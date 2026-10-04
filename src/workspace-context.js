@@ -36,7 +36,7 @@ const PROJECT_OPERATION_HINTS = /\b(giveaway(?:s)? page|mentorship page|promo co
 const STATUS_HINTS = /\b(are you awake|are you there|your status|what's your status|what is your status)\b/;
 const WHATSAPP_OPERATION_HINTS = /\b(whatsapp link|whatsapp group|social media team on whatsapp|team destination|telegram workflows?|whatsapp\/telegram workflows?)\b/;
 const GENERIC_RESEARCH_HINTS = /\b(research a product|research a competitor|research a tool|research .* if it(?:'s| is) useful|tell me if it(?:'s| is) useful)\b/;
-const ROUTING_COMPLAINT_RE = /\b(bad routing error|routing is messed up|routing.*wrong|wrong route|not reading the whole context|not asking for a link|fix (?:this )?in the routing|fix your routing|log your mistake)\b/;
+const ROUTING_COMPLAINT_RE = /\b(bad routing error|routing is messed up|routing.*wrong|wrong route|not reading the whole context|not asking for a link|fix (?:this )?in the routing|fix your routing|log your mistake|log (?:that|this|it) as (?:a )?(?:major )?(?:mistake|error)|you just recommended things)\b/;
 const GENERIC_PROJECT_TERMS = new Set([
   "alumni",
   "book",

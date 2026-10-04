@@ -27,7 +27,7 @@ function resolveCapabilitiesIndexPath() {
 const CAPABILITIES_INDEX_PATH = resolveCapabilitiesIndexPath();
 const MIN_CAPABILITY_EVIDENCE_SCORE = 10;
 const MIN_CAPABILITY_TOTAL_SCORE = 18;
-const ROUTING_COMPLAINT_RE = /\b(bad routing error|routing is messed up|routing.*wrong|wrong route|route this correctly|fix (?:this )?in the routing|fix your routing|not asking for a link|log your mistake)\b/i;
+const ROUTING_COMPLAINT_RE = /\b(bad routing error|routing is messed up|routing.*wrong|wrong route|route this correctly|fix (?:this )?in the routing|fix your routing|not asking for a link|log your mistake|log (?:that|this|it) as (?:a )?(?:major )?(?:mistake|error)|you just recommended things)\b/i;
 const GENERIC_TOKENS = new Set([
   'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'get', 'give',
   'help', 'how', 'i', 'if', 'in', 'into', 'is', 'it', 'live', 'me', 'my', 'of',
@@ -35,7 +35,7 @@ const GENERIC_TOKENS = new Set([
   'up', 'we', 'with', 'you', 'your',
 ]);
 // Cross-domain tags are useful metadata but cannot identify a capability.
-const GENERIC_CAPABILITY_ALIASES = new Set(["api", "media", "myos", "service", "tool", "agent", "memory", "database", "launch"]);
+const GENERIC_CAPABILITY_ALIASES = new Set(["api", "media", "myos", "service", "tool", "agent", "memory", "database", "launch", "files", "storage"]);
 
 function normalizeText(value) {
   return String(value || '').toLowerCase();

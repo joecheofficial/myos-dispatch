@@ -1103,3 +1103,12 @@ test("tool safety matches full-plan labels including protected project aliases",
   const protectedPlan = resolveToolSafetyPlan("update customer console", options);
   assert.ok(toolSafetyLabels(compactRoute(protectedPlan)).includes("protected_surface_write"));
 });
+
+test("authorized execution complaint is recognized before project routing", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "workspace-autonomy-complaint-"));
+  const { collectDispatchSignals } = loadWorkspaceContextWithHome(tmpDir);
+  const signals = collectDispatchSignals("Log that as a major mistake. Go check MyOS Dispatch and all your rules and contacts files because something is wrong.");
+  assert.equal(signals.isRoutingComplaint, true);
+  assert.deepEqual(signals.projectMatches, []);
+  assert.deepEqual(signals.route.candidates, []);
+});
