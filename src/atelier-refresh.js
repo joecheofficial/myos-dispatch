@@ -219,8 +219,9 @@ function runRefresh(config, options = {}) {
 
 // A blocked source (origin drift, invalid origin, retries exhausted, refresh failed) is a
 // governance hold: the guard did its job and the report names the source. It is a status,
-// not a crash, so the scheduled job exits 0. Non-zero is reserved for a run that could not
-// complete: unreadable state, or a source whose refresh just failed and is being retried.
+// not a crash, so the scheduled job exits 0. A failed refresh is retried by the runner's own
+// backoff and is reported the same way. Non-zero is reserved for a run that could not complete
+// (unreadable state, invalid configuration).
 function holdsOf(report) {
   return (report.sources || []).filter(source => source.status === 'blocked').map(source => ({ id: source.id, reason: source.reason }));
 }
@@ -228,7 +229,7 @@ function holdsOf(report) {
 function exitCodeFor(report) {
   if (report.status !== 'attention') return 0;
   if (report.reason) return 1;
-  return (report.sources || []).some(source => source.status === 'failed') ? 1 : 0;
+  return 0;
 }
 
 module.exports = { DEFAULT_CONFIG_PATH, readConfig, validateConfig, runRefresh, holdsOf, exitCodeFor };
