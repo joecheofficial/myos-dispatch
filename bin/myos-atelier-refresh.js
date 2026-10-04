@@ -9,7 +9,7 @@ if (process.versions.node.split('.')[0] !== '24') {
   process.exitCode = 2;
 } else {
   process.env.PATH = `${node24Bin}:${process.env.PATH || ''}`;
-  const { DEFAULT_CONFIG_PATH, readConfig, runRefresh } = require('../src/atelier-refresh');
+  const { DEFAULT_CONFIG_PATH, readConfig, runRefresh, holdsOf, exitCodeFor } = require('../src/atelier-refresh');
   const args = process.argv.slice(2);
   let configPath = DEFAULT_CONFIG_PATH;
   for (let index = 0; index < args.length; index += 2) {
@@ -24,8 +24,9 @@ if (process.versions.node.split('.')[0] !== '24') {
     try {
       if (!path.isAbsolute(configPath)) throw new Error('config_path_must_be_absolute');
       const report = runRefresh(readConfig(configPath));
-      console.log(JSON.stringify(report));
-      if (report.status === 'attention') process.exitCode = 1;
+      const holds = holdsOf(report);
+      console.log(JSON.stringify(holds.length ? { ...report, holds } : report));
+      process.exitCode = exitCodeFor(report);
     } catch {
       console.error('Atelier refresh failed: invalid or unavailable local configuration');
       process.exitCode = 1;

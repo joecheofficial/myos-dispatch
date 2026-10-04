@@ -31,6 +31,8 @@ Minimal shape:
 
 Every source must have an absolute canonical `sourceOrigin` and a state path outside all source views. A canonical local source may omit `sourceOrigin` only with an explicit `canonicalDirect: true` flag, and the path must be a real, non-symlink directory. The runner reads each source independently. Fresh sources are skipped. A stale derived graph is rebuilt through `syncAtelier`, then read back and accepted only when `readAtelierSource` is fresh. Canonical origin changes, invalid origins, missing origins, and failed post-refresh freshness are reported as bounded machine-readable statuses.
 
+Exit codes: a blocked source (origin drift, invalid origin, retries exhausted) is a governance hold. The report keeps `status: attention` and lists the sources under `holds`, but the process exits 0. Exit 1 is reserved for a run that could not complete (unreadable state, invalid configuration, or a source whose refresh just failed and is being retried).
+
 The state file and sibling lock live outside source repositories. Failed sources retain attempt counts and deterministic exponential backoff. `maxRefreshes` bounds derived rebuilds per pass, defaulting to 5, while remaining sources are reported as deferred for the next scheduled pass. A lock held by another invocation returns `{"status":"locked"}` without touching any source. One source failure does not stop other sources. Reports contain source IDs and reason codes only, never document bodies, credentials, or exception text.
 
 The runner never edits canonical origins, source documents, Atelier audience metadata, or Git history. It only invokes the existing derived-state synchronizer. Run it with Node 24:
