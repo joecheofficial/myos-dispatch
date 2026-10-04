@@ -291,8 +291,16 @@ function scoreFastpath(query, fastpath) {
   return score;
 }
 
+// Retired entries no longer match. MYOS_FASTPATH_SKIP_RETIRED=0 restores the old
+// behavior (status ignored); the default is ON.
+function skipRetiredFastpaths() {
+  return String(process.env.MYOS_FASTPATH_SKIP_RETIRED ?? "").trim() !== "0";
+}
+
 function matchFastpaths(query, maxMatches = 3, filePath = FASTPATHS_FILE) {
+  const skipRetired = skipRetiredFastpaths();
   return loadFastpaths(filePath)
+    .filter((fastpath) => !(skipRetired && fastpath && fastpath.status === "retired"))
     .map((fastpath) => ({ fastpath, score: scoreFastpath(query, fastpath) }))
     .filter((entry) => entry.score > 0)
     .sort((a, b) => b.score - a.score)
