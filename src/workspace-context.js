@@ -103,9 +103,36 @@ function scoreMatchedProjectField({ needle, kind, project }) {
   return 6;
 }
 
+const LONG_PROMPT_WORDS = 60;
+const WEAK_MENTION_WINDOW = 200;
+const DIRECTIVE_OBJECT_RE_PREFIX = "\\b(?:check|run|use|open|fix|update|audit|review|send|start|debug|inspect|read|show|build|deploy|test|improve|work on|look at|investigate)\\s+(?:(?:the|my|our)\\s+)?";
+
+function countPhraseHits(haystack, needle) {
+  const escaped = escapeRegex(needle).replace(/\s+/g, "\\s+");
+  const found = [];
+  const re = new RegExp(`\\b${escaped}\\b`, "gi");
+  let match;
+  while ((match = re.exec(haystack)) !== null) {
+    found.push(match.index);
+    if (match[0].length === 0) re.lastIndex += 1;
+  }
+  if (found.length === 0) {
+    const loose = normalizeLooseText(haystack);
+    const looseRe = new RegExp(`\\b${escapeRegex(normalizeLooseText(needle)).replace(/\s+/g, "\\s+")}\\b`, "gi");
+    while ((match = looseRe.exec(loose)) !== null) {
+      found.push(match.index);
+      if (match[0].length === 0) looseRe.lastIndex += 1;
+    }
+  }
+  return found;
+}
+
 function scoreProject(query, project) {
   const haystack = normalizeText(query);
   let score = 0;
+  const hitNeedles = new Set();
+  let hitCount = 0;
+  let firstHitIndex = Infinity;
   const fields = [
     { value: project.slug, kind: "slug" },
     { value: project.name, kind: "name" },
@@ -118,8 +145,27 @@ function scoreProject(query, project) {
     if (!needle) continue;
     if (needle.length < 4 && !/\s/.test(needle)) continue;
     if (hasBoundedPhrase(haystack, needle) || hasLooseBoundedPhrase(haystack, needle)) {
-      score += scoreMatchedProjectField({ needle, kind, project });
+      const fieldScore = scoreMatchedProjectField({ needle, kind, project });
+      score += fieldScore;
+      if (fieldScore > 0 && !hitNeedles.has(needle)) {
+        hitNeedles.add(needle);
+        const hits = countPhraseHits(haystack, needle);
+        hitCount += Math.max(1, hits.length);
+        if (hits.length) firstHitIndex = Math.min(firstHitIndex, hits[0]);
+        else firstHitIndex = 0;
+      }
     }
+  }
+
+  // A single passing mention deep inside a long brief is weak evidence: a 2,000
+  // character audit listing several systems must not route to one of them.
+  const words = String(query || "").trim().split(/\s+/).filter(Boolean).length;
+  if (score > 0 && words > LONG_PROMPT_WORDS && hitCount === 1 && firstHitIndex >= WEAK_MENTION_WINDOW) {
+    const firstSentence = haystack.split(/[.!?\n]/)[0] || "";
+    const slug = normalizeText(project.slug).trim();
+    const directiveObject = slug
+      && new RegExp(`${DIRECTIVE_OBJECT_RE_PREFIX}${escapeRegex(slug)}\\b`, "i").test(firstSentence);
+    if (!directiveObject) return 0;
   }
 
   return score;
@@ -245,8 +291,16 @@ function scoreFastpath(query, fastpath) {
   return score;
 }
 
+// Retired entries no longer match. MYOS_FASTPATH_SKIP_RETIRED=0 restores the old
+// behavior (status ignored); the default is ON.
+function skipRetiredFastpaths() {
+  return String(process.env.MYOS_FASTPATH_SKIP_RETIRED ?? "").trim() !== "0";
+}
+
 function matchFastpaths(query, maxMatches = 3, filePath = FASTPATHS_FILE) {
+  const skipRetired = skipRetiredFastpaths();
   return loadFastpaths(filePath)
+    .filter((fastpath) => !(skipRetired && fastpath && fastpath.status === "retired"))
     .map((fastpath) => ({ fastpath, score: scoreFastpath(query, fastpath) }))
     .filter((entry) => entry.score > 0)
     .sort((a, b) => b.score - a.score)
@@ -1448,6 +1502,7 @@ module.exports = {
   listProjectRecipes,
   loadFastpaths,
   matchFastpaths,
+  scoreProject,
   matchRecipes,
   matchProjects,
   normalizeProjectEntries,

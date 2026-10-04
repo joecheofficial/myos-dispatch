@@ -4,6 +4,12 @@ All notable changes to MyOS Dispatch are documented here.
 
 ## Unreleased
 
+- Make fastpath `status: "retired"` real: `matchFastpaths` now skips retired entries. Gated by `MYOS_FASTPATH_SKIP_RETIRED`, default ON; set it to `0` to restore the old behavior (status ignored). Correct wrongly retired entries in the data file before rolling this out. Default policy caps used when a fastpaths file has no policy are raised from 30/20/10 to 120/80/40 (active/stable/probation) and `config/dispatch-fastpaths.example.json` now ships that policy block. `scripts/audit-dispatch-fastpaths.js` prints a WARN summary counting retired entries with no `retired_at`/`retired_reason`.
+
+- Treat a single passing project mention as weak evidence in long prompts. When a prompt is over 60 words and a project has exactly one hit that starts at or after character 200, the project is not selected on that alone (so a long audit brief listing several systems no longer routes to whatsapp). The hit still counts when the project slug is the object of a directive verb in the first sentence. Short prompts and multi-mention prompts score exactly as before.
+
+- Stop repeating the "Mandatory behavior" footer on every UserPromptSubmit. The full block is emitted on the first prompt of a session, when its text hash changes, and every Nth prompt (`MYOS_DISPATCH_FOOTER_EVERY`, default 6, `1` restores the old behavior); other prompts get one short line. State (`lastFooterHash`, `promptsSinceFullFooter`) lives in the existing route-context state file; unreadable or unwritable state fails open to the full footer.
+
 ## v4.2.1 - 2026-09-21
 
 - Connect verified Claude subscription CLI execution for foreground, tool-free text tasks. Exact live-verified Sonnet 5 is eligible for cheap routing, default automation and planning as a bounded unsupported-model fallback, or an explicit pin. API routes, writer affinity and private bots are unchanged.

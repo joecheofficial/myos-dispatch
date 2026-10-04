@@ -37,6 +37,10 @@ function main() {
   const counts = audit.counts || {};
   console.log(`Dispatch fastpaths: ${counts.activeCount || 0} active (${counts.stableCount || 0} stable, ${counts.probationCount || 0} probation, ${counts.retiredCount || 0} retired), cap ${counts.maxActive || 0}`);
 
+  if (counts.retiredWithoutMetadata > 0) {
+    warnings.push(`${counts.retiredWithoutMetadata} of ${counts.retiredCount || 0} retired fastpaths have no retired_at/retired_reason`);
+  }
+
   for (const warning of warnings) console.warn(`WARN: ${warning}`);
   for (const error of errors) console.error(`ERROR: ${error}`);
 
