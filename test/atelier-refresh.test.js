@@ -23,6 +23,22 @@ test('actual CLI accepts the documented absolute config flag and returns a fresh
   assert.ok(report.sources.every(source => source.status === 'skipped'));
 });
 
+test('blocked sources are a governance hold: attention status, listed holds, exit 0; unreadable state still exits 1', t => {
+  const fx = fixture(t);
+  fs.appendFileSync(path.join(fx.sources[0].sourceOrigin.path, 'README.md'), 'origin drift\n');
+  const file = path.join(fx.root, 'hold-config.json');
+  fs.writeFileSync(file, JSON.stringify(config(fx)));
+  const bin = path.join(__dirname, '../bin/myos-atelier-refresh.js');
+  const held = cp.spawnSync(process.execPath, [bin, '--config', file], { encoding: 'utf8' });
+  assert.equal(held.status, 0, held.stderr);
+  const report = JSON.parse(held.stdout);
+  assert.equal(report.status, 'attention');
+  assert.deepEqual(report.holds, [{ id: 'good', reason: 'origin_changed' }]);
+  fs.writeFileSync(fx.statePath, '{not-json}\n');
+  const broken = cp.spawnSync(process.execPath, [bin, '--config', file], { encoding: 'utf8' });
+  assert.equal(broken.status, 1);
+});
+
 test('missing nested source path still excludes state descendants in their original order', t => {
   const f = fixture(t);
   const missing = path.join(f.root, 'not-created', 'source');
