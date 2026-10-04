@@ -4,6 +4,8 @@ All notable changes to MyOS Dispatch are documented here.
 
 ## Unreleased
 
+- Stop repeating the "Mandatory behavior" footer on every UserPromptSubmit. The full block is emitted on the first prompt of a session, when its text hash changes, and every Nth prompt (`MYOS_DISPATCH_FOOTER_EVERY`, default 6, `1` restores the old behavior); other prompts get one short line. State (`lastFooterHash`, `promptsSinceFullFooter`) lives in the existing route-context state file; unreadable or unwritable state fails open to the full footer.
+
 ## v4.2.1 - 2026-09-21
 
 - Connect verified Claude subscription CLI execution for foreground, tool-free text tasks. Exact live-verified Sonnet 5 is eligible for cheap routing, default automation and planning as a bounded unsupported-model fallback, or an explicit pin. API routes, writer affinity and private bots are unchanged.

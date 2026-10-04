@@ -173,6 +173,8 @@ function loadRouteContextState(sessionId) {
           turn: typeof parsed.turn === "number" ? parsed.turn : 0,
           footerEmittedInTurn: Boolean(parsed.footerEmittedInTurn),
           lastEmittedHash: typeof parsed.lastEmittedHash === "string" ? parsed.lastEmittedHash : null,
+          lastFooterHash: typeof parsed.lastFooterHash === "string" ? parsed.lastFooterHash : null,
+          promptsSinceFullFooter: Number.isInteger(parsed.promptsSinceFullFooter) && parsed.promptsSinceFullFooter >= 0 ? parsed.promptsSinceFullFooter : null,
         };
       }
     }
@@ -191,6 +193,13 @@ function saveRouteContextState(sessionId, state) {
     fs.writeFileSync(tmpPath, JSON.stringify(state, null, 2), "utf8");
     fs.renameSync(tmpPath, filePath);
   } catch {}
+}
+
+function footerEveryPrompts() {
+  const raw = process.env.MYOS_DISPATCH_FOOTER_EVERY;
+  if (raw === undefined || String(raw).trim() === "") return 6;
+  const n = Number(String(raw).trim());
+  return Number.isInteger(n) && n >= 1 ? n : 6;
 }
 
 function readToolName(payload) {
@@ -436,7 +445,7 @@ function formatDispatchContext({ surface, hookEventName, targetKind, text, plan,
       "Mandatory behavior: unchanged (see route block earlier this turn)",
     ];
   } else {
-    footerLines = [
+    const fullFooterLines = [
       "",
       "Mandatory behavior:",
       "- Treat this route as the first routing pass for the turn.",
@@ -457,8 +466,27 @@ function formatDispatchContext({ surface, hookEventName, targetKind, text, plan,
       ] : []),
       "- If the route is wrong, correct it explicitly and continue through the next practical verification or fix step.",
     ];
+    footerLines = fullFooterLines;
     if (state) {
       state.footerEmittedInTurn = true;
+      const footerHash = sha256(fullFooterLines.join("\n"));
+      const every = footerEveryPrompts();
+      const since = state.promptsSinceFullFooter;
+      const canCollapse =
+        every > 1 &&
+        state.lastFooterHash === footerHash &&
+        Number.isInteger(since) &&
+        since + 1 < every;
+      if (canCollapse) {
+        state.promptsSinceFullFooter = since + 1;
+        footerLines = [
+          "",
+          `Mandatory behavior: unchanged since the full block ${state.promptsSinceFullFooter} prompt(s) ago (same rules apply).`,
+        ];
+      } else {
+        state.lastFooterHash = footerHash;
+        state.promptsSinceFullFooter = 0;
+      }
     }
   }
 
@@ -1230,7 +1258,7 @@ function handleUserPromptSubmit(payload, surface, options = {}) {
   let state = rawSessionId ? loadRouteContextState(rawSessionId) : null;
   if (rawSessionId) {
     if (!state) {
-      state = { turn: 0, footerEmittedInTurn: false, lastEmittedHash: null };
+      state = { turn: 0, footerEmittedInTurn: false, lastEmittedHash: null, lastFooterHash: null, promptsSinceFullFooter: null };
     }
     state.turn += 1;
     state.footerEmittedInTurn = false;
