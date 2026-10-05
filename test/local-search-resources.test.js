@@ -447,7 +447,14 @@ test("paused watcher coalesces triggers until idle and healthy dwell pass", asyn
   const deadline = Date.now() + 1000;
   while (controller.getState().runs === 0 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
   await controller.stop();
-  assert.equal(events.length, 1);
+  // The two explicit triggers sent while paused never run on their own: they
+  // stay queued until the periodic timer runs the first pass after the healthy
+  // dwell, which consumes them. The timer (20 ms here) may legitimately finish
+  // another pass before stop() drains on a loaded machine (seen in full-suite
+  // runs), so the count is not fixed at one, but every pass must be periodic.
+  const reasons = JSON.stringify(events.map((event) => event.reason));
+  assert.ok(events.length >= 1, "a reconcile ran once the healthy dwell passed");
+  assert.ok(events.every((event) => event.reason === "periodic"), reasons);
   assert.equal(controller.getState().resources.background, "ready");
 });
 

@@ -10,8 +10,9 @@ const crypto = require('node:crypto');
 const { syncAtelier } = require('../src/atelier-sync');
 const { readAtelierSource } = require('../src/atelier-source');
 const { runRefresh, validateConfig } = require('../src/atelier-refresh');
+const { skipUnlessRunningNode24 } = require('./helpers/node24');
 
-test('actual CLI accepts the documented absolute config flag and returns a fresh report', t => {
+test('actual CLI accepts the documented absolute config flag and returns a fresh report', { skip: skipUnlessRunningNode24 }, t => {
   const f = fixture(t);
   const file = path.join(f.root, 'runner-config.json');
   fs.writeFileSync(file, JSON.stringify(config(f)));
@@ -23,7 +24,7 @@ test('actual CLI accepts the documented absolute config flag and returns a fresh
   assert.ok(report.sources.every(source => source.status === 'skipped'));
 });
 
-test('blocked sources are a governance hold: attention status, listed holds, exit 0; unreadable state still exits 1', t => {
+test('blocked sources are a governance hold: attention status, listed holds, exit 0; unreadable state still exits 1', { skip: skipUnlessRunningNode24 }, t => {
   const fx = fixture(t);
   fs.appendFileSync(path.join(fx.sources[0].sourceOrigin.path, 'README.md'), 'origin drift\n');
   const file = path.join(fx.root, 'hold-config.json');

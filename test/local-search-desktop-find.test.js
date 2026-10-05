@@ -10,6 +10,7 @@ const { PassThrough } = require("node:stream");
 const test = require("node:test");
 
 const packageJson = require("../package.json");
+const { EXPLICIT_NODE24, RUNNING_NODE24, skipUnlessNode24Available } = require("./helpers/node24");
 const entrypoint = path.resolve(__dirname, "../bin/myos-find.js");
 
 function temporaryDirectory(t) {
@@ -49,6 +50,14 @@ function waitFor(check, timeoutMs = 1_000) {
     };
     poll();
   });
+}
+
+function holdEventLoop(t) {
+  // A mocked child owns no handle, and runSearch unrefs its timers so a real
+  // child alone keeps the process alive. Hold the loop for the mocked case so
+  // the test runner does not cancel the pending promise (Node 22 does).
+  const keepAlive = setInterval(() => {}, 1_000);
+  t.after(() => clearInterval(keepAlive));
 }
 
 function processExists(pid) {
@@ -260,7 +269,14 @@ test("search forwards a native request through the fixed Node 24 boundary and pr
   assert.deepEqual(result.results, packet.results);
 });
 
-test("qmd-null keyword search returns three citations within the desktop response cap", (t) => {
+test("qmd-null keyword search returns three citations within the desktop response cap", { skip: skipUnlessNode24Available }, (t) => {
+  const { inspectFile } = require("../packages/local-search/desktop-find");
+  const node24 = EXPLICIT_NODE24 || (RUNNING_NODE24 ? process.execPath : null);
+  // The bridge refuses a runtime with group- or world-writable ancestry (for
+  // example a Homebrew Cellar shared with the admin group). Fail loudly so a
+  // Node 24 run never silently loses this end-to-end case.
+  assert.equal(inspectFile(node24, "runtime"), true,
+    `${node24} is not an owner-safe Node 24 runtime; set MYOS_TEST_NODE24 to an owner-owned Node 24 binary`);
   const directory = temporaryDirectory(t);
   const root = path.join(directory, "notes");
   const stateDirectory = path.join(directory, "state");
@@ -276,7 +292,7 @@ test("qmd-null keyword search returns three citations within the desktop respons
     qmd: null,
   });
   writeSettings(settingsPath, {
-    version: 1, enabled: true, exportToAssistant: true, node24: process.execPath, configPath,
+    version: 1, enabled: true, exportToAssistant: true, node24, configPath,
   });
   const { child, result } = invoke([
     "--settings", settingsPath, "search", "--query", "desktop-qmd-null-keyword", "--mode", "keyword", "--context-bytes", "4096",
@@ -323,6 +339,7 @@ test("all declared modes use fixed argv and semantic-capable modes use default a
 });
 
 test("timeout terminates the owned child and returns no private process output", async (t) => {
+  holdEventLoop(t);
   const { execute } = require("../packages/local-search/desktop-find");
   const fixture = makeEnabledFixture(t);
   const signals = [];
@@ -353,6 +370,7 @@ test("timeout terminates the owned child and returns no private process output",
 });
 
 test("whole-response overflow returns sanitized budgetExceeded JSON", async (t) => {
+  holdEventLoop(t);
   const { execute } = require("../packages/local-search/desktop-find");
   const fixture = makeEnabledFixture(t);
   let controlledChild;
@@ -401,21 +419,26 @@ test("owned process groups drain and finish bounded after TERM-ignoring descenda
   for (const [kind, expected] of [["timeout", "timedOut"], ["cancel", "cancelled"], ["overflow", "budgetExceeded"]]) {
     const pidFile = path.join(directory, `${kind}.pid`);
     let cancel;
-    const startedAt = Date.now();
+    // Child startup alone can pass one second while the full suite loads the
+    // machine. The timeout case needs the wrapper to have spawned its
+    // TERM-ignoring descendant before the deadline fires, and the other cases
+    // need a deadline past the startup wait.
+    const startupWaitMs = 5_000;
     const resultPromise = runSearch(parsed, settings, {
-      timeoutMs: kind === "timeout" ? 80 : 1_000,
+      timeoutMs: kind === "timeout" ? 3_000 : startupWaitMs * 2,
       cleanupGraceMs: 40,
       spawn(_command, _args, options) {
         assert.equal(options.detached, true);
         return spawn(process.execPath, [script, pidFile, kind], options);
       },
     });
-    await waitFor(() => fs.existsSync(pidFile));
+    await waitFor(() => fs.existsSync(pidFile), startupWaitMs);
+    const startedAt = Date.now();
     if (kind === "cancel") process.emit("SIGINT");
     const result = await resultPromise;
     assert.equal(result.status, expected);
-    assert.ok(Date.now() - startedAt < 1_000, `${kind} did not finish bounded`);
+    assert.ok(Date.now() - startedAt < startupWaitMs, `${kind} did not finish bounded`);
     const descendantPid = Number(fs.readFileSync(pidFile, "utf8"));
-    await waitFor(() => !processExists(descendantPid));
+    await waitFor(() => !processExists(descendantPid), 5_000);
   }
 });

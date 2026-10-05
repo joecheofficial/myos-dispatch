@@ -11,6 +11,7 @@ const { normalizeConfig } = require("../packages/local-search/config");
 const { runSdkSearch, runSdkSearchCollections } = require("../packages/local-search/qmd");
 const { search } = require("../packages/local-search/search");
 const { loadManifests, stage } = require("../packages/local-search/staging");
+const { skipUnlessNode24Available } = require("./helpers/node24");
 
 const CHILD = path.resolve(__dirname, "../packages/local-search/qmd-sdk-child.mjs");
 const NODE24 = process.env.MYOS_TEST_NODE24 || process.execPath;
@@ -122,7 +123,7 @@ test("SDK wrapper rejects conflicting collection forms without dropping either s
   assert.equal((await runSdkSearch(config, { ...common, collections: ["one"] }, { signal: controller.signal })).status, "aborted");
 });
 
-test("SDK child batches collections sequentially with one store lifecycle and a per-collection limit", (t) => {
+test("SDK child batches collections sequentially with one store lifecycle and a per-collection limit", { skip: skipUnlessNode24Available }, (t) => {
   const fixture = syntheticQmd(t);
   const child = invokeChild(fixture, { collections: ["one", "two", "three", "four"] });
 
@@ -141,7 +142,7 @@ test("SDK child batches collections sequentially with one store lifecycle and a 
   ]);
 });
 
-test("legacy and batched child requests return equivalent lexical and semantic candidates", (t) => {
+test("legacy and batched child requests return equivalent lexical and semantic candidates", { skip: skipUnlessNode24Available }, (t) => {
   const fixture = syntheticQmd(t);
   for (const operation of ["lexical", "semantic"]) {
     const common = operation === "semantic" ? {
@@ -161,7 +162,7 @@ test("legacy and batched child requests return equivalent lexical and semantic c
   }
 });
 
-test("child rejects invalid collection forms before QMD startup and preserves the legacy form", (t) => {
+test("child rejects invalid collection forms before QMD startup and preserves the legacy form", { skip: skipUnlessNode24Available }, (t) => {
   const invalidRequests = [
     {},
     { collection: "one", collections: ["one"] },
@@ -194,7 +195,7 @@ test("child rejects invalid collection forms before QMD startup and preserves th
   assert.equal(JSON.parse(legacy.stdout).length, 8);
 });
 
-test("foreign candidates and mid-batch failures return no content and always clean up", (t) => {
+test("foreign candidates and mid-batch failures return no content and always clean up", { skip: skipUnlessNode24Available }, (t) => {
   for (const behavior of ["foreignSecond", "failSecond"]) {
     const fixture = syntheticQmd(t, behavior);
     const child = invokeChild(fixture, { collections: ["one", "two", "three"] });
