@@ -10,6 +10,7 @@ const test = require("node:test");
 const { normalizeConfig } = require("../packages/local-search/config");
 const { search } = require("../packages/local-search/search");
 const api = require("../packages/local-search");
+const { skipUnlessRunningNode24 } = require("./helpers/node24");
 
 function fixture(t, files, budgets = {}, roots = null) {
   const base = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "local-search-native-"));
@@ -147,7 +148,7 @@ test("native treats corrupt or oversized catalogues as partial and reconstructs 
   assert.equal(mismatch.results.length, 0);
 });
 
-test("native catalogue replacement with a FIFO cannot block past the query deadline", (t) => {
+test("native catalogue replacement with a FIFO cannot block past the query deadline", { skip: skipUnlessRunningNode24 }, (t) => {
   const f = fixture(t, { "wanted.md": "body" }, { queryDeadlineMs: 100 });
   fs.mkdirSync(f.config.stateDirectory, { recursive: true, mode: 0o700 });
   const catalogue = path.join(f.config.stateDirectory, "catalogue.json");

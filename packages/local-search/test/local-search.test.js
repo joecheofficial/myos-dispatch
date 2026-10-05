@@ -377,7 +377,7 @@ test("QMD model environment is explicit and model files require GGUF headers", (
   assert.equal(Object.hasOwn(env, "HTTPS_PROXY"), false);
 });
 
-test("QMD timeout drains its owned process group", async (t) => {
+test("QMD timeout drains its owned process group", { skip: process.versions.node.split(".")[0] === "24" ? false : `QMD runs on Node 24 only (this run uses Node ${process.versions.node})` }, async (t) => {
   const f = fixture(t);
   const packageRoot = path.join(f.base, "qmd");
   const model = path.join(f.base, "embed.gguf");

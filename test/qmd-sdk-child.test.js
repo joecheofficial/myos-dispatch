@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
+const { skipUnlessRunningNode24 } = require("./helpers/node24");
 
 const HELPER = path.resolve(__dirname, "../packages/local-search/qmd-sdk-child.mjs");
 
@@ -130,7 +131,7 @@ test("semantic search sets the local model before import and calls only searchVe
   }
 });
 
-test("invalid requests fail before SDK import", async (t) => {
+test("invalid requests fail before SDK import", { skip: skipUnlessRunningNode24 }, async (t) => {
   const baseRequest = (fixture) => ({
     operation: "semantic",
     packageRoot: fixture.packageRoot,
@@ -197,7 +198,7 @@ test("invalid requests fail before SDK import", async (t) => {
   }
 });
 
-test("search failure closes the store and disposes the global llama instance", () => {
+test("search failure closes the store and disposes the global llama instance", { skip: skipUnlessRunningNode24 }, () => {
   const fixture = makeFixture();
   try {
     const result = runHelper(fixture, {
@@ -222,7 +223,7 @@ test("search failure closes the store and disposes the global llama instance", (
   }
 });
 
-test("an unbounded SDK filepath fails closed without exporting it", () => {
+test("an unbounded SDK filepath fails closed without exporting it", { skip: skipUnlessRunningNode24 }, () => {
   const fixture = makeFixture();
   try {
     const oversizedFile = `qmd://docs/${"x".repeat(4096)}`;

@@ -11,6 +11,13 @@ const { formatContext } = require("../context-format");
 const { writeReceipt } = require("../context-receipt");
 
 const PRODUCT_TEST_NODE = process.env.MYOS_TEST_NODE24 || process.execPath;
+// The package runs on Node 24 only (engines "24.x"): skip the spawned-runtime test elsewhere.
+const PRODUCT_TEST_NODE_MAJOR = PRODUCT_TEST_NODE === process.execPath
+  ? process.versions.node.split(".")[0]
+  : String(spawnSync(PRODUCT_TEST_NODE, ["-p", "process.versions.node.split('.')[0]"], { encoding: "utf8", timeout: 10_000 }).stdout || "").trim();
+const SKIP_UNLESS_NODE24 = PRODUCT_TEST_NODE_MAJOR === "24"
+  ? false
+  : `requires Node 24 (${PRODUCT_TEST_NODE} reports major ${PRODUCT_TEST_NODE_MAJOR || "unknown"}); set MYOS_TEST_NODE24 or run on Node 24`;
 
 test("context format requires an explicit private receipt directory", () => {
   const parsed = parse([
@@ -272,7 +279,7 @@ test("JSON and evidence CLI failures retain the original error envelope", () => 
   }
 });
 
-test("executable cancellation emits a bounded partial context without source content", async (t) => {
+test("executable cancellation emits a bounded partial context without source content", { skip: SKIP_UNLESS_NODE24 }, async (t) => {
   const directory = privateDirectory(t);
   const receiptDirectory = path.join(directory, "receipts");
   fs.mkdirSync(receiptDirectory, { mode: 0o700 });
