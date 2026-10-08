@@ -19,7 +19,8 @@ function summarizeValue(rows, ratePerMillion = null) {
     group[row.engine === 'jev' ? 'successful' : 'failedOrSkipped']++;
     if (Number.isFinite(row.inputTokens) && row.inputTokens >= 0) group.inputTokens += row.inputTokens;
     else group.missingUsage++;
-    if (!Array.isArray(row.authoritativeFields)) group.unknownEffectEvents++;
+    if (!Array.isArray(row.authoritativeFields) || row.authoritativeFields.some(selection =>
+      !selection || typeof selection.field !== 'string' || !selection.field)) group.unknownEffectEvents++;
     else if (!row.authoritativeFields.length) group.unchangedEvents++;
     else {
       group.changedEvents++;
@@ -52,7 +53,7 @@ function summarizeValue(rows, ratePerMillion = null) {
 }
 
 async function main(argv) {
-  const options = { logs: path.join(os.homedir(), '.myos-dispatch/logs'), days: '7', end: new Date().toISOString() };
+  const options = { logs: path.join(process.env.MYOS_HOME_ROOT || path.join(os.homedir(), '.myos-dispatch'), 'logs'), days: '7', end: new Date().toISOString() };
   for (let i = 0; i < argv.length; i += 2) {
     const key = argv[i].replace(/^--/, '');
     if (!['logs', 'days', 'end', 'rate-per-million'].includes(key) || !argv[i + 1]) throw new Error(`Invalid option: ${argv[i]}`);
