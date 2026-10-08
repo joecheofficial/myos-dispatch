@@ -760,7 +760,7 @@ async function dispatchTask(request = {}) {
     });
 
     const workerResult = {
-      status: "ok",
+      status: ["blocked", "needs_review"].includes(result.status) ? result.status : "ok",
       reply: result.reply,
       artifacts: result.artifacts,
       recipeId: "fallback/worker",
@@ -779,6 +779,7 @@ async function dispatchTask(request = {}) {
       sessionId: result.sessionId || null,
     };
     appendDispatcherEvent({
+      type: result.status === "needs_review" ? "verification_gap" : "worker",
       id: eventId,
       ts: new Date().toISOString(),
       durationMs: Date.now() - startedAt,
@@ -791,7 +792,8 @@ async function dispatchTask(request = {}) {
       candidates: candidateSummaries,
       goal: goalMetadata,
       outcome: {
-        type: "worker",
+        type: result.status === "needs_review" ? "verification_gap" : "worker",
+        completion: result.completion || null,
         dispatchPlan: adoptionRoute,
         recipeId: "fallback/worker",
         fallbackFromRecipeId: candidates[0]?.recipe?.id || null,

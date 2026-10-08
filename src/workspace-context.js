@@ -26,12 +26,12 @@ const WORKSPACE = resolveWorkspaceRoot();
 const PROJECTS_INDEX = resolveWorkspacePath("projects/_index.json");
 const FASTPATHS_FILE = resolveWorkspacePath("DISPATCH-FASTPATHS.json");
 
-const DIRECTIVE_VERBS = /\b(make|create|generate|build|draft|render|produce|write|get|find|retrieve|look up|locate|open|extract|pull|send|forward|message|dm|notify|share|check|inspect|review|show|give me|list|tell me|give|download|add|update|save|mark|count)\b/;
+const DIRECTIVE_VERBS = /\b(make|create|generate|build|draft|render|produce|write|get|find|retrieve|look up|locate|open|extract|pull|send|forward|message|dm|notify|share|check|inspect|review|show|give me|list|tell me|give|download|add|update|save|mark|count|upgrade|fix|repair|implement|finish)\b/;
 const DIRECT_LOOKUP_HINTS = /\b(url|link|website|web page|page|download link|download url|homepage|payment link|promo code|dns|records|giveaway(?:s)?|office|address|location|size|sizes|dimensions|specs|email|rsvp|signed up|signups?|ein|tax id|entity info|business entity|company info)\b/;
 const EXPLORATORY_HINTS = /\b(help me understand|explain|what's going on|what is going on|how does|why does|brainstorm|strategy|architect|investigate|improve|refactor|context|overview)\b/;
 const FOLLOW_UP_HINTS = /\b(also|this|that|it|they|them|these|those|here|there|same|again|too|correct|yes|no|for this|for that|subdomain|rsvp)\b/;
 const READ_HINTS = /\b(what|what is|what's|what are|where is|where's|which|who is|who's|how many|show|find|get|look up|count|list|tell me|give me|retrieve|check)\b/;
-const WRITE_HINTS = /\b(add|update|save|mark|put|attach|send|forward|message|dm|notify|share|create|record|store|log|set|change|fix|repair|replace|redirect|deploy|commit|push|publish|implement|edit|upload|remove|delete|move|rename|prove|improve)\b/;
+const WRITE_HINTS = /\b(add|update|save|mark|put|attach|send|forward|message|dm|notify|share|create|record|store|log|set|change|fix|repair|replace|redirect|deploy|commit|push|publish|implement|edit|upload|remove|delete|move|rename|prove|improve|upgrade|finish)\b/;
 const PROJECT_OPERATION_HINTS = /\b(giveaway(?:s)? page|mentorship page|promo code|promo link|payment link|onboarding|calendar|invite|rsvp|signups?|cohort|participant|participants?)\b/;
 const STATUS_HINTS = /\b(are you awake|are you there|your status|what's your status|what is your status)\b/;
 const WHATSAPP_OPERATION_HINTS = /\b(whatsapp link|whatsapp group|social media team on whatsapp|team destination|telegram workflows?|whatsapp\/telegram workflows?)\b/;
@@ -622,6 +622,9 @@ function chooseSourceOwner({ query, actionType, projectMatches, dataSources, rou
   const primaryCapability = route?.candidates?.[0] || null;
   const preferOverProject = getPreferOverProjectSources(dataSourceOptions);
   const hasPreferredDataSource = dataSources.some((source) => preferOverProject.has(source));
+
+  if (actionType === "read" && /\b(?:gmail|emmie)\b/.test(text)
+      && /\b(?:read|find|search|lookup|look up|latest|inbox|thread|email)\b/.test(text)) return "capability";
 
   if (STATUS_HINTS.test(text)) {
     return "fallback";

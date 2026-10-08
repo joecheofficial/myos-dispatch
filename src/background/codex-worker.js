@@ -11,11 +11,14 @@ const {
   buildBaseState,
   detectPauseCondition,
   markCompleted,
+  markCompletionHeld,
   markFailed,
   markPaused,
   markStarted,
   readSessionState,
 } = require("./codex-worker-state");
+
+const { evaluateWorkerCompletion } = require("../orchestration/completion-evidence");
 
 const DEFAULT_WORKER_CWD = process.env.HOME || os.homedir();
 const MC_GRAPH_PATH = resolveWorkspacePath("mission-control", "graphify-out", "graph.json");
@@ -255,6 +258,7 @@ function normalizeStructuredReplyPayload(payload, fallbackReply = "") {
     return {
       reply: payload.reply,
       artifacts: payload.artifacts,
+      ...(payload.status ? { status: payload.status, verification: payload.verification, blockedBy: payload.blockedBy } : {}),
     };
   }
 
@@ -271,6 +275,7 @@ function normalizeStructuredReplyPayload(payload, fallbackReply = "") {
       return {
         reply: replyCandidate,
         artifacts,
+        ...(payload.status ? { status: payload.status, verification: payload.verification, blockedBy: payload.blockedBy } : {}),
       };
     }
   }
@@ -392,8 +397,9 @@ function buildWorkerPrompt({
     "- Do not spawn ad hoc background scouts or call myos-sidecar.js yourself. MyOS Dispatch owns fan-out; if more lanes are needed, name them in your JSON reply so the orchestrator can issue tracked sidecars.",
     "- Keep the reply concise and factual.",
     "- The final response must be JSON only with this exact structure:",
-    "{\"reply\":\"string\",\"artifacts\":[{\"path\":\"string\",\"caption\":\"string\",\"filename\":\"string\",\"mimeType\":\"string\",\"kind\":\"document|photo\"}]}",
+    "{\"reply\":\"string\",\"artifacts\":[{\"path\":\"string\",\"caption\":\"string\",\"filename\":\"string\",\"mimeType\":\"string\",\"kind\":\"document|photo\"}],\"status\":\"completed|blocked\",\"verification\":[{\"command\":\"exact executed command\",\"passed\":true,\"evidence\":\"observed result\"}],\"blockedBy\":[\"exact blocker\"]}",
     "- If no file should be returned, set artifacts to an empty array.",
+    "- For authorized write work at goal scale 3 or 4, require status (completed or blocked), verification [{command,passed,evidence}], and blockedBy [exact reasons]. Completed requires an actually executed successful verification command. Copy the exact command from this execution trace, including any shell wrapper. Recommendations and self-reported tests are not completion. Genuine blockers must be reported without bypassing them.",
     "",
     dispatchLines.length > 0 ? dispatchLines.join("\n") : "",
     "",
@@ -682,13 +688,24 @@ async function runCodexWorker(options = {}) {
       markFailed(taskState, failureMessage, parsed.sessionId || effectiveSessionId || null);
       throw new Error(failureMessage);
     }
-    const completedState = markCompleted(taskState, {
+    const completion = evaluateWorkerCompletion(payload, options.dispatchPlan || {}, stdout);
+    if (completion.status === "needs_review" && !options.completionRetryAttempt) {
+      markCompletionHeld(taskState, completion, parsed.sessionId || effectiveSessionId || null);
+      return runCodexWorker({ ...options, taskId: taskState.task_id,
+        sessionId: parsed.sessionId || effectiveSessionId || null, completionRetryAttempt: 1,
+        retryHint: "Your previous answer did not complete the authorized work. Continue the original scoped task and run verification. Return status completed only with verification command evidence from this run. If genuinely blocked, return status blocked with exact blockedBy reasons. Do not bypass any safety gate." });
+    }
+    const completedState = completion.status !== "completed"
+      ? markCompletionHeld(taskState, completion, parsed.sessionId || effectiveSessionId || null)
+      : markCompleted(taskState, {
       sessionId: parsed.sessionId || effectiveSessionId || null,
       artifacts,
       usage: parsed.usage,
     });
     return {
       taskId: completedState.task_id,
+      status: completion.status,
+      completion,
       sessionId: parsed.sessionId || effectiveSessionId || null,
       reply: payload.reply.trim(),
       artifacts,

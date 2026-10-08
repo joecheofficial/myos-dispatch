@@ -218,3 +218,8 @@ test("resolveCodexWorkerModelSelection escalates exploratory work to gpt-6-astra
     else process.env.MYOS_LOCAL_WORKER_MODEL = originalModel;
   }
 });
+
+test("worker final contract preserves completion evidence",()=>{
+ const payload={reply:"done",artifacts:[],status:"completed",verification:[{command:"npm test",passed:true,evidence:"1/1"}],blockedBy:[]};
+ assert.deepEqual(normalizeStructuredReplyPayload(payload,""),payload);
+});

@@ -364,3 +364,9 @@ test("generic files and storage aliases cannot identify Dropbox", () => {
   assert.equal(shortlistCapabilities("Search my Dropbox contacts files", null, 5, { indexPath })[0].capability.id, "agent:dropbox");
   assert.equal(selectExecutionLane("Search my Dropbox contacts files", { indexPath }).candidates[0].capability.id, "agent:dropbox");
 });
+
+test("status alone cannot select unrelated status recipes",()=>{
+ const indexPath=writeIndex({capabilities:[{id:"recipe:agent/backup/status",type:"recipe",execution_lane:"recipe_dispatcher",aliases:["backup status","status"],use_when:["status"],description:"Backup status",priority:75}],lanes:{}});
+ assert.equal(selectExecutionLane("check the typed evidence dispatch shadow comparison status",{indexPath}).lane,"worker_skill");
+ assert.equal(selectExecutionLane("backup status",{indexPath}).lane,"recipe_dispatcher");
+});
