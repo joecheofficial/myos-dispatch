@@ -35,7 +35,7 @@ const GENERIC_TOKENS = new Set([
   'up', 'we', 'with', 'you', 'your',
 ]);
 // Cross-domain tags are useful metadata but cannot identify a capability.
-const GENERIC_CAPABILITY_ALIASES = new Set(["api", "media", "myos", "service", "tool", "agent", "memory", "database", "launch", "files", "storage"]);
+const GENERIC_CAPABILITY_ALIASES = new Set(["api", "media", "myos", "service", "tool", "agent", "memory", "database", "launch", "files", "storage", "status"]);
 
 function normalizeText(value) {
   return String(value || '').toLowerCase();
@@ -104,9 +104,16 @@ function scoreCapabilityMatch(capability, text) {
   const tokens = new Set(meaningfulTokens(text));
 
   let evidenceScore = 0;
+  if (capability.type === "recipe") {
+    const phrases = [...(capability.aliases || []), ...(capability.use_when || [])]
+      .filter(phrase => !GENERIC_CAPABILITY_ALIASES.has(normalizeText(phrase).trim()));
+    const owner = String(capability.id || "").split("/")[1];
+    if (!phrases.some(phrase => hasBoundedPhrase(haystack, phrase))
+        && !(owner && hasBoundedPhrase(haystack, owner))) return {score: 0, evidenceScore: 0};
+  }
   evidenceScore += scorePhrases(haystack, tokens, (capability.aliases || [])
     .filter((alias) => !GENERIC_CAPABILITY_ALIASES.has(normalizeText(alias).trim())));
-  evidenceScore += scorePhrases(haystack, tokens, capability.use_when || []);
+  evidenceScore += scorePhrases(haystack, tokens, (capability.use_when || []).filter((phrase) => !GENERIC_CAPABILITY_ALIASES.has(normalizeText(phrase).trim())));
 
   const description = normalizeText(capability.description || '');
   if (description && haystack.includes(description)) {

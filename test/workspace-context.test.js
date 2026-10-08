@@ -1112,3 +1112,9 @@ test("authorized execution complaint is recognized before project routing", () =
   assert.deepEqual(signals.projectMatches, []);
   assert.deepEqual(signals.route.candidates, []);
 });
+
+test("upgrade is an authorized write directive",()=>{
+ const {inferIntentType,inferActionType}=loadWorkspaceContextWithHome(fs.mkdtempSync(path.join(os.tmpdir(),"upgrade-intent-")));
+ assert.equal(inferIntentType("Well, upgrade everything that you found."),"directive");
+ assert.equal(inferActionType("Well, upgrade everything that you found."),"write");
+});
