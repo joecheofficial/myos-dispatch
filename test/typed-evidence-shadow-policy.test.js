@@ -6,6 +6,17 @@ const path = require("node:path");
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
+// Pin only this test process. Mocked existsSync must not switch home roots,
+// and sibling checkpoint suites must retain their own temporary HOME isolation.
+const previousHomeRoot = process.env.MYOS_HOME_ROOT;
+const isolatedHomeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "typed-evidence-policy-home-"));
+process.env.MYOS_HOME_ROOT = isolatedHomeRoot;
+test.after(() => {
+  if (previousHomeRoot === undefined) delete process.env.MYOS_HOME_ROOT;
+  else process.env.MYOS_HOME_ROOT = previousHomeRoot;
+  fs.rmSync(isolatedHomeRoot, { recursive: true, force: true });
+});
+
 const {
   decideTypedEvidenceShadowAuthority,
   evaluateTypedEvidenceReplayCases,

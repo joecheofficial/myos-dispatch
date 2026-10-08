@@ -1,5 +1,11 @@
 # Jev calibrated decisions
 
+## Active routing, October 2026
+
+The default desktop hook now uses the executable routing path described in [jev-executable-routing.md](jev-executable-routing.md). The older shadow/safety design below remains available with `MYOS_JEV_ROUTING=0`; it is no longer the default. The executable router is independent of shadow-field promotion state.
+
+## Legacy shadow and safety mode
+
 The hook checks tier-0 before loading routing indexes. For remaining events, it starts one bounded Jev request from raw inputs before computing rules, then attaches comparisons to the completed rules result. UserPromptSubmit and the plain-text `--render-route` path use the prompt pack. Bash PreToolUse uses `resolveToolSafetyPlan`, avoiding recipe, capability, project and shadow planning on the common path. Other tools and events retain their existing paths. Direct synchronous hook imports remain compatible; the CLI owns the asynchronous step.
 
 Tool safety preserves the goal classifier's approval predicate, planner blocker order and existing sidecar-policy labels. Protected-project write labels depend on project ownership: write-like commands check the protected subset of the project index and matching commands retain the full planner as a compatibility fallback. This exception prevents removing a legacy safety gate. Tool route-log records retain safety labels and the Jev summary schema; unrelated routing metadata now reflects a safety-only plan (`route.branch: "tool_safety"`) rather than an inferred prompt route.

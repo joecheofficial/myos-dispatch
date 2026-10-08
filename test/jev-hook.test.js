@@ -1,4 +1,6 @@
 'use strict';
+// These tests cover the retained legacy mode; active routing has its own integration suite.
+process.env.MYOS_JEV_ROUTING = '0';
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
