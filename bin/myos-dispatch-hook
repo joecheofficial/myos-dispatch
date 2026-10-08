@@ -10,6 +10,7 @@ const { spawnSync, spawn } = require("node:child_process");
 const { createJevClient } = require("../src/runtime/jev-client");
 const { claimNudge: gitClaimNudge } = require("../src/git-claim-nudge");
 const { attachJevShadow, attachJevToolSafety } = require("../src/decision/jev-shadow");
+const { routeWithJev } = require("../src/decision/jev-router");
 
 const { buildPromptPack, buildToolPack } = require("../src/decision/jev-packs");
 
@@ -1424,11 +1425,19 @@ function jevSummary(jev) {
   const rows = Object.values(jev.comparison || {});
   return { stage: jev.stage ?? null, engine: jev.engine || "rules", skipped: jev.skipped ?? null,
     agree: rows.filter(row => row.agrees).length, n: rows.length, latencyMs: jev.latencyMs ?? 0,
-    inputTokens: jev.usage?.input_tokens ?? null, model: jev.model ?? null };
+    inputTokens: jev.usage?.input_tokens ?? null, model: jev.model ?? null,
+    ...(jev.routing ? { routing: jev.routing } : {}) };
 }
 
 function formatJev(jev) {
   if (!jev) return "";
+  if (jev.skipped) return `[Jev] skipped: ${jev.skipped}`;
+  if (jev.routing) {
+    const r = jev.routing;
+    const execute = r.recipeId && r.directExecution ? `\nDeterministic worker: from ${JSON.stringify(r.cwd)}, run node ${JSON.stringify(path.join(__dirname, 'myos-run.js'))} with JSON stdin containing text (the original request), decisionId ${JSON.stringify(r.decisionId)}, and required recipe args. Use its result; do not spawn a generative worker for the same operation. Existing approval gates still apply.`
+      : r.recipeId ? '\nUse the selected recipe through its existing governed execution path. Selection is not authorization; preserve send, payment, destructive and account gates.' : '';
+    return `[Jev routing] ${r.engine}: ${r.reason}; decision=${r.decisionId}; recipe=${r.recipeId || 'none'}; inputTokens=${r.inputTokens ?? 'unknown'}${execute}`;
+  }
   if (jev.skipped) return `[Jev] skipped: ${jev.skipped}`;
   const summary = jevSummary(jev);
   return `[Jev] stage=${summary.stage} engine=${summary.engine} agree=${summary.agree}/${summary.n} latency=${summary.latencyMs}ms`;
@@ -1527,6 +1536,25 @@ async function prepareJev(payload, surface) {
     || (tool && readToolName(payload) && readToolName(payload) !== "Bash")) return {};
   if (tool && isTier0Command(text)) {
     return { plan: { branch: "tier0", jev: { skipped: "tier0_trivial" } } };
+  }
+
+  // Paid classification belongs at task selection, not at every shell invocation.
+  // MYOS_JEV_ROUTING=0 restores the previous shadow/safety integration for rollback.
+  if (process.env.MYOS_JEV_ROUTING !== '0' && process.env.MYOS_JEV_ENABLED !== '0' && readArg('--no-jev') !== '1') {
+    if (tool && process.env.MYOS_JEV_TOOL_SAFETY !== '1') {
+      const plan = resolveToolSafetyPlan(text, { hookSurface: surface, hookEventName: event });
+      return { plan, toolSafety: { labels: toolSafetyLabels(compactRoute(plan)), jev: { skipped: 'deterministic_tool_safety' } } };
+    }
+    if (!tool) {
+      const baseline = resolveHookPlan(text, { hookSurface: surface, hookEventName: event });
+      try {
+        const plan = await routeWithJev(text, baseline, { cwd: payload.cwd, sessionId: payload.session_id || payload.sessionId });
+        plan.jev = { stage: 'routing', engine: plan.jevRouting.engine, routing: plan.jevRouting,
+          latencyMs: plan.jevRouting.latencyMs, usage: { input_tokens: plan.jevRouting.inputTokens }, model: plan.jevRouting.model };
+        if (!['recipe_selected', 'no_match', 'deterministic_match'].includes(plan.jevRouting.reason)) plan.jev.skipped = plan.jevRouting.reason;
+        return { plan };
+      } catch { return { plan: { ...baseline, jev: { skipped: 'routing_internal_error' } } }; }
+    }
   }
 
   let opts, stage, timeoutMs, reason;
