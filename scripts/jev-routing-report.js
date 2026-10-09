@@ -36,16 +36,19 @@ async function main(argv) {
   const days = Number(argv[0] ?? 7);
   if (!Number.isFinite(days) || days <= 0) throw new Error('Usage: node scripts/jev-routing-report.js [days]');
   const end = Date.now(), start = end - days * 86400000;
-  const file = path.join(process.env.MYOS_HOME_ROOT || path.join(os.homedir(), '.myos-dispatch'), 'logs/jev-routing.jsonl');
+  const dir = path.join(process.env.MYOS_HOME_ROOT || path.join(os.homedir(), '.myos-dispatch'), 'logs');
   const rows = [];
   let malformedRows = 0;
-  const lines = readline.createInterface({ input: fs.createReadStream(file), crlfDelay: Infinity });
-  for await (const line of lines) {
-    let row;
-    try { row = JSON.parse(line); } catch { malformedRows++; continue; }
-    const at = Date.parse(row?.ts);
-    if (!Number.isFinite(at)) { malformedRows++; continue; }
-    if (at >= start && at <= end) rows.push(row);
+  const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter(file => /^jev-routing(?:\.[\w-]+)?\.jsonl$/.test(file)).sort() : [];
+  for (const file of files) {
+    const lines = readline.createInterface({ input: fs.createReadStream(path.join(dir,file)), crlfDelay: Infinity });
+    for await (const line of lines) {
+      let row;
+      try { row = JSON.parse(line); } catch { malformedRows++; continue; }
+      const at = Date.parse(row?.ts);
+      if (!Number.isFinite(at)) { malformedRows++; continue; }
+      if (at >= start && at <= end) rows.push(row);
+    }
   }
   return { window: { start: new Date(start).toISOString(), end: new Date(end).toISOString() }, malformedRows, ...summarizeRouting(rows),
     notes: ['Completion status is a handler result, not user acceptance.', 'No fictional API prices are assigned to OAuth tokens.',

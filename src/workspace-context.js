@@ -47,6 +47,7 @@ const GENERIC_PROJECT_TERMS = new Set([
   "podcasts",
   "speaking",
   "workshops",
+  "business", "deal", "roommate", "villa", "home", "website", "page", "report", "api", "memory",
 ]);
 
 function readOptional(filePath, maxChars = 8000) {
@@ -670,13 +671,35 @@ function collectDispatchSignals(query, options = {}) {
   const startedAt = Date.now();
   const recipeMatches = matchRecipes(query, options);
   const dataSourceOptions = options.dataSourceOptions || {};
-  const fastpathMatches = matchFastpaths(query, 3);
+  let fastpathMatches = matchFastpaths(query, 3);
+  // A keyword mentioned inside a long implementation brief is not a request to
+  // execute that shortcut. Preserve exact recipe matching above.
+  if (query.length > 400) fastpathMatches = [];
   // Exact recipes supply their own lane and never consume project/capability scores.
   // Fastpaths still consume the lane and typed-evidence project authority below.
   const recipeWins = Boolean(recipeMatches[0]);
   const projects = recipeWins ? [] : loadProjectIndex();
   let projectMatches = recipeWins ? [] : matchProjects(query, projects);
+  // Explicit owner evidence outranks a keyword shortcut into another project.
+  let explicitOwners = projectMatches.filter(project => [project.slug, project.name, project.path]
+    .filter(Boolean).some(value => !isGenericProjectTerm(value) &&
+      (hasBoundedPhrase(normalizeText(query), normalizeText(value)) || hasLooseBoundedPhrase(query, value))));
+  const namedOwners = explicitOwners.filter(project => hasMultipleWords(project.name) &&
+    (hasBoundedPhrase(query, project.name) || hasLooseBoundedPhrase(query, project.name)));
+  if (namedOwners.length === 1 && explicitOwners.every(project => project === namedOwners[0] ||
+    hasBoundedPhrase(query, `${namedOwners[0].name} ${project.name}`))) explicitOwners = namedOwners;
+  const ambiguousOwnership = explicitOwners.length > 1;
+  if (ambiguousOwnership) { projectMatches = []; fastpathMatches = []; }
+  if (explicitOwners.length === 1) {
+    projectMatches = explicitOwners;
+    const ownerRoot = getProjectScopedPath(explicitOwners[0]);
+    fastpathMatches = fastpathMatches.filter(match => {
+      const target = toWorkspacePath(firstFastpathPath(match.fastpath));
+      return target && (target === ownerRoot || target.startsWith(ownerRoot + path.sep));
+    });
+  }
   const route = recipeWins ? { lane: "recipe_dispatcher", reason: "recipe_exact_match", candidates: [] }
+    : ambiguousOwnership ? { lane: "worker_skill", reason: "multiple_explicit_owners", candidates: [] }
     : selectExecutionLane(query, options);
   const intentType = inferIntentType(query);
   const actionType = inferActionType(query);

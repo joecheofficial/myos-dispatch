@@ -6,6 +6,9 @@
   "type": "commonjs",
   "main": "src/workspace-context.js",
   "bin": {
+    "myos-step": "bin/myos-step.js",
+    "myos-run": "bin/myos-run.js",
+    "myos-jev-doctor": "bin/myos-jev-doctor.js",
     "myos-dispatch-hook": "bin/myos-dispatch-hook",
     "myos-find": "bin/myos-find.js",
     "myos-local-search": "bin/myos-local-search.js",
