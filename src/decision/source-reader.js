@@ -9,8 +9,19 @@ function sourceFingerprint(source) {
   for (const file of files) {
     if (file !== source.path && !fs.existsSync(file)) { hash.update('absent-wal'); continue; }
     const stat = fs.statSync(file);
-    if (!stat.isFile() || stat.size > (source.mode === 'sqlite' ? 64 : 1)*1024*1024) throw new Error('source_size_limit');
-    hash.update(file); hash.update(fs.readFileSync(file));
+    const limit = (source.mode === 'sqlite' ? 256 : 1)*1024*1024;
+    if (!stat.isFile() || stat.size > limit) throw new Error('source_size_limit');
+    hash.update(file);
+    const descriptor = fs.openSync(file,'r');
+    try {
+      const buffer = Buffer.alloc(1024*1024);
+      let bytes, total = 0;
+      while ((bytes=fs.readSync(descriptor,buffer,0,buffer.length,null)) > 0) {
+        total += bytes;
+        if (total > limit) throw new Error('source_size_limit');
+        hash.update(buffer.subarray(0,bytes));
+      }
+    } finally { fs.closeSync(descriptor); }
   }
   return hash.digest('hex');
 }

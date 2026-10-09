@@ -61,6 +61,16 @@ Every result contains rootTaskId, stepId, taskClass, verified, evidence and usag
 
 No extra planning model is launched: the existing orchestrator emits these contracts when a step is useful. Include the native turn ID as rootTaskId where available, and sessionId for confirmed project context. Missing native IDs remain attribution gaps.
 
+### Automatic desktop reads (4.3.0)
+
+For short read-only prompts with registered supported sources and no approval gate, the desktop hook now executes the lookup before returning context. A single eligible source uses code only. Multiple eligible sources use one optional Jev choice, then the same runner. Successful results return compact cited evidence, replacing the routing instructions and avoiding a model-initiated lookup. The native model still provides the final response. Unsupported or failed lookups hand off explicitly. No recipe handler or external write runs automatically in this path.
+
+Content sources preserve surrounding context when the entire source fits its configured character budget. SQLite sources require an installation-reviewed fixed `sqlite.query`; no prompt SQL is accepted. Results retain whole rows and refuse oversized output rather than returning partial aggregates. A configured `sqlite.filterColumn: "cohort_number"` permits a numeric `cohort N` filter applied by code after the fixed query. Source and query fingerprints must remain fresh. SQLite sources are capped at 256 MiB and fingerprinted in bounded memory; the query timeout is two seconds.
+
+Register aggregate-only queries for business reports. Membership counts, stored enrollment state and onboarding state are different facts. A local roster cannot establish verified payment or external waitlist membership. Configure `excludeTerms` for unsupported meanings so they stay on their authoritative worker paths.
+
+The automatic path runs with or without a Jev key. Without a key, an ambiguous choice hands off without network access. `MYOS_JEV_MODE=off` disables inference while preserving direct reads. Customer catalogs and credentials stay installation-local and are not included in this package.
+
 ## Measurement and release gate
 
 `node scripts/jev-task-report.js` accepts JSON `{ "arms": { "baseline": { "tasks": [], "events": [] }, "deterministic": { "tasks": [], "events": [] }, "jev": { "tasks": [], "events": [] } } }` on stdin. Tasks carry rootTaskId, durationMs, accepted and acceptanceEvidence. Events carry stable providerRequestId/eventId, rootTaskId, authMode, token components and nullable observedCostUsd/estimatedCostUsd. Native token_usage_record rows use root_turn_id and response_id. Include child records as well as parent records. The importer never infers OAuth from model name. Missing usage, billing, acceptance or unmatched tasks blocks a savings claim.

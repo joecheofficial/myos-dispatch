@@ -57,3 +57,14 @@ test('configured SQLite reporting opens read-only and rejects mutating configura
   assert.equal((await executeStep({...step,stepId:'mutation'},opts)).verified,false);
   assert.equal(execFileSync('sqlite3',[db,'select count(*) from records;'],{encoding:'utf8'}).trim(),'3');
 });
+test('SQLite evidence preserves complete rows and only uses a registered filter column', async t => {
+  const {execFileSync}=require('node:child_process');
+  const {file,opts,step}=setup(t), db=path.join(path.dirname(file),'cohorts.db');
+  execFileSync('sqlite3',[db,'create table counts(cohort_number integer, participants integer);insert into counts values(15,22),(16,31);']);
+  Object.assign(opts.dataSourceOptions.config.dataSources[0],{mode:'sqlite',path:db,sqlite:{query:'select * from counts',filterColumn:'cohort_number'}});
+  const result=await executeStep({...step,operation:'evidence.retrieve',args:{sourceId:'records',query:'How many people are in cohort 16?',filter:{field:'cohort_number',value:16}}},opts);
+  assert.equal(result.verified,true);
+  assert.deepEqual(result.output,[{row:1,values:{cohort_number:16,participants:31}}]);
+  const denied=await executeStep({...step,stepId:'bad-filter',operation:'evidence.retrieve',args:{sourceId:'records',filter:{field:'participants',value:31}}},opts);
+  assert.equal(denied.verified,false);
+});

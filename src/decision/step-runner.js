@@ -24,7 +24,8 @@ function validateStep(step) {
 async function selectSource(step, opts) {
   const config = opts.dataSourceOptions || {};
   const allowlist = registry.getDataLookupAllowlist(config);
-  const sources = registry.getConfiguredDataSources(config).filter(s => s.readOnly && allowlist.has(s.id) && ['content', 'pointer', 'sqlite'].includes(s.mode));
+  const sources = registry.getConfiguredDataSources(config).filter(s => s.readOnly && allowlist.has(s.id) &&
+    (['content', 'pointer'].includes(s.mode) || s.mode === 'sqlite' && s.sqlite?.query));
   if (step.args.sourceId) return sources.find(s => s.id === step.args.sourceId) || null;
   const query = String(step.args.query || '').slice(0,2000);
   const ids = registry.selectDataSourceIds(query, config);
@@ -32,9 +33,9 @@ async function selectSource(step, opts) {
   if (candidates.length === 1) return candidates[0];
   if (candidates.length < 2) return null;
   const plan = await routeWithJev(query, { branch: 'fallback', route: { lane: 'worker_skill' } }, {
-    ...opts, stepDecision: true, sessionId: step.rootTaskId, rootTaskId: step.rootTaskId, stepId: step.stepId,
+    ...opts, stepDecision: true, sessionId: opts.sessionId || step.rootTaskId, rootTaskId: step.rootTaskId, stepId: step.stepId,
     recipes: candidates.map(s => ({ id: s.id, title: s.label, phrases: s.matchTerms })),
-    context: { operation: step.operation, candidates: candidates.map(s => [s.id,s.path]) },
+    context: { operation: step.operation, candidates: candidates.map(s => [s.id,s.path,digest({sqlite:s.sqlite,maxChars:s.maxChars})]) },
   });
   return candidates.find(s => s.id === plan.jevRouting.recipeId) || null;
 }
@@ -85,12 +86,27 @@ async function executeStep(step, opts = {}) {
       if (!plan.projectSlug || !plan.searchScope) throw new Error('project_unresolved');
       output = { project: plan.projectSlug, scope: plan.searchScope };
       evidence = [{ type: 'project_registry', project: plan.projectSlug }];
+    } else if (step.operation === 'evidence.retrieve' && source.mode === 'sqlite') {
+      let rows = readRows(source);
+      if (!Array.isArray(rows)) throw new Error('unsupported_source_shape');
+      if (step.args.filter) {
+        const {field,value} = step.args.filter;
+        if (!source.sqlite.filterColumn || field !== source.sqlite.filterColumn || !Number.isSafeInteger(value)) throw new Error('unsupported_filter');
+        rows = rows.filter(row => row && row[field] === value);
+      }
+      const budget = Math.max(0,Math.min(Number(source.maxChars) || 4000,8000));
+      output = rows.map((values,i) => ({row:i+1,values}));
+      if (!output.length) throw new Error('no_matching_evidence');
+      // Never pass half a row or a silently incomplete aggregate to the model.
+      if (rows.length > 100 || JSON.stringify(output).length > budget) throw new Error('result_requires_narrower_scope');
+      evidence = [{ sourceId:source.id,path:source.path,mode:source.mode,fingerprint:sourceHash,type:'configured_query_result' }];
     } else if (step.operation === 'evidence.retrieve') {
-      const text = source.mode === 'sqlite' ? JSON.stringify(readRows(source),null,2) : fs.readFileSync(source.path, 'utf8');
+      const text = fs.readFileSync(source.path, 'utf8');
       const words = String(step.args.query || '').toLowerCase().match(/[a-z0-9]{3,}/g) || [];
       const lines = text.split('\n').map((text,i) => ({ line: i + 1, text }));
-      const matches = words.length ? lines.filter(line => words.some(w => line.text.toLowerCase().includes(w))) : lines;
       const budget = Math.max(0,Math.min(Number(source.maxChars) || 4000,8000));
+      const matches = step.args.includeContext && text.length <= budget ? lines
+        : words.length ? lines.filter(line => words.some(w => line.text.toLowerCase().includes(w))) : lines;
       let used = 0;
       output = [];
       for (const line of matches.slice(0,30)) {
