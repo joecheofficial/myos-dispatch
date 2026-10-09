@@ -4,7 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const readline = require('node:readline');
 const { createHash } = require('node:crypto');
-const { routeWithJev, appendRoutingEvent, executableRecipe, directExecutionAllowed, canonicalCwd, fingerprint } = require('./jev-router');
+const { routeWithJev, appendRoutingEvent, executableRecipe, directExecutionAllowed, canonicalCwd, approvalFingerprint } = require('./jev-router');
 
 async function readDecision(id, env) {
   if (!/^[a-f0-9-]{36}$/.test(id)) throw new Error('Invalid decision ID');
@@ -42,6 +42,7 @@ async function executeRoutedTask(request, opts = {}) {
   const started = Date.now();
   const emit = result => {
     appendRoutingEvent({ event: 'execution', decisionId: decision.decisionId, recipeId: decision.recipeId,
+      rootTaskId: request.rootTaskId || decision.rootTaskId || null, stepId: request.stepId || decision.stepId || null,
       status: result.status, reason: result.reason || null, executionMs: Date.now() - started,
       workerInvocations: 0, usage: result.usage || null, accepted: null, verifiedSavingsUsd: null }, env);
     return { ...result, decisionId: decision.decisionId };
@@ -52,7 +53,7 @@ async function executeRoutedTask(request, opts = {}) {
   if (!recipe) return emit({ status: 'needs_worker', reason: 'recipe_removed' });
   if (!directExecutionAllowed(recipe, env)) return emit({ status: 'needs_review', reason: 'recipe_not_approved_for_direct_execution' });
   if (!executableRecipe(recipe)) return emit({ status: 'needs_worker', reason: 'unsupported_recipe_handler' });
-  if (decision.recipeFingerprint && decision.recipeFingerprint !== fingerprint(recipe)) return emit({ status: 'needs_worker', reason: 'recipe_changed' });
+  if (decision.recipeFingerprint && decision.recipeFingerprint !== approvalFingerprint(recipe,env)) return emit({ status: 'needs_worker', reason: 'recipe_changed' });
   const scored = dispatcher.listCandidateRecipes(request).candidates.find(c => c.recipe.id === recipe.id);
   const candidate = { ...(scored || {}), recipe, inferredProject: dispatcher.inferProjectSlug(request), score: 100 };
   const validation = dispatcher.validateRecipeCandidate(candidate, request);

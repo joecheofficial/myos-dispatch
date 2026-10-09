@@ -1,11 +1,14 @@
 {
   "name": "myos-dispatch",
-  "version": "4.2.1",
+  "version": "4.3.0",
   "description": "Standalone MyOS Dispatch routing and execution core.",
   "license": "SEE LICENSE IN LICENSE",
   "type": "commonjs",
   "main": "src/workspace-context.js",
   "bin": {
+    "myos-step": "bin/myos-step.js",
+    "myos-run": "bin/myos-run.js",
+    "myos-jev-doctor": "bin/myos-jev-doctor.js",
     "myos-dispatch-hook": "bin/myos-dispatch-hook",
     "myos-find": "bin/myos-find.js",
     "myos-local-search": "bin/myos-local-search.js",
