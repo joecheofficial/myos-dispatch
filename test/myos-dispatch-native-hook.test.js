@@ -44,7 +44,7 @@ test("UserPromptSubmit (Codex surface) emits bounded lanes with native-thread in
     hook_event_name: "user_prompt_submit",
     cwd: process.cwd(),
     prompt: "Implement the new report pipeline, verify it end-to-end, and update the docs",
-  }, "codex", { contextMode: "full", rewrite: false });
+  }, "codex", { contextMode: "full", rewrite: false, plan:require("./helpers/scoped-hook-plan")("Implement the new report pipeline, verify it end-to-end, and update the docs","codex") });
 
   const context = output?.hookSpecificOutput?.additionalContext || "";
   assert.match(context, /\[MyOS Dispatch route\]/);

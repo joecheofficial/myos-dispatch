@@ -560,6 +560,8 @@ function buildContextForMode({ surface, hookEventName, targetKind, text, plan, c
 function resolveHookPlan(text, options = {}) {
   const env = {
     ...process.env,
+    ...options.env,
+    MYOS_DESKTOP_BOUNDED_ROUTING: "1",
     MYOS_BACKGROUND_ORCHESTRATOR: process.env.MYOS_BACKGROUND_ORCHESTRATOR || "myos-dispatch",
   };
   return resolveDispatchPlan(text, {
@@ -1637,6 +1639,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  resolveHookPlan,
   isTier0Command,
   shouldSamplePrompt,
   prepareJev,

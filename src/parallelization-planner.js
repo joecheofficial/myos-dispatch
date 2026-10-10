@@ -456,6 +456,7 @@ function buildParallelizationPlan(input, basePlan = {}, signals = {}) {
   const depth = resolveDepth(aggression, env);
   const writableLaneCap = resolveWritableLaneCap(env, maxSidecars);
   const repositoryRouting = resolveRepositoryTarget(text, basePlan, {
+    discoverNested: env.MYOS_DESKTOP_BOUNDED_ROUTING !== '1',
     workspaceRoot: signals.workspaceRoot,
     projectIndexPath: signals.projectIndexPath,
     cwd: signals.cwd,
