@@ -77,6 +77,9 @@ function normalizeDataSourceEntry(entry = {}) {
     excludeTerms: normalizeTermList(entry.excludeTerms),
     workerFollowupTerms: normalizeTermList(entry.workerFollowupTerms),
     readOnly: entry.readOnly !== false,
+    projectSlug: typeof entry.projectSlug === "string" ? entry.projectSlug : null,
+    autoEvidence: entry.autoEvidence?.enabled === true && entry.autoEvidence.audience === "orchestrator"
+      ? { enabled:true, audience:"orchestrator", scope:entry.autoEvidence.scope === "global" ? "global" : "project", maxChars:Math.max(1,Math.min(2000,Number(entry.autoEvidence.maxChars) || 1000)) } : null,
     ...(mode === "atelier" ? { audiences: Array.isArray(entry.audiences) ? entry.audiences.filter(value => ["private", "team", "public"].includes(value)) : ["private", "team"] } : {}),
     ...(mode === "atelier" && entry.includePaths !== undefined ? { includePaths: entry.includePaths } : {}),
     ...(entry.sourceOrigin !== undefined ? { sourceOrigin: entry.sourceOrigin } : {}),

@@ -16,6 +16,8 @@ function validateStep(step) {
   }
   if (!Object.hasOwn(require('../../config/myos-routing-policy.json').taskClasses,step.taskClass)) throw new Error('Unknown taskClass');
   if (!step.args || typeof step.args !== 'object' || Array.isArray(step.args)) throw new Error('Step args required');
+  if (step.args.sourceIds && (!Array.isArray(step.args.sourceIds) || !step.args.sourceIds.length || step.args.sourceIds.length > 12 || step.args.sourceIds.some(id => typeof id !== 'string'))) throw new Error('Invalid source shortlist');
+  if (step.args.maxChars !== undefined && (!Number.isSafeInteger(step.args.maxChars) || step.args.maxChars < 1 || step.args.maxChars > 8000)) throw new Error('Invalid evidence budget');
   if (!Array.isArray(step.dependencies) || step.dependencies.some(id => !/^[\w.-]{1,128}$/.test(id) || id === step.stepId)) throw new Error('Invalid dependencies');
   if (step.authorization !== 'read_only') throw new Error('Step authorization must be read_only');
   if (step.expectedOutput !== 'nonempty') throw new Error('Unsupported output check');
@@ -25,6 +27,7 @@ async function selectSource(step, opts) {
   const config = opts.dataSourceOptions || {};
   const allowlist = registry.getDataLookupAllowlist(config);
   const sources = registry.getConfiguredDataSources(config).filter(s => s.readOnly && allowlist.has(s.id) &&
+    (!step.args.sourceIds || step.args.sourceIds.includes(s.id)) &&
     (['content', 'pointer'].includes(s.mode) || s.mode === 'sqlite' && s.sqlite?.query));
   if (step.args.sourceId) return sources.find(s => s.id === step.args.sourceId) || null;
   const query = String(step.args.query || '').slice(0,2000);
@@ -35,7 +38,7 @@ async function selectSource(step, opts) {
   const plan = await routeWithJev(query, { branch: 'fallback', route: { lane: 'worker_skill' } }, {
     ...opts, stepDecision: true, sessionId: opts.sessionId || step.rootTaskId, rootTaskId: step.rootTaskId, stepId: step.stepId,
     recipes: candidates.map(s => ({ id: s.id, title: s.label, phrases: s.matchTerms })),
-    context: { operation: step.operation, candidates: candidates.map(s => [s.id,s.path,digest({sqlite:s.sqlite,maxChars:s.maxChars})]) },
+    context: { operation: step.operation, candidates: candidates.map(s => [s.id,digest({path:s.path,sqlite:s.sqlite,maxChars:s.maxChars})]) },
   });
   return candidates.find(s => s.id === plan.jevRouting.recipeId) || null;
 }
@@ -68,7 +71,7 @@ async function executeStep(step, opts = {}) {
       sourceHash = sourceFingerprint(source);
     } catch { return handoff('source_unavailable'); }
   }
-  const fingerprint = digest({ step, sourceHash, cwd: process.cwd() });
+  const fingerprint = digest({ step, sourceHash, cwd: path.resolve(opts.cwd || process.cwd()) });
   try {
     const prior = JSON.parse(fs.readFileSync(receiptPath(step.stepId), 'utf8'));
     return prior.fingerprint === fingerprint && prior.result.verified && step.operation !== 'recipe.run'
@@ -94,7 +97,7 @@ async function executeStep(step, opts = {}) {
         if (!source.sqlite.filterColumn || field !== source.sqlite.filterColumn || !Number.isSafeInteger(value)) throw new Error('unsupported_filter');
         rows = rows.filter(row => row && row[field] === value);
       }
-      const budget = Math.max(0,Math.min(Number(source.maxChars) || 4000,8000));
+      const budget = Math.max(0,Math.min(Number(source.maxChars) || 4000,Number(step.args.maxChars) || 8000,8000));
       output = rows.map((values,i) => ({row:i+1,values}));
       if (!output.length) throw new Error('no_matching_evidence');
       // Never pass half a row or a silently incomplete aggregate to the model.
@@ -104,7 +107,7 @@ async function executeStep(step, opts = {}) {
       const text = fs.readFileSync(source.path, 'utf8');
       const words = String(step.args.query || '').toLowerCase().match(/[a-z0-9]{3,}/g) || [];
       const lines = text.split('\n').map((text,i) => ({ line: i + 1, text }));
-      const budget = Math.max(0,Math.min(Number(source.maxChars) || 4000,8000));
+      const budget = Math.max(0,Math.min(Number(source.maxChars) || 4000,Number(step.args.maxChars) || 8000,8000));
       const matches = step.args.includeContext && text.length <= budget ? lines
         : words.length ? lines.filter(line => words.some(w => line.text.toLowerCase().includes(w))) : lines;
       let used = 0;
