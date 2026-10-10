@@ -326,3 +326,13 @@ test("sidecar summaries strip terminal escapes and fall back when nothing legibl
   assert.equal(sgrClean, "found 3 modules, no blockers");
   assert.ok(sgrClean.length >= 8, "a real summary survives intact");
 });
+
+test('Codex owns native fanout and never also starts automatic sidecars', t => {
+  const home=createTmpHome();
+  const restore=setupTestEnv(home,createFixtureScript(home));
+  t.after(()=>{restore();cleanupTmpHome(home);});
+  process.env.MYOS_AUTO_FANOUT='1';process.env.MYOS_BACKGROUND_AGENTS_ENABLED='1';
+  const result=handleHookPayload({hook_event_name:'UserPromptSubmit',session_id:'codex-owner',cwd:process.cwd(),prompt:'Implement the report pipeline and verify it'},'codex',{contextMode:'full'});
+  assert.doesNotMatch(result.hookSpecificOutput.additionalContext,/ALREADY RUNNING/);
+  assert.equal(fs.existsSync(path.join(home,'state/sidecar-results/codex-owner/manifest.json')),false);
+});

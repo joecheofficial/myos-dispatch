@@ -347,14 +347,11 @@ function fanoutMandateLines(surface, parallel, autoDispatchedTasks = []) {
   }
   if (parallel.mode === "none" || parallel.taskCount === 0) return [];
   const lines = [
-    "- Fan out FIRST on non-trivial work: dispatch the parallel lanes above at the start of the turn, then work the critical path while they run.",
-    "- Prefer breadth over depth: many parallel single-purpose subagents, shallow nesting. Never chain subagents deeper than the depth shown; widen instead.",
+    "- Use only the bounded independent lanes above, then work the critical path while they run.",
+    "- Do not add decomposition or duplicate context agents. Record which evidence helped the accepted result; completion alone does not prove usefulness.",
   ];
   const surfaceLine = surfaceFanoutInstruction(surface, parallel, autoDispatchedTasks);
   if (surfaceLine) lines.push(surfaceLine);
-  if (parallel.mode !== "none" && parallel.nativeTaskCount > 0 && parallel.nativeTaskCount < 3 && autoDispatchedTasks.length === 0) {
-    lines.push("- The plan exposes fewer than 3 lanes; if the task is multi-part, widen the fanout yourself within the same gates.");
-  }
   return lines;
 }
 
@@ -1230,7 +1227,8 @@ function handleUserPromptSubmit(payload, surface, options = {}) {
 
   const sidecarResultsText = collectAndMarkDeliveredResults(sidecarResultsDir, manifestPath);
 
-  const plan = options.plan || resolveHookPlan(text, { hookSurface: surface, hookEventName: "UserPromptSubmit" });
+  const plan = require('../src/desktop-fanout-gate').gateDesktopFanout(text,
+    options.plan || resolveHookPlan(text, { cwd:payload.cwd, hookSurface: surface, hookEventName: "UserPromptSubmit" }));
   const routeObj = compactRoute(plan);
 
   const manifest = loadSidecarManifest(manifestPath);
@@ -1245,20 +1243,23 @@ function handleUserPromptSubmit(payload, surface, options = {}) {
 
   let autoDispatchedTasks = [];
   if (
+    surface === "claude" &&
     autoFanoutEnabled &&
     goalScale >= 3 &&
     readOnlyTasks.length > 0 &&
     isWorkerCliAvailable()
   ) {
     const dispatchedInLastHour = countDispatchedInLastHour(manifest);
-    const availableCap = Math.min(3, 6 - dispatchedInLastHour);
+    const availableCap = Math.min(2, 6 - dispatchedInLastHour);
     if (availableCap > 0) {
       const candidates = readOnlyTasks.slice(0, availableCap);
       for (const task of candidates) {
         const spawned = spawnSidecarTask(task, sidecarResultsDir, payload.cwd || process.cwd());
         if (spawned) {
           autoDispatchedTasks.push(task);
-          manifest.dispatched.push({ id: task.id, timestamp: Date.now() });
+          manifest.dispatched.push({ id: task.id, timestamp: Date.now(),
+            rootTaskId:payload.turn_id || payload.turnId || null,
+            inputHash:`sha256:${sha256(text)}`, valueContract:task.valueContract });
         }
       }
       if (autoDispatchedTasks.length > 0) {
@@ -1605,7 +1606,8 @@ async function renderRouteFromStdin() {
     hookEventName: "UserPromptSubmit",
     targetKind: "user_prompt",
     text,
-    plan: (await prepareJev({ prompt: text }, readSurface())).plan,
+    plan: require('../src/desktop-fanout-gate').gateDesktopFanout(text,
+      (await prepareJev({ prompt: text, cwd:process.cwd() }, readSurface())).plan),
     contextMode: "full",
   });
   await finishOutput(context ? `${context}\n` : "");

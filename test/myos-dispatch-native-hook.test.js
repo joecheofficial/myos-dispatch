@@ -39,7 +39,7 @@ test("normalizes Codex snake_case hook event names", () => {
   assert.equal(readHookEventName({ hook_event_name: "pre_tool_use", tool_input: { command: "ls" } }), "PreToolUse");
 });
 
-test("UserPromptSubmit (Codex surface) emits full route with fanout mandate and native-thread instruction", () => {
+test("UserPromptSubmit (Codex surface) emits bounded lanes with native-thread instruction", () => {
   const output = handleHookPayload({
     hook_event_name: "user_prompt_submit",
     cwd: process.cwd(),
@@ -49,8 +49,8 @@ test("UserPromptSubmit (Codex surface) emits full route with fanout mandate and 
   const context = output?.hookSpecificOutput?.additionalContext || "";
   assert.match(context, /\[MyOS Dispatch route\]/);
   assert.match(context, /Mandatory behavior:/);
-  assert.match(context, /Fan out FIRST/);
-  assert.match(context, /breadth over depth/i);
+  assert.match(context, /bounded independent lanes/);
+  assert.doesNotMatch(context, /Fan out FIRST|widen the fanout|breadth over depth/i);
   assert.match(context, /native multi-agent threads/);
   assert.match(context, /Lane assignments:/);
   assert.match(context, /myos_code_mapper|myos_lane_lead/);
