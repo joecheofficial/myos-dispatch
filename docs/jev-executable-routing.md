@@ -80,3 +80,15 @@ The automatic path runs with or without a Jev key. Without a key, an ambiguous c
 `node bin/myos-jev-doctor.js` reports installed version, mode, key presence and supported operations without printing the key or testing it over the network. Key presence is not verified authentication or measured savings.
 
 All Sorted uses its existing pinned external checkout and scoped workspace/.env. Its owner controls settings, doctor UI, packaging and immutable release pin advancement. Preserve keys and learned routes. Promotion requires equivalent accepted outcomes with 20 percent fewer total model tokens, 15 percent lower median completion time and no aggregate metered API cost increase. Unknown measurements block promotion.
+
+### Bounded reads inside larger requests
+
+A separately stated short read clause can execute before the selected model handles the remaining task. For example, “Check my computer specs; then produce a compatible deployment configuration” retrieves the approved inventory once and supplies its cited evidence. The rest of the request keeps its worker route and authorization requirements. Evidence success does not mean the larger task is complete.
+
+This path requires installation-local source opt-in:
+
+```json
+{"autoEvidence":{"enabled":true,"audience":"orchestrator","scope":"global","maxChars":1000}}
+```
+
+Use `scope: "global"` only for a reviewed source intended across projects. Otherwise declare `projectSlug` and explicitly name it in the read clause. General registered read-only sources are not opted in automatically. The extractor accepts one separate read clause, rejects mixed mutations and sensitive terms, limits source choices to twelve and evidence to 2,000 characters, and passes only that clause to semantic selection when needed. Failed or uncertain reads preserve the normal task path. Source paths stay in local receipts for freshness validation but are omitted from the hook evidence payload and semantic candidate metadata.

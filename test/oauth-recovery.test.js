@@ -18,7 +18,7 @@ test("OAuth explicit model identity is never silently substituted", () => {
 });
 
 test("fresh official model metadata supersedes a stale Codex cache", async () => {
-  const result = await discoverInventory({ cache: { fetched_at: "2000-01-01", models: [{ slug: "old", visibility: "list" }] },
+  const result = await discoverInventory({ env: { MYOS_OAUTH_LOCAL_PROVIDER_CONFIG: "/nonexistent/myos-test-provider.json" }, cache: { fetched_at: "2000-01-01", models: [{ slug: "old", visibility: "list" }] },
     codexInventory: [{ model: "fixture-new", hidden: false, supportedReasoningEfforts: [{ reasoningEffort: "low" }] }],
     run: async command => ({ ok: command === "codex", stdout: command === "codex" ? "Logged in using ChatGPT" : "" }),
   });
@@ -32,7 +32,7 @@ test("injected transports cannot write live registry evidence without an explici
   const file = path.join(home, ".myos-dispatch", "oauth-models.json");
   updateState(file, () => mergeDiscovery(null, [{ provider: "codex", model: "gpt-5.6-luna", visible: true, auth: "subscription", observedAt: new Date().toISOString() }]));
   await runBackgroundTask({ id: "fixture", mode: "read_only", prompt: "test" }, {
-    command: "codex", callerProvider: "codex", env: { HOME: home, MYOS_BACKGROUND_BACKPRESSURE_ENABLED: "0" },
+    command: "codex", callerProvider: "codex", env: { MYOS_OAUTH_LOCAL_PROVIDER_CONFIG: "/nonexistent/myos-test-provider.json", HOME: home, MYOS_BACKGROUND_BACKPRESSURE_ENABLED: "0" },
     orchestratorContext: { orchestrator: "myos-dispatch", runId: "test", token: "test", parentTaskId: "root" },
     runCommand: async () => ({ code: 0, stdout: "fixture-output" }),
   });
@@ -44,7 +44,7 @@ test("exit-zero provider errors are not successful invocation evidence", async (
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "oauth-false-success-test-")), "state.json");
   updateState(file, () => mergeDiscovery(null, [{ provider: "codex", model: "gpt-5.6-luna", visible: true, auth: "subscription", observedAt: new Date().toISOString() }]));
   const result = await runBackgroundTask({ id: "false-success", model: "gpt-5.6-luna", mode: "read_only", prompt: "test" }, {
-    command: "codex", callerProvider: "codex", env: { MYOS_OAUTH_REGISTRY: file, MYOS_BACKGROUND_BACKPRESSURE_ENABLED: "0" },
+    command: "codex", callerProvider: "codex", env: { MYOS_OAUTH_LOCAL_PROVIDER_CONFIG: "/nonexistent/myos-test-provider.json", MYOS_OAUTH_REGISTRY: file, MYOS_BACKGROUND_BACKPRESSURE_ENABLED: "0" },
     orchestratorContext: { orchestrator: "myos-dispatch", runId: "test", token: "test", parentTaskId: "root" },
     runCommand: async () => ({ code: 0, stdout: JSON.stringify({ type: "error", message: "request rejected" }) }),
   });
@@ -109,7 +109,7 @@ test("real sidecar entrypoint retries an unsupported unpinned OAuth model once w
   const calls = [];
   const result = await runBackgroundTask({ id: "recover", prompt: "test", mode: "read_only", taskClass: "cheap_routing", timeoutMs: 10000 }, {
     command: "codex", callerProvider: "codex",
-    env: { MYOS_OAUTH_REGISTRY: file, MYOS_BACKGROUND_BACKPRESSURE_ENABLED: "0" },
+    env: { MYOS_OAUTH_LOCAL_PROVIDER_CONFIG: "/nonexistent/myos-test-provider.json", MYOS_OAUTH_REGISTRY: file, MYOS_BACKGROUND_BACKPRESSURE_ENABLED: "0" },
     orchestratorContext: { orchestrator: "myos-dispatch", runId: "test", token: "test", parentTaskId: "root" },
     runCommand: async ({ invocation, timeoutMs }) => {
       calls.push({ model: invocation.model, timeoutMs });
@@ -136,7 +136,7 @@ test("failure-triggered doctor coalesces concurrent scans and refreshes provider
 });
 
 test("discovery inventories providers without promoting metadata to working credentials", async () => {
-  const result = await discoverInventory({
+  const result = await discoverInventory({ env: { MYOS_OAUTH_LOCAL_PROVIDER_CONFIG: "/nonexistent/myos-test-provider.json" },
     cache: { fetched_at: "2026-09-21T00:00:00Z", models: [{ slug: "gpt-5.6-sol", visibility: "list" }, { slug: "hidden", visibility: "hide" }] },
     run: async (command, args) => {
       if (command === "codex") return { ok: true, stdout: "Logged in using ChatGPT" };
@@ -153,7 +153,7 @@ test("discovery inventories providers without promoting metadata to working cred
 
 test("doctor includes offline local Qwen without loading it", async () => {
   let checks = 0;
-  const result = await discoverInventory({ cache: {}, run: async () => ({ ok: false, stdout: "" }),
+  const result = await discoverInventory({ env: { MYOS_OAUTH_LOCAL_PROVIDER_CONFIG: "/nonexistent/myos-test-provider.json" }, cache: {}, run: async () => ({ ok: false, stdout: "" }),
     localRegistration: { model: "mlx-community/Qwen3.5-35B-A3B-4bit" },
     validateSnapshot: () => { checks++; },
   });

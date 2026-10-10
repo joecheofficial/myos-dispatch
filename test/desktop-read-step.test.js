@@ -71,3 +71,48 @@ test('local cohort counts cannot stand in for wait-list or payment verification'
   }
   assert.equal(fs.existsSync(path.join(home,'state/steps')),false);
 });
+
+test('complex tasks consume an approved embedded read and retain the remaining task',t=>{
+  const {run,config}=fixture(t);
+  const catalog=JSON.parse(fs.readFileSync(config,'utf8'));
+  catalog.dataSources[0].autoEvidence={enabled:true,audience:'orchestrator',scope:'global',maxChars:1000};
+  fs.writeFileSync(config,JSON.stringify(catalog));
+  const result=run('Check my computer specs; then implement a compatible report pipeline and test it.');
+  assert.equal(result.status,0,result.stderr);
+  const context=JSON.parse(result.stdout).hookSpecificOutput.additionalContext;
+  assert.match(context,/Memory: 64 GB/);
+  assert.match(context,/remaining task/i);
+  assert.match(context,/bounded read step/i);
+  assert.doesNotMatch(context,/dispatch-auto-read-/);
+});
+
+test('embedded reads require opt-in and reject mixed or multiple read clauses',t=>{
+  const {run,config,home}=fixture(t);
+  const request='Check my computer specs; then implement a compatible report pipeline';
+  assert.doesNotMatch(run(request).stdout,/Dispatch verified evidence/);
+  const catalog=JSON.parse(fs.readFileSync(config,'utf8'));
+  catalog.dataSources[0].autoEvidence={enabled:true,audience:'orchestrator',scope:'global',maxChars:1000};
+  fs.writeFileSync(config,JSON.stringify(catalog));
+  for(const prompt of [
+    'Check my computer specs and delete the inventory; then implement the pipeline',
+    'Check my computer specs; show computer specs; then implement the pipeline',
+    'Check my computer specs password; then implement the pipeline',
+  ]) assert.doesNotMatch(run(prompt).stdout,/Dispatch verified evidence/);
+  assert.equal(fs.existsSync(path.join(home,'state/steps')),false);
+});
+
+test('unscoped embedded sources are not implicitly global',t=>{
+  const {run,config}=fixture(t),catalog=JSON.parse(fs.readFileSync(config,'utf8'));
+  catalog.dataSources[0].autoEvidence={enabled:true,audience:'orchestrator',maxChars:1000};
+  fs.writeFileSync(config,JSON.stringify(catalog));
+  assert.doesNotMatch(run('Check my computer specs; then implement the All Sorted pipeline').stdout,/Dispatch verified evidence/);
+});
+
+for(const project of ['All Sorted','all-sorted']) test(`explicit project read recognizes registered slug spelling: ${project}`,()=>{
+  const {embeddedRead}=require('../src/decision/embedded-read');
+  const source={id:'release',readOnly:true,mode:'content',projectSlug:'all-sorted',autoEvidence:{enabled:true,audience:'orchestrator',scope:'project',maxChars:1000}};
+  const registry={selectDataSourceIds:()=>['release'],getDataSource:()=>source};
+  assert.equal(embeddedRead(`Read ${project} release notes; then draft an update`,{projectSlug:'all-sorted'},registry)?.sourceIds[0],'release');
+  assert.equal(embeddedRead('Read otherall-sorted release notes; then draft an update',{projectSlug:'all-sorted'},registry),null);
+  assert.equal(embeddedRead(`Read ${project} release notes; then draft an update`,{projectSlug:'other'},registry),null);
+});

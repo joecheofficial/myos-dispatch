@@ -130,3 +130,10 @@ for (const flags of [{ MYOS_JEV_ROUTING:'0' }, { MYOS_JEV_MODE:'off' }, { MYOS_J
     assert.equal(fs.existsSync(path.join(env.MYOS_HOME_ROOT,'logs/jev-shadow.jsonl')),false);
   });
 }
+
+test('render-route applies the desktop value gate to unscoped multi-part work',t=>{
+  const env={...isolatedEnv(t),MYOS_BACKGROUND_AGENTS_ENABLED:'1',MYOS_JEV_MODE:'off',OPENAI_API_KEY:'fixture-only'};
+  const result=execFileSync(process.execPath,[hook,'--render-route','--surface=codex'],{input:'Implement the new report pipeline and verify it',encoding:'utf8',env,cwd:env.MYOS_HOME_ROOT});
+  assert.ok(result.length>0);
+  assert.doesNotMatch(result,/Fan out FIRST|widen the fanout|Lane assignments:|spawn the \d+ read-only/);
+});

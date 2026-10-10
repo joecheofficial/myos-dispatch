@@ -71,7 +71,7 @@ function setupTestEnv(tmpHome, fixtureBin) {
 }
 
 test("auto-fanout suite", { concurrency: 1 }, async (t) => {
-  await t.test("goal 4 route with read-only lanes: spawns up to 3, hook exits fast, manifest records them", () => {
+  await t.test("confirmed goal 4 route: spawns up to 2 distinct lanes, records contracts", () => {
     const tmpHome = createTmpHome();
     const fixtureBin = createFixtureScript(tmpHome);
     const sessionId = "session-g4-" + Date.now();
@@ -88,7 +88,7 @@ test("auto-fanout suite", { concurrency: 1 }, async (t) => {
         session_id: sessionId,
         cwd: process.cwd(),
         prompt,
-      }, "claude", { contextMode: "full" });
+      }, "claude", { contextMode: "full", plan:require("./helpers/scoped-hook-plan")(prompt) });
       const duration = Date.now() - start;
 
       assert.ok(duration < 2000, `Hook should exit fast, took ${duration}ms`);
@@ -99,7 +99,8 @@ test("auto-fanout suite", { concurrency: 1 }, async (t) => {
       assert.ok(fs.existsSync(manifestPath), "Manifest should be created");
       const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
       assert.ok(Array.isArray(manifest.dispatched));
-      assert.ok(manifest.dispatched.length > 0 && manifest.dispatched.length <= 3, `Expected 1-3 dispatched, got ${manifest.dispatched.length}`);
+      assert.ok(manifest.dispatched.every(task=>task.valueContract?.deliverable));
+      assert.ok(manifest.dispatched.length > 0 && manifest.dispatched.length <= 2, `Expected 1-2 dispatched, got ${manifest.dispatched.length}`);
     } finally {
       restoreEnv();
       cleanupTmpHome(tmpHome);
@@ -243,7 +244,7 @@ test("auto-fanout suite", { concurrency: 1 }, async (t) => {
         session_id: sessionId,
         cwd: process.cwd(),
         prompt,
-      }, "claude", { contextMode: "full" });
+      }, "claude", { contextMode: "full", plan:require("./helpers/scoped-hook-plan")(prompt) });
 
       const context = output?.hookSpecificOutput?.additionalContext || "";
       assert.doesNotMatch(context, /ALREADY RUNNING in the background/);
@@ -325,4 +326,14 @@ test("sidecar summaries strip terminal escapes and fall back when nothing legibl
   const sgrClean = clean(sgr);
   assert.equal(sgrClean, "found 3 modules, no blockers");
   assert.ok(sgrClean.length >= 8, "a real summary survives intact");
+});
+
+test('Codex owns native fanout and never also starts automatic sidecars', t => {
+  const home=createTmpHome();
+  const restore=setupTestEnv(home,createFixtureScript(home));
+  t.after(()=>{restore();cleanupTmpHome(home);});
+  process.env.MYOS_AUTO_FANOUT='1';process.env.MYOS_BACKGROUND_AGENTS_ENABLED='1';
+  const result=handleHookPayload({hook_event_name:'UserPromptSubmit',session_id:'codex-owner',cwd:process.cwd(),prompt:'Implement the report pipeline and verify it'},'codex',{contextMode:'full'});
+  assert.doesNotMatch(result.hookSpecificOutput.additionalContext,/ALREADY RUNNING/);
+  assert.equal(fs.existsSync(path.join(home,'state/sidecar-results/codex-owner/manifest.json')),false);
 });

@@ -141,6 +141,13 @@ function resolveRepositoryTarget(input, plan = {}, options = {}) {
     };
   }
 
+  // Desktop prompt hooks must not walk home, cloud or external storage just
+  // to speculate about possible workers. Installed aliases and exact Git roots
+  // above remain usable; unresolved ownership stays with the orchestrator.
+  if (options.discoverNested === false) {
+    return { authoritative:false, confidence:'low', reason:'nested_repository_discovery_deferred',
+      primaryTarget:null, taskScope:scope, writableSafe:false, candidates:configured };
+  }
   const nestedRoots = findNestedGitRoots(scope, options);
   if (nestedRoots.length === 1) {
     const only = nestedRoots[0];
