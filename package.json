@@ -19,7 +19,8 @@
     "myos-oauth-doctor": "bin/myos-oauth-doctor.js",
     "myos-atelier-audience": "bin/myos-atelier-audience.js",
     "myos-atelier-sync": "bin/myos-atelier-sync.js",
-    "myos-atelier-query": "bin/myos-atelier-query.js"
+    "myos-atelier-query": "bin/myos-atelier-query.js",
+    "myos-fanout-report": "bin/myos-fanout-report.js"
   },
   "engines": {
     "node": ">=20"
