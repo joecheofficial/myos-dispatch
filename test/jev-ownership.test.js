@@ -77,3 +77,75 @@ test('generic rejection clears even a scoped baseline without a session',()=>{
   assert.equal(result.searchScope,'');
   assert.deepEqual(result.dataSources,[]);
 });
+
+function scoped(slug, name=slug) { return {branch:'project',projectSlug:slug,searchScope:'/'+slug,projectMatches:[{slug,name}],route:{lane:'worker_skill'},blockedBy:['fixture-gate'],requiresApproval:true}; }
+test('desktop delivery channel cannot replace the subject project or bypass gates',t=>{
+ const {planWithContext}=require('../src/decision/session-route');
+ const resolvePlan=text=>/whatsapp/i.test(text)?scoped('whatsapp','WhatsApp'):/birthday/i.test(text)?scoped('birthday','Birthday'):{};
+ const p=planWithContext('Send the birthday invite on WhatsApp',{surface:'codex',resolvePlan});
+ assert.equal(p.projectSlug,'birthday');assert.equal(p.requiresApproval,true);assert.deepEqual(p.blockedBy,['fixture-gate']);
+ assert.equal(planWithContext('Check the WhatsApp QR for the birthday invite system',{surface:'codex',resolvePlan}).projectSlug,'whatsapp');
+ assert.equal(planWithContext('Fix the WhatsApp server and send a status message on WhatsApp',{surface:'codex',resolvePlan}).projectSlug,'whatsapp');
+ assert.equal(planWithContext('Send the birthday invite on WhatsApp',{surface:'telegram',resolvePlan}).projectSlug,'whatsapp');
+});
+test('desktop delivery channel with no supported subject stays unresolved',()=>{
+ const {planWithContext}=require('../src/decision/session-route');
+ const p=planWithContext('Send this to her on WhatsApp',{surface:'claude',resolvePlan:text=>/whatsapp/i.test(text)?scoped('whatsapp','WhatsApp'):{route:{lane:'worker_skill'}}});
+ assert.equal(p.projectSlug,undefined);assert.equal(p.searchScope,'');
+});
+test('explicit leading project header has priority, unknown headers do not fall through to incidental owners',()=>{
+ const {planWithContext}=require('../src/decision/session-route');
+ const resolvePlan=text=>text==='On the Event Portal'?scoped('event-portal','Event Portal'):text==='On the Unknown homepage'?{route:{lane:'worker_skill'}}:scoped('personal','Personal');
+ assert.equal(planWithContext('On the Event Portal: change my personal contact details',{surface:'codex',resolvePlan}).projectSlug,'event-portal');
+ assert.equal(planWithContext('On the Unknown homepage: change my personal contact details',{surface:'codex',resolvePlan}).projectSlug,undefined);
+});
+
+
+test('desktop verified short project aliases resolve headers and retain repository evidence',t=>{
+ const {planWithContext}=require('../src/decision/session-route');
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'jev-header-'));
+ t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ fs.mkdirSync(path.join(root,'workspace/projects'),{recursive:true});
+ fs.writeFileSync(path.join(root,'workspace/projects/_index.json'),JSON.stringify({projects:{mastermind:{name:'Mastermind HQ',aliases:['MHQ'],repositories:[{id:'homepage',path:'projects/mastermind/homepage',aliases:['homepage']}]}}}));
+ const resolvePlan=text=>text.includes('mastermind')?scoped('mastermind','Mastermind HQ'):scoped('personal','Personal');
+ const opts={surface:'codex',env:{MYOS_HOME_ROOT:root},resolvePlan};
+ const p=planWithContext('On the MHQ homepage: change my personal details',opts);
+ assert.equal(p.projectSlug,'mastermind');
+ assert.equal(p.repositoryTarget.id,'homepage');
+ assert.equal(p.repositoryTarget.path,path.join(root,'workspace/projects/mastermind/homepage'));
+ assert.equal(planWithContext('For the next step: show personal details',opts).projectSlug,'personal');
+});
+
+test('desktop hints reject legacy ownership and reuse a newly confirmed subject',t=>{
+ const {planWithContext}=require('../src/decision/session-route');
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'jev-hint-v2-'));
+ t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ const resolvePlan=text=>/whatsapp/i.test(text)?scoped('whatsapp','WhatsApp'):/birthday/i.test(text)?scoped('birthday','Birthday'):{projectMatches:[]};
+ const opts={env:{MYOS_HOME_ROOT:root},cwd:'/fixture',sessionId:'same',resolvePlan};
+ planWithContext('show whatsapp',opts);
+ assert.equal(planWithContext('show that again',{...opts,surface:'codex'}).projectSlug,undefined);
+ planWithContext('Send the birthday invite through WhatsApp',{...opts,surface:'codex'});
+ assert.equal(planWithContext('Send that to him on WhatsApp',{...opts,surface:'codex'}).projectSlug,'birthday');
+});
+
+
+test('desktop transport repair preserves a unique owner found inside a data route',()=>{
+ const {planWithContext}=require('../src/decision/session-route');
+ const resolvePlan=text=>text==='show birthday'?scoped('birthday','Birthday'):/whatsapp/i.test(text)?scoped('whatsapp','WhatsApp'):{branch:'data',projectSlug:null,projectMatches:[{slug:'birthday',name:'Birthday'}],requiresApproval:true};
+ assert.equal(planWithContext('Send birthday invites through WhatsApp',{surface:'codex',resolvePlan}).projectSlug,'birthday');
+});
+
+
+test('desktop stale repository hints are rejected after registered target removal',t=>{
+ const {planWithContext}=require('../src/decision/session-route');
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'jev-stale-repository-'));
+ t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ fs.mkdirSync(path.join(root,'workspace/projects/demo/site'),{recursive:true});
+ const index=path.join(root,'workspace/projects/_index.json');
+ fs.writeFileSync(index,JSON.stringify({projects:{demo:{name:'Demo',repositories:[{id:'homepage',path:'projects/demo/site'}]}}}));
+ const opts={surface:'codex',env:{MYOS_HOME_ROOT:root},sessionId:'repo',resolvePlan:text=>/demo/i.test(text)?scoped('demo','Demo'):{projectMatches:[]}};
+ planWithContext('On the Demo homepage: update the title',opts);
+ assert.equal(planWithContext('Show that again',opts).repositoryTarget.id,'homepage');
+ fs.writeFileSync(index,JSON.stringify({projects:{demo:{name:'Demo',repositories:[]}}}));
+ assert.equal(planWithContext('Show that again',opts).projectSlug,undefined);
+});

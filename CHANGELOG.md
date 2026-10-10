@@ -2,6 +2,12 @@
 
 All notable changes to MyOS Dispatch are documented here.
 
+## v4.4.0-rc.2 - 2026-10-10
+
+- Keep delivery channels from replacing the subject project in desktop routing. Preserve send and execution gates while resolving the registered owner.
+- Resolve explicit project/repository headers through reviewed local aliases, including short names. Reject unsupported headers and stale repository hints.
+- Version desktop ownership evidence so legacy transport-only hints cannot seed a new route. Private bot resolution remains unchanged.
+
 ## v4.4.0-rc.1 - 2026-10-10
 
 - Execute one explicitly approved read-only evidence step inside a larger desktop task, preserving the remaining task and its permissions. Project names accept spaced slug spelling and reject substring ownership.
