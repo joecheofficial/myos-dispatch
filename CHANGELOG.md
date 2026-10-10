@@ -2,6 +2,14 @@
 
 All notable changes to MyOS Dispatch are documented here.
 
+## v4.4.0-rc.1 - 2026-10-10
+
+- Execute one explicitly approved read-only evidence step inside a larger desktop task, preserving the remaining task and its permissions. Project names accept spaced slug spelling and reject substring ownership.
+- Bound default desktop fanout to useful distinct context and verification lanes; avoid duplicate native/background workers and speculative recursive repository scans.
+- Clear rejected session project ownership before inheriting hints. Keep exact routes and unsupported requests free of Jev calls.
+- Add native parent/child token accounting, per-invocation output/adoption reports, and a reproducible actual-model accepted-work benchmark. Missing API charges remain unknown.
+- Controlled exact and ambiguous lookup benchmarks reduced model turns from two to one. This release candidate does not claim verified savings across the representative40 historical tasks and is not approved for broad promotion on that basis.
+
 ## Unreleased
 
 - Make fastpath `status: "retired"` real: `matchFastpaths` now skips retired entries. Gated by `MYOS_FASTPATH_SKIP_RETIRED`, default ON; set it to `0` to restore the old behavior (status ignored). Correct wrongly retired entries in the data file before rolling this out. Default policy caps used when a fastpaths file has no policy are raised from 30/20/10 to 120/80/40 (active/stable/probation) and `config/dispatch-fastpaths.example.json` now ships that policy block. `scripts/audit-dispatch-fastpaths.js` prints a WARN summary counting retired entries with no `retired_at`/`retired_reason`.

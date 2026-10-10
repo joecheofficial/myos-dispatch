@@ -107,3 +107,12 @@ test('unscoped embedded sources are not implicitly global',t=>{
   fs.writeFileSync(config,JSON.stringify(catalog));
   assert.doesNotMatch(run('Check my computer specs; then implement the All Sorted pipeline').stdout,/Dispatch verified evidence/);
 });
+
+for(const project of ['All Sorted','all-sorted']) test(`explicit project read recognizes registered slug spelling: ${project}`,()=>{
+  const {embeddedRead}=require('../src/decision/embedded-read');
+  const source={id:'release',readOnly:true,mode:'content',projectSlug:'all-sorted',autoEvidence:{enabled:true,audience:'orchestrator',scope:'project',maxChars:1000}};
+  const registry={selectDataSourceIds:()=>['release'],getDataSource:()=>source};
+  assert.equal(embeddedRead(`Read ${project} release notes; then draft an update`,{projectSlug:'all-sorted'},registry)?.sourceIds[0],'release');
+  assert.equal(embeddedRead('Read otherall-sorted release notes; then draft an update',{projectSlug:'all-sorted'},registry),null);
+  assert.equal(embeddedRead(`Read ${project} release notes; then draft an update`,{projectSlug:'other'},registry),null);
+});

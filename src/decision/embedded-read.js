@@ -10,12 +10,13 @@ function embeddedRead(text, plan, registry) {
   const reads = clauses.filter(s => READ.test(s));
   if (reads.length !== 1 || reads[0].length > 240 || UNSAFE.test(reads[0])) return null;
   const query = reads[0];
+  const words = value => ' ' + value.toLowerCase().replace(/[^a-z0-9]+/g,' ').trim() + ' ';
   const ids = registry.selectDataSourceIds(query);
   const sources = ids.map(id => registry.getDataSource(id)).filter(s => {
     if (!s?.readOnly || !s.autoEvidence?.enabled || s.autoEvidence.audience !== 'orchestrator') return false;
     if (!s.projectSlug && s.autoEvidence.scope !== 'global') return false;
     if (s.projectSlug && (!plan.projectSlug || s.projectSlug !== plan.projectSlug ||
-      !query.toLowerCase().includes(s.projectSlug.toLowerCase()))) return false;
+      !words(query).includes(words(s.projectSlug)))) return false;
     return ['content','pointer'].includes(s.mode) || s.mode === 'sqlite' && s.sqlite?.query;
   });
   if (!sources.length || sources.length > 12) return null;
