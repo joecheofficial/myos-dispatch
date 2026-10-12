@@ -5,6 +5,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { readAtelierSource, sourceManifest } = require('./atelier-source');
 const { syncAtelier } = require('./atelier-sync');
+const { reconcileAtelierSource } = require('./atelier-reconcile');
 
 const DEFAULT_CONFIG_PATH = path.resolve(__dirname, '..', 'config', 'atelier-refresh.json');
 const TASK_CLASS = 'maintenance';
@@ -137,13 +138,23 @@ function retryAt(now, attempt, retry) {
   return now + Math.min(retry.maxDelayMs, retry.baseDelayMs * (2 ** Math.max(0, attempt - 1)));
 }
 
+function retainDiagnostic(statePath, source, error) {
+  const dir = path.join(path.dirname(statePath), 'diagnostics');
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  if (fs.realpathSync(dir) !== canonicalPath(path.dirname(statePath)) + path.sep + 'diagnostics') throw new Error('unsafe_diagnostics_directory');
+  const file = path.join(dir, `${source.id.replace(/[^a-z0-9_.-]/gi, '_')}-${crypto.randomUUID()}.json`);
+  const detail = { code: String(error.code || ''), message: String(error.message || '').slice(0, 4000), stderr: String(error.stderr || '').slice(-16000), stdout: String(error.stdout || '').slice(-16000) };
+  fs.writeFileSync(file, `${JSON.stringify(detail, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
+  return file;
+}
+
 function runRefresh(config, options = {}) {
   validateConfig(config);
   const now = Number.isFinite(options.now) ? options.now : Date.now();
   const reportBase = { taskClass: TASK_CLASS, owner: config.owner, reportedAt: new Date(now).toISOString(), sourceCount: config.sources.length };
   const release = acquireLock(config.statePath);
   if (!release) return { ...reportBase, status: 'locked', sources: [] };
-  const dependencies = { readAtelierSource, syncAtelier, ...(options.dependencies || {}) };
+  const dependencies = { readAtelierSource, syncAtelier, reconcileAtelierSource, ...(options.dependencies || {}) };
   const retry = config.retry;
   const maxRefreshes = config.maxRefreshes ?? 5;
   let refreshes = 0;
@@ -153,6 +164,31 @@ function runRefresh(config, options = {}) {
     try { state = loadState(config.statePath); } catch { return { ...report, status: 'attention', reason: 'state_invalid' }; }
     for (const source of [...config.sources].sort((a, b) => a.id.localeCompare(b.id))) {
       const prior = state.sources[source.id] || { attempts: 0 };
+      if (source.reconcile?.enabled) {
+        try {
+          const planned = dependencies.reconcileAtelierSource(source, config, { ...dependencies, dryRun: true });
+          if (planned.status === 'planned' && refreshes >= maxRefreshes) {
+            report.sources.push(failureResult(source, 'deferred', 'refresh_budget_exhausted', prior.attempts));
+            if (report.status === 'complete') report.status = 'pending';
+            continue;
+          }
+          if (planned.status === 'planned') refreshes += 1;
+          const reconciled = planned.status === 'planned' ? dependencies.reconcileAtelierSource(source, config, dependencies) : planned;
+          if (reconciled.status === 'reconciled') {
+            const fingerprint = JSON.stringify(sourceManifest(source.path));
+            state.sources[source.id] = { status: 'fresh', attempts: 0, fingerprint, updatedAt: now };
+            report.sources.push({ id: source.id, status: 'reconciled', reason: 'canonical_projection_updated', attempts: 0 });
+            saveState(config.statePath, state);
+            continue;
+          }
+        } catch (error) {
+          const reason = /^reconcile_[a-z_]+$/.test(error.message) ? error.message : 'reconcile_failed';
+          state.sources[source.id] = { status: 'blocked', attempts: prior.attempts, reason, diagnosticPath: retainDiagnostic(config.statePath, source, error), updatedAt: now };
+          report.sources.push(failureResult(source, 'blocked', reason, prior.attempts));
+          report.status = 'attention';
+          continue;
+        }
+      }
       let fingerprint;
       try { fingerprint = JSON.stringify(sourceManifest(source.path)); } catch { fingerprint = null; }
       const changed = fingerprint !== null && prior.fingerprint && prior.fingerprint !== fingerprint;
@@ -184,7 +220,7 @@ function runRefresh(config, options = {}) {
         continue;
       }
       if (attempts >= retry.maxAttempts) {
-        state.sources[source.id] = { status: 'blocked', attempts, fingerprint, reason: 'retry_exhausted', updatedAt: now };
+        state.sources[source.id] = { status: 'blocked', attempts, fingerprint, reason: 'retry_exhausted', ...(prior.diagnosticPath ? { diagnosticPath: prior.diagnosticPath } : {}), updatedAt: now };
         report.sources.push(failureResult(source, 'blocked', 'retry_exhausted', attempts));
         report.status = 'attention';
         continue;
@@ -206,7 +242,7 @@ function runRefresh(config, options = {}) {
         const failedAttempts = attempts + 1;
         const failure = error.message === 'post_refresh_not_fresh' ? 'post_refresh_not_fresh' : 'refresh_failed';
         const failedNextRetryAt = retryAt(now, failedAttempts, retry);
-        state.sources[source.id] = { status: 'failed', attempts: failedAttempts, fingerprint, reason: failure, nextRetryAt: failedNextRetryAt, updatedAt: now };
+        state.sources[source.id] = { status: 'failed', attempts: failedAttempts, fingerprint, reason: failure, diagnosticPath: retainDiagnostic(config.statePath, source, error), nextRetryAt: failedNextRetryAt, updatedAt: now };
         report.sources.push(failureResult(source, 'failed', failure, failedAttempts, failedNextRetryAt));
         report.status = 'attention';
       }

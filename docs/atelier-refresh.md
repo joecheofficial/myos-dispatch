@@ -35,10 +35,67 @@ Exit codes: a blocked source (origin drift, invalid origin, retries exhausted) i
 
 The state file and sibling lock live outside source repositories. Failed sources retain attempt counts and deterministic exponential backoff. `maxRefreshes` bounds derived rebuilds per pass, defaulting to 5, while remaining sources are reported as deferred for the next scheduled pass. A lock held by another invocation returns `{"status":"locked"}` without touching any source. One source failure does not stop other sources. Reports contain source IDs and reason codes only, never document bodies, credentials, or exception text.
 
-The runner never edits canonical origins, source documents, Atelier audience metadata, or Git history. It only invokes the existing derived-state synchronizer. Run it with Node 24:
+Without explicit reconciliation enrollment, the runner never edits canonical origins, source documents, Atelier audience metadata, or Git history. It only invokes the existing derived-state synchronizer. Opted-in reconciliation is described below; canonical origins, audience policy and Git history remain unchanged. Run it with Node 24:
 
 ```bash
 PATH=/opt/homebrew/opt/node@24/bin:$PATH \
   /opt/homebrew/opt/node@24/bin/node \
   bin/myos-atelier-refresh.js --config /absolute/path/config/atelier-refresh.json
 ```
+
+## Approved original-file continuity
+
+Original-file updates remain blocked by default. An owner may explicitly enroll a projection in deterministic reconciliation. Enrollment is exact file authority, not permission to discover new files, alter audiences or accept an arbitrary new origin. The existing scheduled command picks up enrollment from its config on the next run. No extra service or model is required.
+
+The refresh config adds:
+
+```json
+{
+  "reconciliation": {
+    "backupRoot": "/absolute/private/verified-backups",
+    "registries": [
+      { "path": "/absolute/atelier-refresh.config.json", "collection": "sources" },
+      { "path": "/absolute/data-sources.json", "collection": "dataSources" },
+      { "path": "/absolute/atelier-portfolio.json", "collection": "sources" }
+    ]
+  }
+}
+```
+
+All three registry paths must be distinct regular canonical files. Each source entry must agree on path and overlapping origin fingerprints. Explicit aliases may retain narrower audience, include-path and origin-file scopes. Source arrays use exact IDs; the portfolio source object uses its exact key. Unrelated entries and fields survive updates.
+
+A source must be `readOnly: true`, with exact `includePaths` and a reviewed policy. When registry IDs differ, set `reconcile.registryEntries` to an object mapping each absolute registry path to an array of its exact source IDs or object keys, including all reviewed aliases. Without this mapping, only the refresh source ID is used. Alias fingerprints update only their existing origin-file keys.
+
+Example policy:
+
+```json
+{
+  "reconcile": {
+    "enabled": true,
+    "files": {
+      "README.md": {
+        "origin": "README.md",
+        "kgBlock": "kg:\n  id: example:readme\n  audience: private\n  relations: {}\n"
+      }
+    },
+    "projectionFiles": { "README.md": "sha256", "atelier.project.json": "sha256" }
+  }
+}
+```
+
+`projectionFiles` is the complete current `sourceManifest(projectionRoot)`, including Atelier configuration and boundary files. A rule maps one exact projection file to one enrolled origin file. Explicit mappings may include enrolled files outside retrieval `includePaths`, but never expand the retrieval scope. Every origin file must be mapped. The optional `kgBlock` is the existing reviewed projection's fixed metadata, injected into the canonical original's frontmatter. It is not inferred from text. A newly added canonical `kg` block is a hold requiring review. If explicitly reviewed at enrollment, a rule may pin its exact `originKgBlock` text, including the final newline. Only that unchanged canonical block may then be replaced by the fixed projection block; later metadata drift or duplicate top-level kg keys remain holds. Without `kgBlock`, bytes are copied verbatim; Markdown audience changes still fail closed. Explicit replacements such as projection `LICENSE.md` from origin `LICENSE` require reviewed enrollment. No missing original is silently dropped.
+
+Review without writes:
+
+```js
+const { reconcileAtelierSource } = require('./src/atelier-reconcile');
+const result = reconcileAtelierSource(source, config, { dryRun: true });
+```
+
+The result lists old/new projection hashes, next origin fingerprints and registry hashes. Missing projection repositories must first be restored separately from reviewed exact allowlists. The refresh runner never recreates a repository or modifies Git history/indexes.
+
+Reconciliation verifies paths, the complete tracked projection census, and absence of unexpected untracked document files. It preserves original projection bytes and all three configuration versions in verified owner-private backups. It copies only approved documents, rebuilds the graph, verifies its snapshot and adapter freshness, and confirms the originals and projection stayed stable. Only then does it compare-and-swap fingerprints across the three registries. Repeated runs are idempotent, and later original-file edits follow the same bounded process. `maxRefreshes` includes reconciliations.
+
+Build failures or races restore this operation's exact projection writes. Partial registry commits are restored only while their bytes still equal this operation's writes. A concurrent writer's version is never overwritten; backups retain the recovery material. Multiple file renames cannot form a filesystem-wide atomic transaction: readers observing the intermediate state fail closed under existing origin/snapshot checks. Unavailable or conflicting evidence stays unavailable rather than being blessed as fresh.
+
+Failure reports remain reason-only. Full bounded builder exception, stdout and stderr diagnostics are written mode 0600 under the state directory's `diagnostics` folder, and the state record retains `diagnosticPath`, including after retry exhaustion. This private diagnostic is for the owner and must not be sent to external Atelier consumers.
