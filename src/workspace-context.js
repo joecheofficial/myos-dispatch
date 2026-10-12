@@ -444,8 +444,15 @@ function inferIntentType(query) {
   return "exploratory";
 }
 
-function inferActionType(query) {
+function inferActionType(query, { userPrompt = false } = {}) {
   const text = normalizeText(query);
+  // Prompt constraints are not shell syntax. Keep command safety inference on
+  // its existing path, even if a command contains quoted review-only language.
+  if (userPrompt && (
+    /(?:^|[.!;,]\s*)(?:read[ -]only(?:\s+(?:advice|review|audit|analysis))?|(?:review|audit|analysis|advice|diagnosis)[ -]only)(?:\s*[:;,.!?]|$)/i.test(text)
+    || /\b(?:keep|remain|stay)\s+(?:this\s+|strictly\s+)?read[ -]only\b/i.test(text)
+    || /\b(?:(?:do not|don't|don’t|never)\s+(?:make\s+any\s+changes|change\s+anything|modify\s+anything|edit\s+anything)|no\s+(?:writes|changes|edits)\s*(?:[.!;,]|$))/i.test(text)
+  )) return "read";
   const hasWrite = WRITE_HINTS.test(text);
   const hasRead = READ_HINTS.test(text) || DIRECT_LOOKUP_HINTS.test(text);
 
@@ -702,7 +709,7 @@ function collectDispatchSignals(query, options = {}) {
     : ambiguousOwnership ? { lane: "worker_skill", reason: "multiple_explicit_owners", candidates: [] }
     : selectExecutionLane(query, options);
   const intentType = inferIntentType(query);
-  const actionType = inferActionType(query);
+  const actionType = inferActionType(query, { userPrompt: true });
   const isFollowUp = isShortFollowUp(query);
   const dataSources = selectDataSources(query, dataSourceOptions);
   const isRoutingComplaint = ROUTING_COMPLAINT_RE.test(normalizeText(query));
