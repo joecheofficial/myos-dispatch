@@ -283,3 +283,29 @@ test('refresh budget bounds one pass without stopping source inspection', t => {
   assert.equal(result.sources.filter(source => source.status === 'deferred').length, 1);
   assert.equal(result.status, 'pending');
 });
+
+
+test('opted-in canonical drift is reconciled before freshness inspection', t => {
+  const fx = fixture(t);
+  const source = fx.sources[0];
+  source.reconcile = { enabled: true };
+  fs.appendFileSync(path.join(source.sourceOrigin.path, 'README.md'), 'new original\n');
+  let reconciled = 0;
+  const result = runRefresh(config(fx), { dependencies: deps(fx, {
+    reconcileAtelierSource: s => { reconciled += 1; const bytes = fs.readFileSync(path.join(s.sourceOrigin.path, 'README.md')); fs.writeFileSync(path.join(s.path, 'README.md'), bytes); s.sourceOrigin.files['README.md'] = hash(bytes); syncAtelier(s.path, { build: fx.build }); return { status: 'reconciled' }; },
+  }) });
+  assert.equal(reconciled, 1);
+  assert.equal(result.sources.find(s => s.id === 'good').status, 'reconciled');
+});
+
+test('refresh failures retain a private diagnostic without exposing exception text in reports', t => {
+  const fx = fixture(t);
+  fs.appendFileSync(path.join(fx.sources[0].path, 'README.md'), 'changed\n');
+  const result = runRefresh(config(fx), { dependencies: deps(fx, { syncAtelier: () => { throw Object.assign(new Error('builder diagnosis'), { stderr: Buffer.from('document graph parse failed') }); } }) });
+  const state = JSON.parse(fs.readFileSync(fx.statePath));
+  const diagnostic = state.sources.good.diagnosticPath;
+  assert.ok(diagnostic);
+  assert.match(fs.readFileSync(diagnostic, 'utf8'), /document graph parse failed/);
+  assert.equal(fs.statSync(diagnostic).mode & 0o077, 0);
+  assert.equal(JSON.stringify(result).includes('document graph parse failed'), false);
+});
