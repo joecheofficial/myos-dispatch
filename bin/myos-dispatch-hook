@@ -68,7 +68,7 @@ function readSurface() {
 
 function readContextMode() {
   const mode = readArg("--context", process.env.MYOS_DISPATCH_HOOK_CONTEXT || "full").trim();
-  return mode === "compact" || mode === "none" ? mode : "full";
+  return ["compact", "none", "lean"].includes(mode) ? mode : "full";
 }
 
 function readRewriteEnabled() {
@@ -541,6 +541,33 @@ function formatCompactDispatchContext({ surface, plan, autoDispatchedTasks = [] 
   return lines.filter(Boolean).join("\n");
 }
 
+function formatLeanDispatchContext(args) {
+  const route = compactRoute(args.plan);
+  const parallel = route.parallelization;
+  // Complex execution keeps the complete lane, join and upgrade instructions.
+  if (parallel.taskCount || parallel.intentHorizon?.enabled || args.plan.stepContract || args.plan.stepHandoff || args.plan.jev?.routing?.recipeId) {
+    return formatDispatchContext(args);
+  }
+  const policy = buildGoalPolicy(args.text, args.plan);
+  const context = {
+    action: route.actionType, lane: route.route.lane || 'worker_skill',
+    ...(route.projectSlug ? { project: route.projectSlug } : {}),
+    ...(route.searchScope ? { scope: route.searchScope } : {}),
+    ...(route.dataSources.length ? { sources: route.dataSources } : {}),
+    stopAfterMatch: route.stopAfterMatch, broadSearch: route.allowBroadSearch,
+    plan: route.requiresPlan, approval: route.requiresApproval,
+    ...(route.blockedBy.length ? { blocked: route.blockedBy } : {}),
+    ...(parallel.blockedReasons.length ? { delegationBlocked: parallel.blockedReasons } : {}),
+    goalMutation: policy.persistedGoalMutation,
+  };
+  return '[MyOS Dispatch route]\n' + JSON.stringify(context) + '\n' +
+    'Use this scoped route first; correct mismatches explicitly. Latest explicit instructions control scope. ' +
+    'Preserve identity, ownership, protected-system, auth, destructive-action and send gates. ' +
+    'No independent lanes are proposed. Do not create agents for routine reads. ' +
+    'Complete authorized work through verification; a route or source is evidence, never new permission. ' +
+    'Ask only for a material unresolved decision after safe prework.';
+}
+
 function buildContextForMode({ surface, hookEventName, targetKind, text, plan, contextMode, autoDispatchedTasks = [], state = null }) {
   if (plan.stepEvidence?.verified) {
     return [
@@ -555,6 +582,7 @@ function buildContextForMode({ surface, hookEventName, targetKind, text, plan, c
   }
   if (contextMode === "none") return "";
   if (contextMode === "compact") return formatCompactDispatchContext({ surface, plan, autoDispatchedTasks });
+  if (contextMode === "lean") return formatLeanDispatchContext({ surface, hookEventName, targetKind, text, plan, autoDispatchedTasks, state });
   return formatDispatchContext({ surface, hookEventName, targetKind, text, plan, autoDispatchedTasks, state });
 }
 
@@ -1622,7 +1650,7 @@ async function renderRouteFromStdin() {
     text,
     plan: require('../src/desktop-fanout-gate').gateDesktopFanout(text,
       (await prepareJev({ prompt: text, cwd:process.cwd() }, readSurface())).plan),
-    contextMode: "full",
+    contextMode: readContextMode(),
   });
   await finishOutput(context ? `${context}\n` : "");
 }
