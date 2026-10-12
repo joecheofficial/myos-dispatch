@@ -92,6 +92,7 @@ function reconcileAtelierSource(source, config, options = {}) {
     const file = relativeFile(source.path, target);
     const old = regular(file);
     const bytes = projectBytes(original, rule, source.audiences || []);
+    if (/\.kg\.json$/i.test(target) && hash(bytes) !== hash(old)) fail('reconcile_metadata_changed');
     if (/\.(md|markdown|mdown)$/i.test(target) && audienceOf(bytes) !== audienceOf(old)) fail('reconcile_audience_changed');
     if (hash(old) !== hash(bytes)) writes.push({ file, old, bytes });
   }
