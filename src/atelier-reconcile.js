@@ -132,7 +132,9 @@ function reconcileAtelierSource(source, config, options = {}) {
   const projectedWrites = [];
   try {
   for (const write of writes) { atomic(write.file, write.bytes, hash(write.old)); projectedWrites.push(write); }
-  const projected = projectionManifest(source.path);
+  const projected = { ...before };
+  for (const write of writes) projected[path.relative(source.path, write.file)] = hash(write.bytes);
+  if (!same(projectionManifest(source.path), projected)) fail('reconcile_projection_race');
   originsStable();
   (options.syncAtelier || syncAtelier)(source.path);
   originsStable();
@@ -158,17 +160,28 @@ function reconcileAtelierSource(source, config, options = {}) {
     for (const registry of registries) if (hash(regular(registry.descriptor.path)) !== hash(registry.after)) fail('reconcile_registry_race');
   } catch (error) {
     // Restore only our exact writes, never a concurrent writer's version. Originals remain in backup.
-    for (const registry of committed.reverse()) if (hash(regular(registry.descriptor.path)) === hash(registry.after)) atomic(registry.descriptor.path, registry.bytes, hash(registry.after));
+    error.recovery = { backup, conflicts: [] };
+    for (const registry of committed.reverse()) {
+      try {
+        if (hash(regular(registry.descriptor.path)) === hash(registry.after)) atomic(registry.descriptor.path, registry.bytes, hash(registry.after));
+        else error.recovery.conflicts.push(registry.descriptor.path);
+      } catch { error.recovery.conflicts.push(registry.descriptor.path); }
+    }
     throw error;
   }
   source.sourceOrigin = nextSource.sourceOrigin;
   source.reconcile.projectionFiles = projected;
   return { status: 'reconciled', files: writes.length, backup };
   } catch (error) {
+    error.recovery ||= { backup, conflicts: [] };
     for (const write of projectedWrites.reverse()) {
-      try { if (hash(regular(write.file)) === hash(write.bytes)) atomic(write.file, write.old, hash(write.bytes)); } catch { /* Preserve concurrent versions; verified originals remain in backup. */ }
+      try { if (hash(regular(write.file)) === hash(write.bytes)) atomic(write.file, write.old, hash(write.bytes)); else error.recovery.conflicts.push(write.file); } catch { error.recovery.conflicts.push(write.file); }
     }
     throw error;
   }
 }
-module.exports = { reconcileAtelierSource };
+function originFingerprint(source) {
+  directory(source.sourceOrigin.path);
+  return JSON.stringify(Object.fromEntries(Object.keys(source.sourceOrigin.files).sort().map(relative => [relative, hash(regular(relativeFile(source.sourceOrigin.path, relative)))])));
+}
+module.exports = { reconcileAtelierSource, originFingerprint };

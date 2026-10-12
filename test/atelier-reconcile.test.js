@@ -153,3 +153,45 @@ test('reviewed original kg block may be replaced with fixed private projection m
   fs.writeFileSync(target, `---\n${originalKg.replace('team', 'public')}---\n# Updated\n`);
   assert.throws(() => reconcileAtelierSource(f.source, f.config, f.options), /origin_metadata_changed/);
 });
+
+test('unplanned metadata edits during projection writes are rejected, not blessed', t => {
+  const f = fixture(t); fs.appendFileSync(path.join(f.origin, 'README.md'), 'change\n');
+  const originalRename = fs.renameSync;
+  fs.renameSync = (from, to) => {
+    originalRename(from, to);
+    if (to === path.join(f.projection, 'README.md')) { const meta = path.join(f.projection, 'atelier.project.json'); const value = JSON.parse(fs.readFileSync(meta)); value.unplanned = true; fs.writeFileSync(meta, JSON.stringify(value)); }
+  };
+  try { assert.throws(() => reconcileAtelierSource(f.source, f.config, f.options), /reconcile_projection_race/); } finally { fs.renameSync = originalRename; }
+});
+
+test('registry rollback attempts every completed write after a conflicting registry disappears', t => {
+  const f = fixture(t); fs.appendFileSync(path.join(f.origin, 'README.md'), 'change\n');
+  const before = fs.readFileSync(f.registries[0].path);
+  const originalRename = fs.renameSync;
+  fs.renameSync = (from, to) => {
+    if (to === f.registries[2].path) { fs.unlinkSync(f.registries[1].path); throw new Error('third registry unavailable'); }
+    originalRename(from, to);
+  };
+  try { assert.throws(() => reconcileAtelierSource(f.source, f.config, f.options), error => { assert.match(error.message, /third registry unavailable/); assert.ok(error.recovery.conflicts.includes(f.registries[1].path)); assert.ok(fs.existsSync(path.join(error.recovery.backup, 'manifest.json'))); return true; }); } finally { fs.renameSync = originalRename; }
+  assert.deepEqual(fs.readFileSync(f.registries[0].path), before);
+});
+
+test('reconciliation backoff and exhaustion leave budget for other sources and reset on original edits', t => {
+  const f = fixture(t), second = fixture(t);
+  second.source.id = 'second';
+  const { runRefresh } = require('../src/atelier-refresh');
+  Object.assign(f.config, { schema: 'myos.atelier-refresh@v1', owner: 'test', taskClass: 'maintenance', statePath: path.join(f.root, 'state.json'), retry: { maxAttempts: 2, baseDelayMs: 100, maxDelayMs: 100 }, maxRefreshes: 1, sources: [f.source, second.source] });
+  fs.writeFileSync(f.registries[0].path, JSON.stringify(f.config));
+  fs.writeFileSync(f.registries[1].path, JSON.stringify({ dataSources: f.config.sources }));
+  fs.writeFileSync(f.registries[2].path, JSON.stringify({ sources: { example: f.source, second: second.source } }));
+  for (const origin of [f.origin, second.origin]) fs.appendFileSync(path.join(origin, 'README.md'), 'Changed\n');
+  let failing = true;
+  const dependencies = { syncAtelier: root => { if (root === f.projection && failing) throw new Error('builder failure'); return f.options.syncAtelier(root); } };
+  assert.equal(runRefresh(f.config, { dependencies, now: 1000 }).sources[0].status, 'failed');
+  const waiting = runRefresh(f.config, { dependencies, now: 1050 });
+  assert.deepEqual(waiting.sources.map(s => s.status), ['retry_scheduled', 'reconciled']);
+  assert.equal(runRefresh(f.config, { dependencies, now: 1100 }).sources[0].attempts, 2);
+  assert.equal(runRefresh(f.config, { dependencies, now: 1200 }).sources[0].reason, 'retry_exhausted');
+  fs.appendFileSync(path.join(f.origin, 'README.md'), 'Corrected\n'); failing = false;
+  assert.equal(runRefresh(f.config, { dependencies, now: 1250 }).sources[0].status, 'reconciled');
+});
