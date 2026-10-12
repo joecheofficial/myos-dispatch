@@ -195,3 +195,31 @@ test('reconciliation backoff and exhaustion leave budget for other sources and r
   fs.appendFileSync(path.join(f.origin, 'README.md'), 'Corrected\n'); failing = false;
   assert.equal(runRefresh(f.config, { dependencies, now: 1250 }).sources[0].status, 'reconciled');
 });
+
+test('changed binary sidecar metadata is held while unchanged sidecars permit document updates', t => {
+  const f = fixture(t);
+  const sidecar = 'document.pdf.kg.json';
+  const bytes = JSON.stringify({ kg: { id: 'document', audience: 'private' } });
+  for (const root of [f.origin, f.projection]) {
+    fs.writeFileSync(path.join(root, sidecar), bytes);
+    fs.writeFileSync(path.join(root, 'document.pdf'), 'old document bytes');
+  }
+  cp.execFileSync('git', ['-C', f.projection, 'add', sidecar, 'document.pdf']);
+  for (const file of [sidecar, 'document.pdf']) {
+    f.source.sourceOrigin.files[file] = hash(fs.readFileSync(path.join(f.origin, file)));
+    f.source.reconcile.files[file] = { origin: file };
+    f.source.includePaths.push(file);
+  }
+  f.source.audiences = ['private', 'team', 'public'];
+  f.source.reconcile.projectionFiles = sourceManifest(f.projection);
+  fs.writeFileSync(f.registries[0].path, JSON.stringify(f.config));
+  fs.writeFileSync(f.registries[1].path, JSON.stringify({ dataSources: [f.source] }));
+  fs.writeFileSync(f.registries[2].path, JSON.stringify({ sources: { example: f.source } }));
+  fs.writeFileSync(path.join(f.origin, 'document.pdf'), 'updated document bytes');
+  assert.equal(reconcileAtelierSource(f.source, f.config, f.options).status, 'reconciled');
+  const configs = f.registries.map(d => fs.readFileSync(d.path));
+  fs.writeFileSync(path.join(f.origin, sidecar), bytes.replace('private', 'public'));
+  assert.throws(() => reconcileAtelierSource(f.source, f.config, f.options), /reconcile_metadata_changed/);
+  assert.equal(fs.readFileSync(path.join(f.projection, sidecar), 'utf8'), bytes);
+  f.registries.forEach((d, i) => assert.deepEqual(fs.readFileSync(d.path), configs[i]));
+});
