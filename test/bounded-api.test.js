@@ -539,3 +539,48 @@ test('image policy expiry inside the final synchronous guard refuses transport',
     assert.equal(calls, 0);
   } finally { Date.now = now; }
 });
+test('absolute host deadline survives elapsed pre-entry time and clamps relative timeout', async () => {
+  const absolute = Date.now() + 500;
+  await new Promise(resolve => setTimeout(resolve, 12));
+  let descriptor, calls = 0;
+  global.fetch = async () => { calls++; return response(); };
+  await runtime.myosRunBoundedAPI({ ...options(), deadlineAt: absolute, authorizeLaunch: d => {
+    descriptor = d; assert.equal(d.deadline, absolute); return reserve(d);
+  } });
+  assert.equal(calls, 1);
+  assert.equal(descriptor.deadline, absolute);
+});
+test('expired or malformed absolute deadlines cannot reserve or launch', async () => {
+  let calls = 0, reservations = 0;
+  global.fetch = async () => { calls++; return response(); };
+  for (const deadlineAt of [Date.now() - 1, 0, null, '123', 1.5, Infinity, NaN]) {
+    await assert.rejects(runtime.myosRunBoundedAPI({ ...options(), deadlineAt, authorizeLaunch: d => {
+      reservations++; return reserve(d);
+    } }), e => ['BOUNDED_INVALID_DEADLINE', 'BOUNDED_DEADLINE'].includes(e.code) && e.attempts === 0);
+  }
+  assert.equal(calls, 0); assert.equal(reservations, 0);
+});
+test('absolute deadline cannot extend timeout and binds reservation identity', async () => {
+  const now = Date.now; const base = now(); let descriptor;
+  global.fetch = async () => response();
+  try {
+    Date.now = () => base;
+    await runtime.myosRunBoundedAPI({ ...options(), deadlineAt: base + 5000, authorizeLaunch: d => {
+      descriptor = d; assert.equal(d.deadline, base + 1000); return reserve(d);
+    } });
+    await runtime.myosRunBoundedAPI({ ...options(), deadlineAt: base + 6000, authorizeLaunch: d => {
+      assert.notEqual(d.requestDigest, descriptor.requestDigest); return reserve(d);
+    } });
+  } finally { Date.now = now; }
+});
+test('absolute deadline reached in reservation prevents final guard and fetch', async () => {
+  const now = Date.now; const base = now(); let calls = 0, guards = 0;
+  global.fetch = async () => { calls++; return response(); };
+  try {
+    Date.now = () => base;
+    await assert.rejects(runtime.myosRunBoundedAPI({ ...options(), deadlineAt: base + 100,
+      authorizeLaunch: d => { Date.now = () => base + 100; return reserve(d); },
+      beforeLaunch: () => { guards++; } }), { code: 'BOUNDED_DEADLINE', attempts: 0, reservationId: 'reservation-test' });
+    assert.equal(calls, 0); assert.equal(guards, 0);
+  } finally { Date.now = now; }
+});
