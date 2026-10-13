@@ -4,7 +4,7 @@ const ENDPOINT = 'https://api.openai.com/v1/chat/completions';
 const FIELDS = new Set(['taskClass', 'executionPolicy', 'authMode', 'complianceLane',
   'pinnedProvider', 'model', 'prompt', 'systemPrompt', 'responseMode', 'maxInputTokens',
   'maxOutputTokens', 'timeoutMs', 'budgetCapUsd', 'agentId', 'project', 'rootTaskId',
-  'stepId', 'accountBinding', 'authorizeLaunch']);
+  'stepId', 'accountBinding', 'authorizeLaunch', 'signal']);
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const fail = code => { const error = new Error(code); error.code = code; throw error; };
 const positive = (n, max) => Number.isSafeInteger(n) && n > 0 && n <= max;
@@ -14,7 +14,11 @@ function validateOptions(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) fail('BOUNDED_INVALID_OPTIONS');
   if (typeof raw.authorizeLaunch !== 'function') fail('BOUNDED_RESERVATION_REQUIRED');
   if (Object.keys(raw).some(key => !FIELDS.has(key))) fail('BOUNDED_UNSUPPORTED_OPTION');
-  const { authorizeLaunch, ...data } = raw;
+  const { authorizeLaunch, signal, ...data } = raw;
+  if (signal !== undefined) {
+    try { Object.getOwnPropertyDescriptor(AbortSignal.prototype, 'aborted').get.call(signal); }
+    catch { fail('BOUNDED_INVALID_SIGNAL'); }
+  }
   const options = JSON.parse(JSON.stringify(data));
   if (!isCanonicalTaskClass(options.taskClass) || options.executionPolicy !== 'internal_automation' ||
       options.authMode !== 'api' || options.complianceLane !== 'unattended_api' ||
@@ -36,7 +40,7 @@ function validateOptions(raw) {
   if (!binding || Object.keys(binding).some(k => !['accountId', 'evidenceRef', 'credentialSha256'].includes(k)) ||
       !label(binding.accountId) || !label(binding.evidenceRef) ||
       !/^[a-f0-9]{64}$/.test(binding.credentialSha256)) fail('BOUNDED_ACCOUNT_BINDING_REQUIRED');
-  return { options, authorizeLaunch };
+  return { options, authorizeLaunch, signal };
 }
 
 function prepare(options, prepareLaunch) {
@@ -76,16 +80,30 @@ async function readResponse(response, signal) {
 async function runBoundedAPI(raw, prepareLaunch) {
   let attempted = false;
   let reservationId = null;
+  let reservationPending = false;
   let timer;
   let usage = null;
+  let callerSignal;
+  let onCallerAbort;
+  let stopCode = null;
   const startedAt = Date.now();
   const controller = new AbortController();
   try {
-    const { options, authorizeLaunch } = validateOptions(raw);
+    const { options, authorizeLaunch, signal } = validateOptions(raw);
+    callerSignal = signal;
+    if (signal?.aborted) fail('BOUNDED_CANCELLED');
     const deadline = startedAt + options.timeoutMs;
     const expiration = new Promise((_, reject) => {
-      timer = setTimeout(() => { controller.abort(); reject(Object.assign(new Error('BOUNDED_DEADLINE'),
-        { code: 'BOUNDED_DEADLINE' })); }, Math.max(1, deadline - Date.now()));
+      const stop = code => {
+        if (stopCode) return;
+        stopCode = code;
+        reject(Object.assign(new Error(code), { code }));
+        controller.abort();
+      };
+      timer = setTimeout(() => stop('BOUNDED_DEADLINE'), Math.max(1, deadline - Date.now()));
+      onCallerAbort = () => stop('BOUNDED_CANCELLED');
+      signal?.addEventListener('abort', onCallerAbort, { once: true });
+      if (signal?.aborted) onCallerAbort();
     });
     // Every asynchronous operation shares this deadline, including reservation and body reads.
     const before = prepare(options, prepareLaunch);
@@ -95,13 +113,23 @@ async function runBoundedAPI(raw, prepareLaunch) {
       accountId: options.accountBinding.accountId, accountEvidenceRef: options.accountBinding.evidenceRef,
       maxInputTokens: options.maxInputTokens, maxOutputTokens: options.maxOutputTokens,
       maxCostUsd: before.maxCostUsd, requestDigest: before.requestDigest, deadline, maximumAttempts: 1 });
-    const reservation = await Promise.race([Promise.resolve().then(() => authorizeLaunch(descriptor)), expiration]);
+    const reservation = await Promise.race([Promise.resolve().then(() => {
+      if (stopCode) fail(stopCode);
+      reservationPending = true;
+      return authorizeLaunch(descriptor, { signal: controller.signal });
+    }).then(receipt => {
+      reservationPending = false;
+      if (label(receipt?.id)) reservationId = receipt.id;
+      return receipt;
+    }, error => { reservationPending = false; throw error; }), expiration]);
+    if (stopCode) fail(stopCode);
     if (!reservation || !label(reservation.id) || reservation.requestDigest !== before.requestDigest ||
         !Number.isFinite(reservation.maxCostUsd) || reservation.maxCostUsd < before.maxCostUsd ||
         !Number.isSafeInteger(reservation.expiresAt) || reservation.expiresAt < deadline) fail('BOUNDED_INVALID_RESERVATION');
     reservationId = reservation.id;
     const launch = prepare(options, prepareLaunch);
     if (launch.requestDigest !== before.requestDigest) fail('BOUNDED_LAUNCH_CHANGED');
+    if (stopCode) fail(stopCode);
     if (Date.now() >= deadline) fail('BOUNDED_DEADLINE');
     const messages = options.systemPrompt ? [{ role: 'system', content: options.systemPrompt }] : [];
     messages.push({ role: 'user', content: options.prompt });
@@ -113,8 +141,10 @@ async function runBoundedAPI(raw, prepareLaunch) {
         store: false, stream: false, n: 1, service_tier: 'default',
         response_format: options.responseMode === 'json' ? { type: 'json_object' } : undefined }),
     }), expiration]);
+    if (stopCode) fail(stopCode);
     if (!response.ok) { response.body?.cancel().catch(() => {}); fail('BOUNDED_PROVIDER_REJECTED'); }
     const data = await Promise.race([readResponse(response, controller.signal), expiration]);
+    if (stopCode) fail(stopCode);
     const native = data.usage;
     if (!Number.isSafeInteger(native?.prompt_tokens) || native.prompt_tokens < 0 ||
         !Number.isSafeInteger(native?.completion_tokens) || native.completion_tokens < 0) fail('BOUNDED_USAGE_MISSING');
@@ -148,9 +178,13 @@ async function runBoundedAPI(raw, prepareLaunch) {
       provenance: { endpoint: ENDPOINT, ...options.accountBinding,
         accountVerification: 'operator-attested-credential-binding' } };
   } catch (error) {
-    const code = /^BOUNDED_[A-Z_]+$/.test(error?.code) ? error.code : 'BOUNDED_EXECUTION_FAILED';
+    const code = stopCode || (/^BOUNDED_[A-Z_]+$/.test(error?.code) ? error.code : 'BOUNDED_EXECUTION_FAILED');
     throw Object.assign(new Error(code), { code, attemptStarted: attempted, attempts: attempted ? 1 : 0,
-      reservationId, usage, observedCostUsd: null });
-  } finally { clearTimeout(timer); controller.abort(); }
+      reservationId, reservationPending, usage, observedCostUsd: null });
+  } finally {
+    clearTimeout(timer);
+    if (onCallerAbort) callerSignal?.removeEventListener('abort', onCallerAbort);
+    controller.abort();
+  }
 }
 module.exports = { runBoundedAPI };
