@@ -415,3 +415,127 @@ test('signal and deadline are checked again after a synchronous guard', async ()
     } }), { code: 'BOUNDED_DEADLINE', attempts: 0, reservationId: 'reservation-test' });
   assert.equal(calls, 0);
 });
+const tinyPng = () => Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==', 'base64');
+const pinnedImage = () => { const bytes = tinyPng(); return { bytes, sha256: crypto.createHash('sha256').update(bytes).digest('hex') }; };
+test('one pinned PNG reaches the provider with a reserved image bound and safe receipts', async () => {
+  const image = pinnedImage();
+  let descriptor, calls = 0;
+  global.fetch = async (_url, init) => {
+    calls++;
+    const body = JSON.parse(init.body);
+    const content = body.messages.at(-1).content;
+    assert.equal(content[0].type, 'text');
+    assert.equal(content[1].type, 'image_url');
+    assert.equal(content[1].image_url.detail, 'high');
+    assert.equal(content[1].image_url.url, 'data:image/png;base64,' + image.bytes.toString('base64'));
+    return new Response(JSON.stringify({ ...await response().json(), model: 'gpt-5.4-mini',
+      usage: { prompt_tokens: 3100, completion_tokens: 10 } }));
+  };
+  const result = await runtime.myosRunBoundedAPI({ ...options(), model: 'gpt-5.4-mini',
+    maxInputTokens: 5000, image, authorizeLaunch: d => { descriptor = d; return reserve(d); } });
+  assert.equal(calls, 1);
+  assert.equal(descriptor.imageInputTokenUpperBound, 3001);
+  assert.equal(descriptor.image.sha256, image.sha256);
+  assert.equal(descriptor.image.byteLength, image.bytes.length);
+  assert.ok(descriptor.maxCostUsd >= (5000 * 0.75 + 128 * 4.5) / 1e6);
+  assert.deepEqual(result.image, descriptor.image);
+  assert.equal(JSON.stringify({ descriptor, result }).includes(image.bytes.toString('base64')), false);
+  assert.equal(JSON.stringify(descriptor).includes('"bytes"'), false);
+});
+const visionOptions = () => ({ ...options(), model: 'gpt-5.4-mini', image: pinnedImage(), maxInputTokens: 5000 });
+const visionResponse = async () => new Response(JSON.stringify({ ...await response().json(), model: 'gpt-5.4-mini' }));
+test('invalid image contracts refuse reservation and transport, including insufficient input and spend bounds', async () => {
+  let reservations = 0, calls = 0;
+  global.fetch = async () => { calls++; return visionResponse(); };
+  for (const patch of [{ model: 'gpt-5-mini' }, { image: { ...pinnedImage(), sha256: '0'.repeat(64) } },
+    { image: { url: 'https://example.com/image.png' } }, { image: [pinnedImage()] },
+    { maxInputTokens: 4000 }, { budgetCapUsd: 0.00001 }]) {
+    await assert.rejects(runtime.myosRunBoundedAPI({ ...visionOptions(), ...patch,
+      authorizeLaunch: d => { reservations++; return reserve(d); } }), e => e.attempts === 0);
+  }
+  assert.equal(reservations, 0); assert.equal(calls, 0);
+});
+test('PNG copy survives caller mutation and its digest is bound into the reservation', async () => {
+  const image = pinnedImage(), original = image.bytes.toString('base64');
+  let descriptor;
+  global.fetch = async (_url, init) => {
+    assert.equal(JSON.parse(init.body).messages.at(-1).content[1].image_url.url, 'data:image/png;base64,' + original);
+    return visionResponse();
+  };
+  await runtime.myosRunBoundedAPI({ ...visionOptions(), image, authorizeLaunch: d => {
+    descriptor = d; image.bytes.fill(0); return reserve(d);
+  } });
+  // Different valid PNG bytes must change the task's reservation identity.
+  const zlib = require('node:zlib');
+  const bytes = tinyPng();
+  // A second known valid PNG uses a different zlib compression level, same pixels and dimensions.
+  const compressed = zlib.deflateSync(Buffer.from([0, 255, 0, 0, 255]), { level: 0 });
+  const typeAndData = Buffer.concat([Buffer.from('IDAT'), compressed]);
+  let crc = 0xffffffff;
+  for (const byte of typeAndData) { crc ^= byte; for (let i = 0; i < 8; i++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0); }
+  const length = Buffer.alloc(4), checksum = Buffer.alloc(4);
+  length.writeUInt32BE(compressed.length); checksum.writeUInt32BE((crc ^ 0xffffffff) >>> 0);
+  const changed = Buffer.concat([bytes.subarray(0, 33), length, typeAndData, checksum, bytes.subarray(-12)]);
+  global.fetch = async () => visionResponse();
+  await runtime.myosRunBoundedAPI({ ...visionOptions(), image: { bytes: changed,
+    sha256: crypto.createHash('sha256').update(changed).digest('hex') }, authorizeLaunch: d => {
+    assert.notEqual(d.requestDigest, descriptor.requestDigest); return reserve(d);
+  } });
+});
+test('image guard rejection and cancellation retain safe metadata without launching', async () => {
+  let calls = 0;
+  global.fetch = async () => { calls++; return visionResponse(); };
+  for (const kind of ['throw', 'async', 'abort']) {
+    const controller = new AbortController();
+    await assert.rejects(runtime.myosRunBoundedAPI({ ...visionOptions(), signal: controller.signal,
+      authorizeLaunch: reserve, beforeLaunch: () => {
+        if (kind === 'throw') throw Error('private-details');
+        if (kind === 'async') return Promise.resolve();
+        controller.abort();
+      } }), e => {
+      assert.equal(e.attempts, 0); assert.equal(e.reservationId, 'reservation-test');
+      assert.equal(e.image.sha256, pinnedImage().sha256);
+      assert.equal(JSON.stringify(e).includes(tinyPng().toString('base64')), false);
+      return true;
+    });
+  }
+  assert.equal(calls, 0);
+});
+test('image request in-flight cancellation aborts the one transport and retains the reservation', async () => {
+  const controller = new AbortController(); let calls = 0;
+  global.fetch = (_url, init) => { calls++; controller.abort();
+    assert.equal(init.signal.aborted, true); return new Promise(() => {}); };
+  await assert.rejects(runtime.myosRunBoundedAPI({ ...visionOptions(), signal: controller.signal,
+    authorizeLaunch: reserve }), e => e.code === 'BOUNDED_CANCELLED' && e.attempts === 1 &&
+    e.reservationId === 'reservation-test' && e.image.sha256 === pinnedImage().sha256 && e.usage === null);
+  assert.equal(calls, 1);
+});
+test('expired image policy before or during reservation cannot launch', async () => {
+  const { POLICY } = require('../src/runtime/bounded-vision');
+  const now = Date.now; let calls = 0, reservations = 0;
+  global.fetch = async () => { calls++; return visionResponse(); };
+  try {
+    Date.now = () => POLICY.expiresAt;
+    await assert.rejects(runtime.myosRunBoundedAPI({ ...visionOptions(), authorizeLaunch: d => {
+      reservations++; return reserve(d);
+    } }), { code: 'BOUNDED_IMAGE_BOUND_UNAVAILABLE', attempts: 0 });
+    assert.equal(reservations, 0);
+    Date.now = now;
+    await assert.rejects(runtime.myosRunBoundedAPI({ ...visionOptions(), authorizeLaunch: d => {
+      reservations++; Date.now = () => POLICY.expiresAt; return reserve(d);
+    } }), { code: 'BOUNDED_IMAGE_BOUND_UNAVAILABLE', attempts: 0, reservationId: 'reservation-test' });
+    assert.equal(reservations, 1); assert.equal(calls, 0);
+  } finally { Date.now = now; }
+});
+test('image policy expiry inside the final synchronous guard refuses transport', async () => {
+  const { POLICY } = require('../src/runtime/bounded-vision');
+  const now = Date.now; let calls = 0;
+  global.fetch = async () => { calls++; return visionResponse(); };
+  try {
+    Date.now = () => POLICY.expiresAt - 1000;
+    await assert.rejects(runtime.myosRunBoundedAPI({ ...visionOptions(), timeoutMs: 2000,
+      authorizeLaunch: reserve, beforeLaunch: () => { Date.now = () => POLICY.expiresAt; } }),
+    { code: 'BOUNDED_IMAGE_BOUND_UNAVAILABLE', attempts: 0, reservationId: 'reservation-test' });
+    assert.equal(calls, 0);
+  } finally { Date.now = now; }
+});

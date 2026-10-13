@@ -1,10 +1,11 @@
 const crypto = require('node:crypto');
 const { isCanonicalTaskClass } = require('../myos-routing');
+const { prepareVision, assertVisionPolicy } = require('./bounded-vision');
 const ENDPOINT = 'https://api.openai.com/v1/chat/completions';
 const FIELDS = new Set(['taskClass', 'executionPolicy', 'authMode', 'complianceLane',
   'pinnedProvider', 'model', 'prompt', 'systemPrompt', 'responseMode', 'maxInputTokens',
   'maxOutputTokens', 'timeoutMs', 'budgetCapUsd', 'agentId', 'project', 'rootTaskId',
-  'stepId', 'accountBinding', 'authorizeLaunch', 'signal', 'beforeLaunch']);
+  'stepId', 'accountBinding', 'authorizeLaunch', 'signal', 'beforeLaunch', 'image']);
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const fail = code => { const error = new Error(code); error.code = code; throw error; };
 const positive = (n, max) => Number.isSafeInteger(n) && n > 0 && n <= max;
@@ -14,7 +15,7 @@ function validateOptions(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) fail('BOUNDED_INVALID_OPTIONS');
   if (typeof raw.authorizeLaunch !== 'function') fail('BOUNDED_RESERVATION_REQUIRED');
   if (Object.keys(raw).some(key => !FIELDS.has(key))) fail('BOUNDED_UNSUPPORTED_OPTION');
-  const { authorizeLaunch, signal, beforeLaunch, ...data } = raw;
+  const { authorizeLaunch, signal, beforeLaunch, image, ...data } = raw;
   if (beforeLaunch !== undefined && typeof beforeLaunch !== 'function') fail('BOUNDED_INVALID_BEFORE_LAUNCH');
   if (signal !== undefined) {
     try { Object.getOwnPropertyDescriptor(AbortSignal.prototype, 'aborted').get.call(signal); }
@@ -31,8 +32,11 @@ function validateOptions(raw) {
   if (!positive(options.maxInputTokens, 131072) || !positive(options.maxOutputTokens, 16384) ||
       !positive(options.timeoutMs, 120000) || !Number.isFinite(options.budgetCapUsd) ||
       options.budgetCapUsd <= 0) fail('BOUNDED_INVALID_LIMIT');
+  const vision = image === undefined ? null : prepareVision(image, options.model);
+  if (vision) options.image = vision.receipt;
   // UTF-8 bytes upper-bound text BPE tokens. Reserve generous framing for two plain messages.
-  const inputUpperBound = Buffer.byteLength(options.prompt) + Buffer.byteLength(options.systemPrompt || '') + 1024;
+  const inputUpperBound = Buffer.byteLength(options.prompt) + Buffer.byteLength(options.systemPrompt || '') + 1024 +
+    (vision ? assertVisionPolicy(options.model).imageInputTokenUpperBound : 0);
   if (inputUpperBound > options.maxInputTokens) fail('BOUNDED_INPUT_LIMIT');
   for (const key of ['agentId', 'project', 'rootTaskId', 'stepId']) {
     if (!label(options[key])) fail('BOUNDED_INVALID_IDENTITY');
@@ -41,7 +45,7 @@ function validateOptions(raw) {
   if (!binding || Object.keys(binding).some(k => !['accountId', 'evidenceRef', 'credentialSha256'].includes(k)) ||
       !label(binding.accountId) || !label(binding.evidenceRef) ||
       !/^[a-f0-9]{64}$/.test(binding.credentialSha256)) fail('BOUNDED_ACCOUNT_BINDING_REQUIRED');
-  return { options, authorizeLaunch, signal, beforeLaunch };
+  return { options, authorizeLaunch, signal, beforeLaunch, vision };
 }
 
 function prepare(options, prepareLaunch) {
@@ -51,10 +55,12 @@ function prepare(options, prepareLaunch) {
   const pricing = launch.pricing;
   if (!pricing || !Number.isFinite(pricing.input_usd) || pricing.input_usd <= 0 ||
       !Number.isFinite(pricing.output_usd) || pricing.output_usd <= 0) fail('BOUNDED_UNKNOWN_PRICE');
+  if (options.image) assertVisionPolicy(options.model, pricing);
   const maxCostUsd = Math.ceil(options.maxInputTokens * pricing.input_usd +
     options.maxOutputTokens * pricing.output_usd) / 1e6;
   if (maxCostUsd > options.budgetCapUsd) fail('BOUNDED_BUDGET_TOO_SMALL');
-  const requestDigest = hash(JSON.stringify({ options, policy: launch.policyIdentity, pricing }));
+  const requestDigest = hash(JSON.stringify({ options, policy: launch.policyIdentity, pricing,
+    ...(options.image ? { visionPolicy: assertVisionPolicy(options.model) } : {}) }));
   return { ...launch, maxCostUsd, requestDigest };
 }
 
@@ -87,10 +93,12 @@ async function runBoundedAPI(raw, prepareLaunch) {
   let callerSignal;
   let onCallerAbort;
   let stopCode = null;
+  let imageReceipt = null;
   const startedAt = Date.now();
   const controller = new AbortController();
   try {
-    const { options, authorizeLaunch, signal, beforeLaunch } = validateOptions(raw);
+    const { options, authorizeLaunch, signal, beforeLaunch, vision } = validateOptions(raw);
+    imageReceipt = vision?.receipt || null;
     callerSignal = signal;
     if (signal?.aborted) fail('BOUNDED_CANCELLED');
     const deadline = startedAt + options.timeoutMs;
@@ -113,7 +121,9 @@ async function runBoundedAPI(raw, prepareLaunch) {
       billingMode: 'api', credentialSha256: options.accountBinding.credentialSha256,
       accountId: options.accountBinding.accountId, accountEvidenceRef: options.accountBinding.evidenceRef,
       maxInputTokens: options.maxInputTokens, maxOutputTokens: options.maxOutputTokens,
-      maxCostUsd: before.maxCostUsd, requestDigest: before.requestDigest, deadline, maximumAttempts: 1 });
+      maxCostUsd: before.maxCostUsd, requestDigest: before.requestDigest, deadline, maximumAttempts: 1,
+      ...(vision ? { image: imageReceipt, imageInputTokenUpperBound: assertVisionPolicy(options.model).imageInputTokenUpperBound,
+        visionPolicy: assertVisionPolicy(options.model).id } : {}) });
     const reservation = await Promise.race([Promise.resolve().then(() => {
       if (stopCode) fail(stopCode);
       reservationPending = true;
@@ -133,7 +143,10 @@ async function runBoundedAPI(raw, prepareLaunch) {
     if (stopCode) fail(stopCode);
     if (Date.now() >= deadline) fail('BOUNDED_DEADLINE');
     const messages = options.systemPrompt ? [{ role: 'system', content: options.systemPrompt }] : [];
-    messages.push({ role: 'user', content: options.prompt });
+    messages.push({ role: 'user', content: vision ? [
+      { type: 'text', text: options.prompt },
+      { type: 'image_url', image_url: { url: 'data:image/png;base64,' + vision.bytes.toString('base64'), detail: 'high' } },
+    ] : options.prompt });
     const request = {
       method: 'POST', redirect: 'error', signal: controller.signal,
       headers: { Authorization: `Bearer ${launch.apiKey}`, 'Content-Type': 'application/json' },
@@ -157,6 +170,7 @@ async function runBoundedAPI(raw, prepareLaunch) {
     }
     if (stopCode) fail(stopCode);
     if (Date.now() >= deadline) fail('BOUNDED_DEADLINE');
+    if (vision) assertVisionPolicy(options.model, launch.pricing);
     attempted = true;
     const response = await Promise.race([fetch(ENDPOINT, request), expiration]);
     if (stopCode) fail(stopCode);
@@ -186,6 +200,7 @@ async function runBoundedAPI(raw, prepareLaunch) {
       if (!json || typeof json !== 'object' || Array.isArray(json)) fail('BOUNDED_INVALID_JSON');
     }
     return { schemaVersion: 1, text, ...(json === undefined ? {} : { json }),
+      ...(vision ? { image: imageReceipt } : {}),
       provider: 'openai', model: options.model, resolvedModel: data.model, billingMode: 'api',
       taskClass: options.taskClass, rootTaskId: options.rootTaskId, stepId: options.stepId,
       attempts: 1, fallbackIndex: 0, reservationId, requestDigest: launch.requestDigest,
@@ -198,7 +213,8 @@ async function runBoundedAPI(raw, prepareLaunch) {
   } catch (error) {
     const code = stopCode || (/^BOUNDED_[A-Z_]+$/.test(error?.code) ? error.code : 'BOUNDED_EXECUTION_FAILED');
     throw Object.assign(new Error(code), { code, attemptStarted: attempted, attempts: attempted ? 1 : 0,
-      reservationId, reservationPending, usage, observedCostUsd: null });
+      reservationId, reservationPending, usage, observedCostUsd: null,
+      ...(imageReceipt ? { image: imageReceipt } : {}) });
   } finally {
     clearTimeout(timer);
     if (onCallerAbort) callerSignal?.removeEventListener('abort', onCallerAbort);
