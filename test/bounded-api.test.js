@@ -313,3 +313,105 @@ test('cancelled outstanding reservation explicitly remains pending for journal r
       return new Promise(() => {});
     } }), { code: 'BOUNDED_CANCELLED', attempts: 0, reservationId: null, reservationPending: true });
 });
+test('synchronous final guard observes cancellation after reservation and prevents launch', async () => {
+  let cancelled = false, calls = 0, guardCalls = 0;
+  global.fetch = async () => { calls++; return response(); };
+  await assert.rejects(runtime.myosRunBoundedAPI({ ...options(), authorizeLaunch: async d => {
+    const receipt = await reserve(d);
+    cancelled = true; // Durable task state changed after its reservation was accepted.
+    return receipt;
+  }, beforeLaunch: (descriptor, context) => {
+    guardCalls++;
+    assert.equal(descriptor.stepId, 'step-test');
+    assert.equal(context.reservationId, 'reservation-test');
+    if (cancelled) throw new Error('private task cancellation detail');
+  } }), e => {
+    assert.equal(e.code, 'BOUNDED_BEFORE_LAUNCH_REJECTED');
+    assert.equal(e.attempts, 0);
+    assert.equal(e.reservationId, 'reservation-test');
+    assert.equal(e.reservationPending, false);
+    assert.equal(e.usage, null);
+    assert.equal(e.message.includes('private'), false);
+    return true;
+  });
+  assert.equal(guardCalls, 1);
+  assert.equal(calls, 0);
+});
+test('Promise-returning final guard is rejected without awaiting or launching', async () => {
+  let calls = 0;
+  global.fetch = async () => { calls++; return response(); };
+  await assert.rejects(runtime.myosRunBoundedAPI({ ...options(), authorizeLaunch: reserve,
+    beforeLaunch: () => Promise.resolve(true) }), {
+    code: 'BOUNDED_BEFORE_LAUNCH_ASYNC', attempts: 0, reservationId: 'reservation-test',
+  });
+  assert.equal(calls, 0);
+});
+test('passing final guard is synchronous with launch and sees only frozen safe context', async () => {
+  const order = [];
+  let guardCalls = 0;
+  global.fetch = async () => { order.push('fetch'); return response(); };
+  const result = await runtime.myosRunBoundedAPI({ ...options(), authorizeLaunch: async d => {
+    order.push('reserve'); return reserve(d);
+  }, beforeLaunch: (descriptor, context) => {
+    guardCalls++;
+    order.push('guard');
+    assert.equal(Object.isFrozen(descriptor), true);
+    assert.equal(Object.isFrozen(context), true);
+    assert.equal(context.reservationId, 'reservation-test');
+    assert.equal(context.signal.aborted, false);
+    assert.equal(JSON.stringify(descriptor).includes(options().prompt), false);
+    queueMicrotask(() => order.push('microtask'));
+  } });
+  assert.equal(result.json.value, 42);
+  assert.equal(guardCalls, 1);
+  assert.deepEqual(order, ['reserve', 'guard', 'fetch', 'microtask']);
+});
+
+test('rejected async, pending and thenable guards cannot launch or leak errors', async () => {
+  for (const guard of [
+    () => Promise.reject(new Error('private guard error')),
+    () => new Promise(() => {}),
+    () => ({ then(_resolve, reject) { reject(new Error('private thenable error')); } }),
+  ]) {
+    let calls = 0;
+    global.fetch = async () => { calls++; return response(); };
+    await assert.rejects(runtime.myosRunBoundedAPI({ ...options(), authorizeLaunch: reserve,
+      beforeLaunch: guard }), { code: 'BOUNDED_BEFORE_LAUNCH_ASYNC', attempts: 0,
+      reservationId: 'reservation-test', reservationPending: false });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(calls, 0);
+  }
+});
+
+test('guard remains behind final policy validation and rejects false or invalid callback', async () => {
+  let calls = 0, guardCalls = 0;
+  global.fetch = async () => { calls++; return response(); };
+  await assert.rejects(runtime.myosRunBoundedAPI({ ...options(), authorizeLaunch: reserve,
+    beforeLaunch: false }), { code: 'BOUNDED_INVALID_BEFORE_LAUNCH', attempts: 0, reservationId: null });
+  await assert.rejects(runtime.myosRunBoundedAPI({ ...options(), authorizeLaunch: reserve,
+    beforeLaunch: () => false }), { code: 'BOUNDED_BEFORE_LAUNCH_REJECTED', attempts: 0,
+    reservationId: 'reservation-test' });
+  try {
+    await assert.rejects(runtime.myosRunBoundedAPI({ ...options(), authorizeLaunch: async d => {
+      fs.writeFileSync(process.env.MYOS_SPEND_POLICY_PATH, '{"killSwitch":true}');
+      return reserve(d);
+    }, beforeLaunch: () => { guardCalls++; } }), { code: 'BOUNDED_LAUNCH_POLICY_REJECTED' });
+  } finally { fs.writeFileSync(process.env.MYOS_SPEND_POLICY_PATH, '{}'); }
+  assert.equal(guardCalls, 0);
+  assert.equal(calls, 0);
+});
+
+test('signal and deadline are checked again after a synchronous guard', async () => {
+  let calls = 0;
+  global.fetch = async () => { calls++; return response(); };
+  const controller = new AbortController();
+  await assert.rejects(runtime.myosRunBoundedAPI({ ...options(), signal: controller.signal,
+    authorizeLaunch: reserve, beforeLaunch: () => controller.abort('private') }),
+  { code: 'BOUNDED_CANCELLED', attempts: 0, reservationId: 'reservation-test' });
+  await assert.rejects(runtime.myosRunBoundedAPI({ ...options(), timeoutMs: 25,
+    authorizeLaunch: reserve, beforeLaunch: () => {
+      const until = Date.now() + 30;
+      while (Date.now() < until) { /* Simulate synchronous local guard exceeding remaining deadline. */ }
+    } }), { code: 'BOUNDED_DEADLINE', attempts: 0, reservationId: 'reservation-test' });
+  assert.equal(calls, 0);
+});
