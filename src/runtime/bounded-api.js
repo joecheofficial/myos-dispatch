@@ -4,7 +4,7 @@ const ENDPOINT = 'https://api.openai.com/v1/chat/completions';
 const FIELDS = new Set(['taskClass', 'executionPolicy', 'authMode', 'complianceLane',
   'pinnedProvider', 'model', 'prompt', 'systemPrompt', 'responseMode', 'maxInputTokens',
   'maxOutputTokens', 'timeoutMs', 'budgetCapUsd', 'agentId', 'project', 'rootTaskId',
-  'stepId', 'accountBinding', 'authorizeLaunch', 'signal']);
+  'stepId', 'accountBinding', 'authorizeLaunch', 'signal', 'beforeLaunch']);
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const fail = code => { const error = new Error(code); error.code = code; throw error; };
 const positive = (n, max) => Number.isSafeInteger(n) && n > 0 && n <= max;
@@ -14,7 +14,8 @@ function validateOptions(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) fail('BOUNDED_INVALID_OPTIONS');
   if (typeof raw.authorizeLaunch !== 'function') fail('BOUNDED_RESERVATION_REQUIRED');
   if (Object.keys(raw).some(key => !FIELDS.has(key))) fail('BOUNDED_UNSUPPORTED_OPTION');
-  const { authorizeLaunch, signal, ...data } = raw;
+  const { authorizeLaunch, signal, beforeLaunch, ...data } = raw;
+  if (beforeLaunch !== undefined && typeof beforeLaunch !== 'function') fail('BOUNDED_INVALID_BEFORE_LAUNCH');
   if (signal !== undefined) {
     try { Object.getOwnPropertyDescriptor(AbortSignal.prototype, 'aborted').get.call(signal); }
     catch { fail('BOUNDED_INVALID_SIGNAL'); }
@@ -40,7 +41,7 @@ function validateOptions(raw) {
   if (!binding || Object.keys(binding).some(k => !['accountId', 'evidenceRef', 'credentialSha256'].includes(k)) ||
       !label(binding.accountId) || !label(binding.evidenceRef) ||
       !/^[a-f0-9]{64}$/.test(binding.credentialSha256)) fail('BOUNDED_ACCOUNT_BINDING_REQUIRED');
-  return { options, authorizeLaunch, signal };
+  return { options, authorizeLaunch, signal, beforeLaunch };
 }
 
 function prepare(options, prepareLaunch) {
@@ -89,7 +90,7 @@ async function runBoundedAPI(raw, prepareLaunch) {
   const startedAt = Date.now();
   const controller = new AbortController();
   try {
-    const { options, authorizeLaunch, signal } = validateOptions(raw);
+    const { options, authorizeLaunch, signal, beforeLaunch } = validateOptions(raw);
     callerSignal = signal;
     if (signal?.aborted) fail('BOUNDED_CANCELLED');
     const deadline = startedAt + options.timeoutMs;
@@ -133,14 +134,31 @@ async function runBoundedAPI(raw, prepareLaunch) {
     if (Date.now() >= deadline) fail('BOUNDED_DEADLINE');
     const messages = options.systemPrompt ? [{ role: 'system', content: options.systemPrompt }] : [];
     messages.push({ role: 'user', content: options.prompt });
-    attempted = true;
-    const response = await Promise.race([fetch(ENDPOINT, {
+    const request = {
       method: 'POST', redirect: 'error', signal: controller.signal,
       headers: { Authorization: `Bearer ${launch.apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: options.model, messages, max_completion_tokens: options.maxOutputTokens,
         store: false, stream: false, n: 1, service_tier: 'default',
         response_format: options.responseMode === 'json' ? { type: 'json_object' } : undefined }),
-    }), expiration]);
+    };
+    if (beforeLaunch) {
+      let result, asynchronous;
+      try {
+        result = beforeLaunch(descriptor, Object.freeze({ signal: controller.signal, reservationId }));
+        asynchronous = result != null && typeof result.then === 'function';
+      }
+      catch { fail('BOUNDED_BEFORE_LAUNCH_REJECTED'); }
+      if (asynchronous) {
+        // Consume a rejected mistaken async guard, but never await it or launch afterward.
+        Promise.resolve(result).catch(() => {});
+        fail('BOUNDED_BEFORE_LAUNCH_ASYNC');
+      }
+      if (result === false) fail('BOUNDED_BEFORE_LAUNCH_REJECTED');
+    }
+    if (stopCode) fail(stopCode);
+    if (Date.now() >= deadline) fail('BOUNDED_DEADLINE');
+    attempted = true;
+    const response = await Promise.race([fetch(ENDPOINT, request), expiration]);
     if (stopCode) fail(stopCode);
     if (!response.ok) { response.body?.cancel().catch(() => {}); fail('BOUNDED_PROVIDER_REJECTED'); }
     const data = await Promise.race([readResponse(response, controller.signal), expiration]);

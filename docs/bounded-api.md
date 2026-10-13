@@ -10,6 +10,8 @@ Provide an opt-in public Dispatch invocation for unattended, tool-free text or J
 
 Caller cancellation is an optional native `AbortSignal`, validated separately from serializable request data. The first caller abort or absolute deadline wins. Cancellation must stop before reservation/launch where possible, abort an in-flight request and response reader, retain conservative attempt/reservation attribution, and remove listeners on completion. It cannot reverse provider spending or a journal transaction already in progress.
 
+An optional synchronous `beforeLaunch` callback closes the gap between reservation and provider launch. It rechecks the caller's durable task state after final Dispatch revalidation and request preparation. Throws and asynchronous return values must refuse the request with zero attempts and retain reservation attribution. No asynchronous operation is inserted after this guard and before fetch.
+
 ## Acceptance criteria
 
 - Explicit canonical task class, exact provider/model, API authentication and one candidate.
@@ -50,6 +52,9 @@ const result = await myosRunBoundedAPI({
   accountBinding: trustedConfiguration.openaiAccountBinding,
   signal: runnerAbortController.signal, // optional native AbortSignal, never serialized
   authorizeLaunch: (descriptor, { signal }) => runtimeRunner.reserveAtomic(descriptor, { signal }),
+  beforeLaunch: (descriptor, { signal, reservationId }) => {
+    runtimeRunner.assertTaskMayLaunchNow(descriptor.rootTaskId, descriptor.stepId, reservationId, signal);
+  }, // optional synchronous local guard; throw or return false to refuse
 });
 ```
 
@@ -68,3 +73,11 @@ OpenAI contract reference: https://developers.openai.com/api/reference/resources
 An already-aborted `signal` rejects with `BOUNDED_CANCELLED` before reservation or transport. The first caller abort or internal wall deadline wins; deadlines retain `BOUNDED_DEADLINE`. The reservation callback receives an optional second argument `{ signal }` containing the combined internal cancellation signal. Existing one-argument callbacks continue to work. Check that signal before committing an atomic reservation, and reconcile transactions that race with cancellation.
 
 An abort cannot undo a reservation or retract a request already sent to the provider. Cancelled in-flight calls retain `attemptStarted: true`, `attempts: 1`, the known reservation ID and unknown usage/cost as null. `reservationPending: true` on an error means the reservation callback is still outstanding, even if `attempts` is zero and its ID is not yet known. RuntimeRunner must reconcile that task/step in its journal; a late callback resolution cannot start a provider request. Caller abort reasons are never returned or forwarded to the provider. Abort listeners and the wall timer are removed when the invocation ends.
+
+### Final synchronous launch guard
+
+`beforeLaunch(descriptor, { signal, reservationId })` runs once, after successful reservation and final Dispatch route/spend revalidation, immediately before marking the attempt and calling fetch. The descriptor and context are frozen and contain no prompt, key or generated output. The callback is excluded from request serialization and hashes. Existing clients may omit it.
+
+The caller must use a fast synchronous read of current durable task/lease/pause state, throwing or returning `false` if launch is no longer permitted. Throws are redacted as `BOUNDED_BEFORE_LAUNCH_REJECTED`. A returned Promise or thenable is rejected as `BOUNDED_BEFORE_LAUNCH_ASYNC`; Dispatch does not await it or launch later. Mistaken asynchronous callbacks may still perform their own side effects, so they must not be used for authorization, provider calls or new reservations. Signal and deadline are checked again after the guard. Failure preserves the known reservation ID with zero attempts for journal reconciliation.
+
+There is no JavaScript asynchronous gap between the final guard and fetch. This cannot make an independent database transaction and an external provider request atomic. RuntimeRunner retains responsibility for leases and concurrent writers, as well as in-flight cancellation once a request has begun.
