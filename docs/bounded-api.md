@@ -8,6 +8,8 @@ Provide an opt-in public Dispatch invocation for unattended, tool-free text or J
 
 `myosRunBoundedAPI` in `src/runtime/llm-call.js` delegates to `src/runtime/bounded-api.js`. It reuses existing route, catalog, credential and spend-policy resolution without altering legacy callers. The initial supported transport is OpenAI Chat Completions. A trusted caller supplies an account-to-credential binding and an atomic reservation callback. RuntimeRunner owns the shared daily budget, reconciliation and retry policy. Adding another independent budget journal would break cross-agent accounting.
 
+Caller cancellation is an optional native `AbortSignal`, validated separately from serializable request data. The first caller abort or absolute deadline wins. Cancellation must stop before reservation/launch where possible, abort an in-flight request and response reader, retain conservative attempt/reservation attribution, and remove listeners on completion. It cannot reverse provider spending or a journal transaction already in progress.
+
 ## Acceptance criteria
 
 - Explicit canonical task class, exact provider/model, API authentication and one candidate.
@@ -46,7 +48,8 @@ const result = await myosRunBoundedAPI({
   agentId: 'autonomizer', project: 'autonomizer',
   rootTaskId: task.id, stepId: step.id,
   accountBinding: trustedConfiguration.openaiAccountBinding,
-  authorizeLaunch: descriptor => runtimeRunner.reserveAtomic(descriptor),
+  signal: runnerAbortController.signal, // optional native AbortSignal, never serialized
+  authorizeLaunch: (descriptor, { signal }) => runtimeRunner.reserveAtomic(descriptor, { signal }),
 });
 ```
 
@@ -59,3 +62,9 @@ The input bound is UTF-8 byte length plus 1,024 framing tokens for at most two p
 Return values include accepted `text`/`json`, requested and resolved models, response ID, native usage (cached input is a subset), estimated cost, reservation ID, task/step identity and provenance. Dispatch does not log prompts, output or raw provider errors in this path. RuntimeRunner owns durable usage recording and must avoid logging result content. Failures expose only a stable `BOUNDED_*` code, `attemptStarted`, attempt count, reservation ID and known usage. Unknown usage/cost stays null. This path does not make legacy usage-ledger caps into an atomic shared budget.
 
 OpenAI contract reference: https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create
+
+### Cancellation
+
+An already-aborted `signal` rejects with `BOUNDED_CANCELLED` before reservation or transport. The first caller abort or internal wall deadline wins; deadlines retain `BOUNDED_DEADLINE`. The reservation callback receives an optional second argument `{ signal }` containing the combined internal cancellation signal. Existing one-argument callbacks continue to work. Check that signal before committing an atomic reservation, and reconcile transactions that race with cancellation.
+
+An abort cannot undo a reservation or retract a request already sent to the provider. Cancelled in-flight calls retain `attemptStarted: true`, `attempts: 1`, the known reservation ID and unknown usage/cost as null. `reservationPending: true` on an error means the reservation callback is still outstanding, even if `attempts` is zero and its ID is not yet known. RuntimeRunner must reconcile that task/step in its journal; a late callback resolution cannot start a provider request. Caller abort reasons are never returned or forwarded to the provider. Abort listeners and the wall timer are removed when the invocation ends.

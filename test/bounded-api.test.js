@@ -200,3 +200,116 @@ test('HTTP request ID and completion response ID remain distinct', async () => {
   assert.equal(result.providerRequestId, 'request-test');
   assert.equal(result.providerResponseId, 'response-test');
 });
+test('pre-aborted caller signal cancels before reservation without exposing its reason', async () => {
+  const controller = new AbortController();
+  controller.abort(new Error('private cancellation reason'));
+  let reservations = 0, calls = 0;
+  global.fetch = async () => { calls++; return response(); };
+  await assert.rejects(runtime.myosRunBoundedAPI({ ...options(), signal: controller.signal,
+    authorizeLaunch: async d => { reservations++; return reserve(d); } }), e => {
+    assert.equal(e.code, 'BOUNDED_CANCELLED');
+    assert.equal(e.attempts, 0);
+    assert.equal(e.reservationId, null);
+    assert.equal(e.message.includes('private'), false);
+    return true;
+  });
+  assert.equal(reservations, 0);
+  assert.equal(calls, 0);
+});
+test('caller cancellation aborts in-flight transport and retains uncertain reservation', async () => {
+  const controller = new AbortController();
+  let calls = 0, transportSignal;
+  global.fetch = async (_url, init) => {
+    calls++; transportSignal = init.signal;
+    queueMicrotask(() => controller.abort('private reason'));
+    return new Promise(() => {});
+  };
+  const started = Date.now();
+  await assert.rejects(runtime.myosRunBoundedAPI({ ...options(), signal: controller.signal,
+    authorizeLaunch: reserve }), e => {
+    assert.equal(e.code, 'BOUNDED_CANCELLED');
+    assert.equal(e.attempts, 1);
+    assert.equal(e.reservationId, 'reservation-test');
+    assert.equal(e.usage, null);
+    assert.equal(e.observedCostUsd, null);
+    return true;
+  });
+  assert.ok(Date.now() - started < 500);
+  assert.equal(calls, 1);
+  assert.equal(transportSignal.aborted, true);
+});
+test('caller signal is validated, not cloned, and removed after successful execution', async () => {
+  const { getEventListeners } = require('node:events');
+  for (const signal of [null, {}, { aborted: false, addEventListener() {} }]) {
+    await assert.rejects(runtime.myosRunBoundedAPI({ ...options(), signal, authorizeLaunch: reserve }),
+      { code: 'BOUNDED_INVALID_SIGNAL', attempts: 0 });
+  }
+  const controller = new AbortController();
+  controller.signal.toJSON = () => { throw new Error('signal must not serialize'); };
+  global.fetch = async () => response();
+  const result = await runtime.myosRunBoundedAPI({ ...options(), signal: controller.signal,
+    authorizeLaunch: reserve });
+  assert.equal(result.json.value, 42);
+  assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
+});
+
+test('cancellation before queued reservation prevents both reservation and fetch', async () => {
+  const controller = new AbortController();
+  let reservations = 0, calls = 0;
+  global.fetch = async () => { calls++; return response(); };
+  const pending = runtime.myosRunBoundedAPI({ ...options(), signal: controller.signal,
+    authorizeLaunch: async d => { reservations++; return reserve(d); } });
+  controller.abort();
+  await assert.rejects(pending, { code: 'BOUNDED_CANCELLED', attempts: 0 });
+  assert.equal(reservations, 0);
+  assert.equal(calls, 0);
+});
+
+test('cancellation during reservation aborts its cooperative signal and prevents a late fetch', async () => {
+  const controller = new AbortController();
+  let release, reservationSignal, descriptor;
+  let calls = 0;
+  global.fetch = async () => { calls++; return response(); };
+  const pending = runtime.myosRunBoundedAPI({ ...options(), signal: controller.signal,
+    authorizeLaunch: (d, context) => {
+      descriptor = d; reservationSignal = context.signal;
+      queueMicrotask(() => controller.abort());
+      return new Promise(resolve => { release = resolve; });
+    } });
+  await assert.rejects(pending, { code: 'BOUNDED_CANCELLED', attempts: 0, reservationId: null });
+  assert.equal(reservationSignal.aborted, true);
+  release(await reserve(descriptor));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls, 0);
+  assert.equal(require('node:events').getEventListeners(controller.signal, 'abort').length, 0);
+});
+
+test('caller cancellation stops a stalled body reader with one uncertain attempt', async () => {
+  const controller = new AbortController();
+  let cancelled = false;
+  global.fetch = async () => new Response(new ReadableStream({
+    start() { setTimeout(() => controller.abort(), 5); },
+    cancel() { cancelled = true; },
+  }));
+  await assert.rejects(runtime.myosRunBoundedAPI({ ...options(), signal: controller.signal,
+    authorizeLaunch: reserve }), { code: 'BOUNDED_CANCELLED', attempts: 1, reservationId: 'reservation-test' });
+  assert.equal(cancelled, true);
+  assert.equal(require('node:events').getEventListeners(controller.signal, 'abort').length, 0);
+});
+
+test('deadline wins when it occurs before caller cancellation', async () => {
+  const controller = new AbortController();
+  global.fetch = async () => new Promise(() => {});
+  await assert.rejects(runtime.myosRunBoundedAPI({ ...options(), timeoutMs: 25,
+    signal: controller.signal, authorizeLaunch: reserve }), { code: 'BOUNDED_DEADLINE', attempts: 1 });
+  controller.abort('later reason');
+  assert.equal(require('node:events').getEventListeners(controller.signal, 'abort').length, 0);
+});
+test('cancelled outstanding reservation explicitly remains pending for journal reconciliation', async () => {
+  const controller = new AbortController();
+  await assert.rejects(runtime.myosRunBoundedAPI({ ...options(), signal: controller.signal,
+    authorizeLaunch: () => {
+      queueMicrotask(() => controller.abort());
+      return new Promise(() => {});
+    } }), { code: 'BOUNDED_CANCELLED', attempts: 0, reservationId: null, reservationPending: true });
+});
