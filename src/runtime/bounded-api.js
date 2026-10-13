@@ -5,7 +5,7 @@ const ENDPOINT = 'https://api.openai.com/v1/chat/completions';
 const FIELDS = new Set(['taskClass', 'executionPolicy', 'authMode', 'complianceLane',
   'pinnedProvider', 'model', 'prompt', 'systemPrompt', 'responseMode', 'maxInputTokens',
   'maxOutputTokens', 'timeoutMs', 'budgetCapUsd', 'agentId', 'project', 'rootTaskId',
-  'stepId', 'accountBinding', 'authorizeLaunch', 'signal', 'beforeLaunch', 'image']);
+  'stepId', 'accountBinding', 'authorizeLaunch', 'signal', 'beforeLaunch', 'image', 'deadlineAt']);
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const fail = code => { const error = new Error(code); error.code = code; throw error; };
 const positive = (n, max) => Number.isSafeInteger(n) && n > 0 && n <= max;
@@ -21,6 +21,7 @@ function validateOptions(raw) {
     try { Object.getOwnPropertyDescriptor(AbortSignal.prototype, 'aborted').get.call(signal); }
     catch { fail('BOUNDED_INVALID_SIGNAL'); }
   }
+  if (raw.deadlineAt !== undefined && !positive(raw.deadlineAt, Number.MAX_SAFE_INTEGER)) fail('BOUNDED_INVALID_DEADLINE');
   const options = JSON.parse(JSON.stringify(data));
   if (!isCanonicalTaskClass(options.taskClass) || options.executionPolicy !== 'internal_automation' ||
       options.authMode !== 'api' || options.complianceLane !== 'unattended_api' ||
@@ -101,7 +102,8 @@ async function runBoundedAPI(raw, prepareLaunch) {
     imageReceipt = vision?.receipt || null;
     callerSignal = signal;
     if (signal?.aborted) fail('BOUNDED_CANCELLED');
-    const deadline = startedAt + options.timeoutMs;
+    const deadline = Math.min(startedAt + options.timeoutMs, options.deadlineAt ?? Infinity);
+    if (Date.now() >= deadline) fail('BOUNDED_DEADLINE');
     const expiration = new Promise((_, reject) => {
       const stop = code => {
         if (stopCode) return;
@@ -126,6 +128,7 @@ async function runBoundedAPI(raw, prepareLaunch) {
         visionPolicy: assertVisionPolicy(options.model).id } : {}) });
     const reservation = await Promise.race([Promise.resolve().then(() => {
       if (stopCode) fail(stopCode);
+      if (Date.now() >= deadline) fail('BOUNDED_DEADLINE');
       reservationPending = true;
       return authorizeLaunch(descriptor, { signal: controller.signal });
     }).then(receipt => {
