@@ -1971,7 +1971,41 @@ function geminiCall(promptOrOptions, model, timeoutMs = 180000) {
   return options.includeMetadata ? result : result.text;
 }
 
+async function myosRunBoundedAPI(options = {}) {
+  return require('./bounded-api').runBoundedAPI(options, prepareBoundedApiLaunch);
+}
+
+// Deliberately opt-in: legacy, OAuth and private bot execution are unchanged.
+function prepareBoundedApiLaunch(options) {
+  if (!isCanonicalTaskClass(options.taskClass) || resolveAuthMode(options) !== 'api') {
+    throw new Error('route');
+  }
+  // Unlike the legacy loader, an unreadable explicit policy fails closed.
+  const policyPath = resolveSpendPolicyPath();
+  if (process.env.MYOS_SPEND_POLICY_PATH || fs.existsSync(policyPath)) {
+    const policy = JSON.parse(fs.readFileSync(policyPath, 'utf8'));
+    if (!policy || typeof policy !== 'object' || Array.isArray(policy)) throw new Error('policy');
+  }
+  const plan = resolveExecutionPlan(options);
+  if (plan.candidates.length !== 1) throw new Error('route');
+  spendSummaryCache = null;
+  const { candidate, spendControlAction } = applySpendPolicyToCandidate({
+    candidate: plan.candidates[0], options, taskClass: options.taskClass,
+    complianceLane: 'unattended_api', caller: resolveCallerContext(options),
+    authLabel: resolveAuthLabel({ provider: 'openai', authMode: 'api', options }), authMode: 'api',
+  });
+  validateExecutionCandidate(plan, candidate, { executionPolicy: 'internal_automation', authMode: 'api' });
+  if (candidate.type !== 'llm' || candidate.provider !== 'openai' ||
+      candidate.model !== options.model || spendControlAction) throw new Error('route');
+  const { meta } = resolveModelForProvider('openai', candidate.profile, options.model);
+  const apiKey = resolveProviderApiKey('openai');
+  if (!apiKey) throw new Error('credential');
+  return { apiKey, pricing: meta?.pricing_per_1m_tokens,
+    policyIdentity: JSON.stringify({ plan, candidate, policy: loadSpendPolicy() }) };
+}
+
 module.exports = {
+  myosRunBoundedAPI,
   CODEX_OAUTH_CHEAP_MODEL,
   CODEX_OAUTH_STRONG_MODEL,
   claudeCall,
