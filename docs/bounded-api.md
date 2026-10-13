@@ -12,6 +12,8 @@ Caller cancellation is an optional native `AbortSignal`, validated separately fr
 
 An optional synchronous `beforeLaunch` callback closes the gap between reservation and provider launch. It rechecks the caller's durable task state after final Dispatch revalidation and request preparation. Throws and asynchronous return values must refuse the request with zero attempts and retain reservation attribution. No asynchronous operation is inserted after this guard and before fetch.
 
+Visual review adds one optional `{ bytes: Buffer, sha256 }` PNG to this same transport. A separate `bounded-vision.js` validates a private copy, fixed PNG resource limits and an explicit reviewed model/accounting policy. Only digest and size metadata enter request hashes and receipts. No file lookup, URL fetch, second model call, image generation or new budget service is introduced. Unknown or expired accounting policy prevents reservation and launch. Host vault, image authorization and verdict acceptance remain caller responsibilities.
+
 ## Acceptance criteria
 
 - Explicit canonical task class, exact provider/model, API authentication and one candidate.
@@ -81,3 +83,31 @@ An abort cannot undo a reservation or retract a request already sent to the prov
 The caller must use a fast synchronous read of current durable task/lease/pause state, throwing or returning `false` if launch is no longer permitted. Throws are redacted as `BOUNDED_BEFORE_LAUNCH_REJECTED`. A returned Promise or thenable is rejected as `BOUNDED_BEFORE_LAUNCH_ASYNC`; Dispatch does not await it or launch later. Mistaken asynchronous callbacks may still perform their own side effects, so they must not be used for authorization, provider calls or new reservations. Signal and deadline are checked again after the guard. Failure preserves the known reservation ID with zero attempts for journal reconciliation.
 
 There is no JavaScript asynchronous gap between the final guard and fetch. This cannot make an independent database transaction and an external provider request atomic. RuntimeRunner retains responsibility for leases and concurrent writers, as well as in-flight cancellation once a request has begun.
+
+### Bounded PNG visual review
+
+Supply exactly one `image: { bytes: Buffer, sha256: '<lowercase SHA-256 hex>' }` with `model: 'gpt-5.4-mini'`. The trusted host must read its authorized image vault and pin the bytes before invoking Dispatch. URLs, file paths, arrays, extra image fields and shared-memory buffers are rejected. Dispatch copies the bytes synchronously, verifies their digest, and sends that same private copy through the existing Chat Completions request as a PNG data URI with fixed `detail: 'high'`. No filesystem read or remote image fetch occurs in Dispatch.
+
+Accepted PNGs are at most 8 MiB, 1 to 2,048 pixels on each axis, 8-bit noninterlaced grayscale, grayscale-alpha, RGB or RGBA. The parser checks chunk structure, CRC, decompression length and row filters. Animated, palette, 16-bit and interlaced PNGs are refused. Normalize unsupported images in the trusted host before computing their digest. A rejected image never reaches reservation or transport.
+
+The reviewed policy is `openai-gpt54mini-high-20261014`. Official documentation gives this model's high-detail patch budget as 2,500, with a 1.2 billing multiplier and possible one-token rounding variation. Dispatch conservatively reserves **3,001 image input tokens**, independent of PNG dimensions. Set `maxInputTokens` to cover this bound plus UTF-8 prompt/system bytes and 1,024 framing tokens. A small-image discount is intentionally not assumed. The catalog must supply at least $0.75 per million input tokens and $4.50 per million output tokens. The bound is reviewed through **2026-11-14T00:00:00Z**, then image calls fail closed until reviewed source updates it. Other image models and caller policy overrides are unsupported.
+
+Sources reviewed 2026-10-14:
+- https://developers.openai.com/api/docs/guides/images-vision
+- https://developers.openai.com/api/docs/models/gpt-5.4-mini
+
+Reservation descriptors retain their existing schemaVersion 1 fields and add:
+
+```js
+{
+  image: { sha256, byteLength, width, height },
+  imageInputTokenUpperBound: 3001,
+  visionPolicy: 'openai-gpt54mini-high-20261014'
+}
+```
+
+The image metadata is frozen. The image digest and complete reviewed accounting policy enter `requestDigest`, binding the existing atomic reservation to that image and bound. `maxCostUsd` includes all declared input tokens and maximum completion tokens at catalog prices, without cache discounts. No second budget or allowance is created. The shared daily cap still belongs to RuntimeRunner.
+
+Success results and failures after image validation include `image: { sha256, byteLength, width, height }`. Descriptors and image receipts never contain base64, bytes, paths or secrets; base64 appears only in the provider request body. As with text calls, generated content is returned to the caller, so the host must not persist the whole result or log prompts/provider requests. Invalid-image failures may have no image receipt. `BOUNDED_IMAGE_BOUND_UNAVAILABLE` covers unsupported models or expiry; `BOUNDED_IMAGE_PRICE_UNVERIFIED` blocks insufficient prices. Other input failures use `BOUNDED_INVALID_IMAGE`, `BOUNDED_IMAGE_SIZE`, `BOUNDED_IMAGE_HASH_MISMATCH`, `BOUNDED_INVALID_PNG`, `BOUNDED_ANIMATED_PNG`, `BOUNDED_IMAGE_DIMENSIONS` or `BOUNDED_PNG_FORMAT_UNSUPPORTED`.
+
+Existing cancellation, absolute deadline, one attempt, synchronous final guard, no tools, no fallback and reconciliation rules apply unchanged. A successful transport is not an accepted visual verdict: the host owns the verdict schema, image-to-task authorization and acceptance checks. This source capability does not activate an Autonomizer pilot or authorize paid execution.
