@@ -1977,7 +1977,7 @@ async function myosRunBoundedAPI(options = {}) {
 
 // Deliberately opt-in: legacy, OAuth and private bot execution are unchanged.
 function prepareBoundedApiLaunch(options) {
-  if (!isCanonicalTaskClass(options.taskClass) || resolveAuthMode(options) !== 'api') {
+  if (!isCanonicalTaskClass(options.taskClass) || resolveAuthMode(options.authMode) !== 'api') {
     throw new Error('route');
   }
   // Unlike the legacy loader, an unreadable explicit policy fails closed.

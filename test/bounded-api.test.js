@@ -584,3 +584,41 @@ test('absolute deadline reached in reservation prevents final guard and fetch', 
     assert.equal(calls, 0); assert.equal(guards, 0);
   } finally { Date.now = now; }
 });
+test('explicit API auth works without a process auth-mode override', async () => {
+  const previous = process.env.MYOS_AUTH_MODE;
+  let calls = 0, reservations = 0;
+  global.fetch = async () => { calls++; return visionResponse(); };
+  try {
+    delete process.env.MYOS_AUTH_MODE;
+    const result = await runtime.myosRunBoundedAPI({ ...visionOptions(), authorizeLaunch: d => {
+      reservations++; return reserve(d);
+    } });
+    assert.equal(result.billingMode, 'api');
+    assert.equal(calls, 1); assert.equal(reservations, 1);
+  } finally {
+    if (previous === undefined) delete process.env.MYOS_AUTH_MODE;
+    else process.env.MYOS_AUTH_MODE = previous;
+  }
+});
+test('environment auth policy still overrides the bounded request and is rechecked after reservation', async () => {
+  const previous = process.env.MYOS_AUTH_MODE;
+  let calls = 0, reservations = 0;
+  global.fetch = async () => { calls++; return response(); };
+  try {
+    for (const mode of ['oauth', 'invalid-auth-mode']) {
+      process.env.MYOS_AUTH_MODE = mode;
+      await assert.rejects(runtime.myosRunBoundedAPI({ ...options(), authorizeLaunch: d => {
+        reservations++; return reserve(d);
+      } }), { code: 'BOUNDED_LAUNCH_POLICY_REJECTED', attempts: 0 });
+    }
+    assert.equal(reservations, 0);
+    delete process.env.MYOS_AUTH_MODE;
+    await assert.rejects(runtime.myosRunBoundedAPI({ ...options(), authorizeLaunch: d => {
+      reservations++; process.env.MYOS_AUTH_MODE = 'oauth'; return reserve(d);
+    } }), { code: 'BOUNDED_LAUNCH_POLICY_REJECTED', attempts: 0, reservationId: 'reservation-test' });
+    assert.equal(reservations, 1); assert.equal(calls, 0);
+  } finally {
+    if (previous === undefined) delete process.env.MYOS_AUTH_MODE;
+    else process.env.MYOS_AUTH_MODE = previous;
+  }
+});
