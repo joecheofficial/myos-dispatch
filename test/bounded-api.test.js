@@ -622,3 +622,44 @@ test('environment auth policy still overrides the bounded request and is recheck
     else process.env.MYOS_AUTH_MODE = previous;
   }
 });
+
+
+test('HTTP failure retains safe headers and status without reading provider error bodies', async () => {
+  let calls = 0, cancelled = false;
+  global.fetch = async () => { calls++; return { ok: false, status: 429,
+    headers: new Headers({ 'x-request-id': 'req-safe' }),
+    body: { cancel: async () => { cancelled = true; }, getReader() { throw Error('must not read error body'); } } }; };
+  await assert.rejects(runtime.myosRunBoundedAPI({ ...options(), authorizeLaunch: reserve }), e => {
+    assert.equal(e.code, 'BOUNDED_PROVIDER_REJECTED');
+    assert.equal(e.httpStatus, 429); assert.equal(e.providerRequestId, 'req-safe');
+    assert.equal(e.providerResponseId, null); assert.equal(e.usage, null);
+    assert.equal(e.attemptStarted, true); assert.equal(e.attempts, 1);
+    assert.equal(e.body, undefined); assert.equal(e.cause, undefined); return true;
+  });
+  assert.equal(calls, 1); assert.equal(cancelled, true);
+});
+
+test('incomplete output retains response identity and validated usage without content', async () => {
+  global.fetch = async () => new Response(JSON.stringify({ id: 'chatcmpl-safe', model: 'gpt-5-mini',
+    choices: [{ finish_reason: 'length', message: { content: 'PRIVATE_PROVIDER_CONTENT' } }],
+    usage: { prompt_tokens: 27, completion_tokens: 128, prompt_tokens_details: { cached_tokens: 9 } }
+  }), { headers: { 'x-request-id': 'req-safe' } });
+  await assert.rejects(runtime.myosRunBoundedAPI({ ...options(), authorizeLaunch: reserve }), e => {
+    assert.equal(e.code, 'BOUNDED_INCOMPLETE_OUTPUT'); assert.equal(e.httpStatus, 200);
+    assert.equal(e.providerRequestId, 'req-safe'); assert.equal(e.providerResponseId, 'chatcmpl-safe');
+    assert.deepEqual(e.usage, { inputTokens: 27, outputTokens: 128, cachedInputTokens: 9, cacheWriteTokens: null });
+    assert.equal(JSON.stringify(e).includes('PRIVATE_PROVIDER_CONTENT'), false); return true;
+  });
+});
+
+test('malformed body retains headers; unsafe identifiers and cached usage are discarded', async () => {
+  for (const body of ['not json', JSON.stringify({ id: 'unsafe id', usage: { prompt_tokens: 3, completion_tokens: 2,
+    prompt_tokens_details: { cached_tokens: 'PRIVATE_CACHE_CONTENT' } }, choices: [] })]) {
+    global.fetch = async () => new Response(body, { headers: { 'x-request-id': 'unsafe id' } });
+    await assert.rejects(runtime.myosRunBoundedAPI({ ...options(), authorizeLaunch: reserve }), e => {
+      assert.equal(e.httpStatus, 200); assert.equal(e.providerRequestId, null); assert.equal(e.providerResponseId, null);
+      if (e.usage) assert.equal(e.usage.cachedInputTokens, null);
+      assert.equal(JSON.stringify(e).includes('PRIVATE_CACHE_CONTENT'), false); return true;
+    });
+  }
+});

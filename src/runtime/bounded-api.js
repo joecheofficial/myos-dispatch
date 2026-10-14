@@ -91,6 +91,9 @@ async function runBoundedAPI(raw, prepareLaunch) {
   let reservationPending = false;
   let timer;
   let usage = null;
+  let httpStatus = null;
+  let providerRequestId = null;
+  let providerResponseId = null;
   let callerSignal;
   let onCallerAbort;
   let stopCode = null;
@@ -177,14 +180,20 @@ async function runBoundedAPI(raw, prepareLaunch) {
     attempted = true;
     const response = await Promise.race([fetch(ENDPOINT, request), expiration]);
     if (stopCode) fail(stopCode);
+    httpStatus = Number.isInteger(response.status) && response.status >= 100 && response.status <= 599 ? response.status : null;
+    const requestId = response.headers.get('x-request-id');
+    providerRequestId = label(requestId) ? requestId : null;
     if (!response.ok) { response.body?.cancel().catch(() => {}); fail('BOUNDED_PROVIDER_REJECTED'); }
     const data = await Promise.race([readResponse(response, controller.signal), expiration]);
     if (stopCode) fail(stopCode);
-    const native = data.usage;
+    providerResponseId = label(data?.id) ? data.id : null;
+    const native = data?.usage;
     if (!Number.isSafeInteger(native?.prompt_tokens) || native.prompt_tokens < 0 ||
         !Number.isSafeInteger(native?.completion_tokens) || native.completion_tokens < 0) fail('BOUNDED_USAGE_MISSING');
     usage = { inputTokens: native.prompt_tokens, outputTokens: native.completion_tokens,
-      cachedInputTokens: native.prompt_tokens_details?.cached_tokens ?? null, cacheWriteTokens: null };
+      cachedInputTokens: Number.isSafeInteger(native.prompt_tokens_details?.cached_tokens) &&
+        native.prompt_tokens_details.cached_tokens >= 0 && native.prompt_tokens_details.cached_tokens <= native.prompt_tokens
+        ? native.prompt_tokens_details.cached_tokens : null, cacheWriteTokens: null };
     if (usage.inputTokens > options.maxInputTokens || usage.outputTokens > options.maxOutputTokens) fail('BOUNDED_USAGE_LIMIT');
     const choice = data.choices?.[0];
     if (data.choices?.length !== 1 || choice.finish_reason !== 'stop' || choice.message?.tool_calls?.length ||
@@ -195,7 +204,6 @@ async function runBoundedAPI(raw, prepareLaunch) {
       fail('BOUNDED_MODEL_MISMATCH');
     }
     if (!label(data.id)) fail('BOUNDED_RESPONSE_ID_MISSING');
-    const requestId = response.headers.get('x-request-id');
     const text = choice.message.content;
     let json;
     if (options.responseMode === 'json') {
@@ -207,7 +215,7 @@ async function runBoundedAPI(raw, prepareLaunch) {
       provider: 'openai', model: options.model, resolvedModel: data.model, billingMode: 'api',
       taskClass: options.taskClass, rootTaskId: options.rootTaskId, stepId: options.stepId,
       attempts: 1, fallbackIndex: 0, reservationId, requestDigest: launch.requestDigest,
-      providerRequestId: label(requestId) ? requestId : null, providerResponseId: data.id,
+      providerRequestId, providerResponseId,
       usage, durationMs: Date.now() - startedAt,
       estimatedCostUsd: (usage.inputTokens * launch.pricing.input_usd + usage.outputTokens * launch.pricing.output_usd) / 1e6,
       observedCostUsd: null, finishReason: 'stop',
@@ -216,7 +224,7 @@ async function runBoundedAPI(raw, prepareLaunch) {
   } catch (error) {
     const code = stopCode || (/^BOUNDED_[A-Z_]+$/.test(error?.code) ? error.code : 'BOUNDED_EXECUTION_FAILED');
     throw Object.assign(new Error(code), { code, attemptStarted: attempted, attempts: attempted ? 1 : 0,
-      reservationId, reservationPending, usage, observedCostUsd: null,
+      reservationId, reservationPending, httpStatus, providerRequestId, providerResponseId, usage, observedCostUsd: null,
       ...(imageReceipt ? { image: imageReceipt } : {}) });
   } finally {
     clearTimeout(timer);
