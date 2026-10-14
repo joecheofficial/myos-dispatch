@@ -663,3 +663,64 @@ test('malformed body retains headers; unsafe identifiers and cached usage are di
     });
   }
 });
+
+
+test('provider error subtype is closed-set and retry-after is diagnostic only', async () => {
+  for (const code of ['rate_limit_exceeded', 'insufficient_quota', 'credit_balance_exhausted',
+    'organization_spend_limit_exceeded', 'project_spend_limit_exceeded', 'organization_usage_limit_exceeded', 'slow_down', 'server_is_overloaded']) {
+    let calls = 0;
+    global.fetch = async () => { calls++; return new Response(JSON.stringify({ error: {
+      code, type: 'insufficient_quota', message: 'SECRET_MESSAGE', param: 'SECRET_PARAM' }
+    }), { status: 429, headers: { 'content-type': 'application/json', 'retry-after': '120', 'x-request-id': 'req-subtype' } }); };
+    await assert.rejects(runtime.myosRunBoundedAPI({ ...options(), authorizeLaunch: reserve }), e => {
+      assert.equal(e.code, 'BOUNDED_PROVIDER_REJECTED'); assert.equal(e.providerErrorCode, code);
+      assert.equal(e.providerErrorType, 'insufficient_quota'); assert.equal(e.retryAfterMs, 120000);
+      assert.equal(e.providerRequestId, 'req-subtype'); assert.equal(e.attempts, 1);
+      assert.equal(JSON.stringify(e).includes('SECRET_'), false); return true;
+    });
+    assert.equal(calls, 1);
+  }
+});
+
+test('unknown, malformed and oversized error bodies never escape diagnostics', async () => {
+  for (const body of ['bad JSON', 'null', JSON.stringify({error:{code:'SECRET_CODE',type:'SECRET_TYPE'}}),
+    JSON.stringify({error:{code:'insufficient_quota',message:'x'.repeat(9000)}})]) {
+    global.fetch = async () => new Response(body, { status: 429, headers: { 'content-type': 'application/json', 'retry-after': 'SECRET_HEADER' } });
+    await assert.rejects(runtime.myosRunBoundedAPI({ ...options(), authorizeLaunch: reserve }), e => {
+      assert.equal(e.code, 'BOUNDED_PROVIDER_REJECTED'); assert.equal(e.providerErrorCode, null);
+      assert.equal(e.providerErrorType, null); assert.equal(e.retryAfterMs, null);
+      assert.equal(JSON.stringify(e).includes('SECRET_'), false); return true;
+    });
+  }
+});
+
+test('error-body diagnostics remain bounded and obey caller cancellation and deadline', async () => {
+  for (const mode of ['diagnostic-timeout', 'deadline', 'cancel']) {
+    const controller = new AbortController(); let cancelled = false, calls = 0;
+    global.fetch = async () => { calls++; return new Response(new ReadableStream({
+      start() { if (mode === 'cancel') setTimeout(() => controller.abort('SECRET_ABORT'), 10); },
+      cancel() { cancelled = true; }
+    }), { status: 429, headers: { 'content-type': 'application/json', 'x-request-id': 'req-stalled' } }); };
+    const start = Date.now();
+    await assert.rejects(runtime.myosRunBoundedAPI({ ...options(), timeoutMs: mode === 'deadline' ? 40 : 1000,
+      signal: controller.signal, authorizeLaunch: reserve }), e => {
+      assert.equal(e.code, mode === 'deadline' ? 'BOUNDED_DEADLINE' : mode === 'cancel' ? 'BOUNDED_CANCELLED' : 'BOUNDED_PROVIDER_REJECTED');
+      assert.equal(e.httpStatus, 429); assert.equal(e.providerRequestId, 'req-stalled');
+      assert.equal(e.providerErrorCode, null); assert.equal(e.attemptStarted, true);
+      assert.equal(JSON.stringify(e).includes('SECRET_ABORT'), false); return true;
+    });
+    assert.ok(Date.now() - start < 900); assert.equal(cancelled, true); assert.equal(calls, 1);
+  }
+});
+
+test('retry-after accepts bounded seconds and canonical HTTP dates only', async () => {
+  const future = new Date(Math.floor(Date.now()/1000)*1000 + 60000).toUTCString();
+  for (const [value, expected] of [['0',0], ['604800',604800000], ['604801',null], ['1.5',null], ['-1',null],
+    ['9999999999999999999',null], ['Wed, 99 Oct 2026 25:99:99 GMT',null], ['2026-10-14',null], [future,'date']]) {
+    global.fetch = async () => new Response('', {status:429, headers:{'retry-after':value}});
+    await assert.rejects(runtime.myosRunBoundedAPI({...options(),authorizeLaunch:reserve}), e => {
+      if(expected==='date') assert.ok(e.retryAfterMs>0 && e.retryAfterMs<=60000);
+      else assert.equal(e.retryAfterMs,expected); return true;
+    });
+  }
+});

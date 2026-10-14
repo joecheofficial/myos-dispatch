@@ -65,7 +65,7 @@ function prepare(options, prepareLaunch) {
   return { ...launch, maxCostUsd, requestDigest };
 }
 
-async function readResponse(response, signal) {
+async function readResponse(response, signal, maxBytes = 1024 * 1024) {
   if (!response.body) fail('BOUNDED_INVALID_RESPONSE');
   const reader = response.body.getReader();
   const cancel = () => { reader.cancel().catch(() => {}); };
@@ -78,11 +78,50 @@ async function readResponse(response, signal) {
       const { done, value } = await reader.read();
       if (done) break;
       bytes += value.byteLength;
-      if (bytes > 1024 * 1024) fail('BOUNDED_RESPONSE_TOO_LARGE');
+      if (bytes > maxBytes) fail('BOUNDED_RESPONSE_TOO_LARGE');
       chunks.push(Buffer.from(value));
     }
     return JSON.parse(Buffer.concat(chunks).toString('utf8'));
   } finally { signal.removeEventListener('abort', cancel); cancel(); }
+}
+
+// Diagnostic-only allowlists. These values never authorize retry or settle an effect.
+const PROVIDER_ERROR_CODES = new Set(['rate_limit_exceeded', 'insufficient_quota',
+  'credit_balance_exhausted', 'organization_spend_limit_exceeded', 'project_spend_limit_exceeded',
+  'organization_usage_limit_exceeded', 'slow_down', 'server_is_overloaded']);
+const PROVIDER_ERROR_TYPES = new Set(['insufficient_quota', 'rate_limit_error', 'service_unavailable_error']);
+function retryAfterMilliseconds(value, now = Date.now()) {
+  if (typeof value !== 'string' || value.length > 64) return null;
+  let ms;
+  if (/^\d{1,6}$/.test(value)) ms = Number(value) * 1000;
+  else {
+    // Require canonical IMF-fixdate; Date.parse alone accepts ambiguous non-HTTP strings.
+    const at = Date.parse(value);
+    if (!Number.isFinite(at) || new Date(at).toUTCString() !== value) return null;
+    ms = Math.max(0, at - now);
+  }
+  return Number.isSafeInteger(ms) && ms >= 0 && ms <= 604800000 ? ms : null;
+}
+async function readProviderError(response, signal) {
+  const empty = { providerErrorCode: null, providerErrorType: null };
+  if (!/^application\/(?:json|problem\+json)(?:;|$)/i.test(response.headers.get('content-type') || '')) {
+    response.body?.cancel().catch(() => {}); return empty;
+  }
+  const timeout = new AbortController();
+  const combined = AbortSignal.any([signal, timeout.signal]);
+  let onAbort;
+  const expiration = new Promise((_, reject) => {
+    onAbort = () => reject(new Error('BOUNDED_ERROR_DIAGNOSTIC_STOP'));
+    combined.addEventListener('abort', onAbort, { once: true });
+    if (combined.aborted) onAbort();
+  });
+  const timer = setTimeout(() => timeout.abort(), 250);
+  try {
+    const data = await Promise.race([readResponse(response, combined, 8192), expiration]);
+    return { providerErrorCode: PROVIDER_ERROR_CODES.has(data?.error?.code) ? data.error.code : null,
+      providerErrorType: PROVIDER_ERROR_TYPES.has(data?.error?.type) ? data.error.type : null };
+  } catch { return empty; }
+  finally { clearTimeout(timer); combined.removeEventListener('abort', onAbort); timeout.abort(); }
 }
 
 async function runBoundedAPI(raw, prepareLaunch) {
@@ -94,6 +133,9 @@ async function runBoundedAPI(raw, prepareLaunch) {
   let httpStatus = null;
   let providerRequestId = null;
   let providerResponseId = null;
+  let providerErrorCode = null;
+  let providerErrorType = null;
+  let retryAfterMs = null;
   let callerSignal;
   let onCallerAbort;
   let stopCode = null;
@@ -183,7 +225,13 @@ async function runBoundedAPI(raw, prepareLaunch) {
     httpStatus = Number.isInteger(response.status) && response.status >= 100 && response.status <= 599 ? response.status : null;
     const requestId = response.headers.get('x-request-id');
     providerRequestId = label(requestId) ? requestId : null;
-    if (!response.ok) { response.body?.cancel().catch(() => {}); fail('BOUNDED_PROVIDER_REJECTED'); }
+    if (!response.ok) {
+      retryAfterMs = retryAfterMilliseconds(response.headers.get('retry-after'));
+      ({ providerErrorCode, providerErrorType } = await Promise.race([
+        readProviderError(response, controller.signal), expiration]));
+      if (stopCode) fail(stopCode);
+      fail('BOUNDED_PROVIDER_REJECTED');
+    }
     const data = await Promise.race([readResponse(response, controller.signal), expiration]);
     if (stopCode) fail(stopCode);
     providerResponseId = label(data?.id) ? data.id : null;
@@ -224,7 +272,7 @@ async function runBoundedAPI(raw, prepareLaunch) {
   } catch (error) {
     const code = stopCode || (/^BOUNDED_[A-Z_]+$/.test(error?.code) ? error.code : 'BOUNDED_EXECUTION_FAILED');
     throw Object.assign(new Error(code), { code, attemptStarted: attempted, attempts: attempted ? 1 : 0,
-      reservationId, reservationPending, httpStatus, providerRequestId, providerResponseId, usage, observedCostUsd: null,
+      reservationId, reservationPending, httpStatus, providerRequestId, providerResponseId, providerErrorCode, providerErrorType, retryAfterMs, usage, observedCostUsd: null,
       ...(imageReceipt ? { image: imageReceipt } : {}) });
   } finally {
     clearTimeout(timer);
