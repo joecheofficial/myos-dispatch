@@ -2,6 +2,14 @@
 
 All notable changes to MyOS Dispatch are documented here.
 
+## v4.4.0-rc.3 - 2026-10-16
+
+- Preserve prompt authority in the lean desktop startup context.
+- Reconcile approved Atelier projections before an automatic refresh. Fail closed on reconcile races, bound retries after a failed refresh, and hold changes to reviewed document sidecar metadata for review.
+- Add a bounded API runtime: one reserved, single-attempt provider call per request with caller cancellation, host absolute deadlines, a launch guard rechecked after reservation, and auth resolved from a scalar option.
+- Add hash-pinned bounded PNG visual review with a conservative, dated image token reservation that fails closed after its review window.
+- Retain bounded, allowlisted provider failure diagnostics (HTTP status, request and response ids, retry-after, error code and type). These values never authorize a retry.
+
 ## v4.4.0-rc.2 - 2026-10-10
 
 - Keep delivery channels from replacing the subject project in desktop routing. Preserve send and execution gates while resolving the registered owner.
