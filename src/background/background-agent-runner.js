@@ -440,10 +440,14 @@ function buildBackgroundWorkerInvocation(task = {}, options = {}) {
   return { kind, command, args, cwd, input: prompt, model: model || null, readOnly };
 }
 
-function runCommand({ command, args, cwd, input, timeoutMs, env, maxOutputBytes }) {
+function runCommand({ command, args, cwd, input, timeoutMs, env, maxOutputBytes, signal, beforeSpawn, deadlineAt }) {
   if (maxOutputBytes != null && (!Number.isSafeInteger(maxOutputBytes) || maxOutputBytes < 1)) {
     throw new Error("Native process output bound must be a positive integer");
   }
+  if (signal != null && !(signal instanceof AbortSignal)) throw new Error("Invalid native abort signal");
+  if (beforeSpawn != null && typeof beforeSpawn !== "function") throw new Error("Invalid native launch guard");
+  if (deadlineAt != null && (!Number.isSafeInteger(deadlineAt) || deadlineAt <= Date.now())) throw new Error("Native deadline expired or invalid");
+  if (signal?.aborted) throw new Error("Native process aborted before launch");
   // No scoped Windows Job Object implementation is available here. Refuse to
   // start a process without the owned-process-group cleanup used on POSIX.
   if (process.platform === "win32") {
@@ -452,6 +456,9 @@ function runCommand({ command, args, cwd, input, timeoutMs, env, maxOutputBytes 
       cleanupScope: "owned-process-group", ownedGroupStopped: null, treeQuiescence: "unverified" });
   }
   return new Promise((resolve) => {
+    if (beforeSpawn && beforeSpawn() !== true) throw new Error("Native launch guard must synchronously approve");
+    if (signal?.aborted) throw new Error("Native process aborted before launch");
+    if (deadlineAt != null && deadlineAt <= Date.now()) throw new Error("Native deadline expired before launch");
     const child = spawn(command, args, {
       cwd, stdio: ["pipe", "pipe", "pipe"], env: env || process.env,
       detached: true,
@@ -464,6 +471,7 @@ function runCommand({ command, args, cwd, input, timeoutMs, env, maxOutputBytes 
     let outputLimitExceeded = false;
     let settled = false;
     let timedOut = false;
+    let aborted = false;
     let closed = false;
     let exitCode = null;
     let exitSignal = null;
@@ -491,6 +499,7 @@ function runCommand({ command, args, cwd, input, timeoutMs, env, maxOutputBytes 
       settled = true;
       clearTimeout(timeout);
       clearTimeout(pollTimer);
+      signal?.removeEventListener("abort", onAbort);
       if (cleanupFailed) {
         stderr += "\nOwned-process-group cleanup failed; tree quiescence could not be verified";
         // Bound this call even if a surviving process holds inherited pipes.
@@ -504,8 +513,9 @@ function runCommand({ command, args, cwd, input, timeoutMs, env, maxOutputBytes 
         stdout = new StringDecoder("utf8").write(Buffer.concat(captured.stdout));
         stderr = new StringDecoder("utf8").write(Buffer.concat(captured.stderr));
       }
-      resolve({ code: timedOut || cleanupFailed || outputLimitExceeded ? null : exitCode,
+      resolve({ code: timedOut || aborted || cleanupFailed || outputLimitExceeded ? null : exitCode,
         signal: timedOut ? "SIGTERM" : exitSignal, stdout, stderr, cleanupFailed,
+        ...(signal ? {aborted} : {}),
         ...(bounded ? {outputLimitExceeded,cleanupErrorCode} : {}),
         cleanupScope: "owned-process-group", ownedGroupStopped, treeQuiescence: "unverified" });
     };
@@ -548,7 +558,10 @@ function runCommand({ command, args, cwd, input, timeoutMs, env, maxOutputBytes 
       timedOut = true;
       stderr += `\nTimed out after ${timeoutMs || DEFAULT_TIMEOUT_MS}ms`;
       beginTeardown();
-    }, Number(timeoutMs || DEFAULT_TIMEOUT_MS));
+    }, Math.max(1,Math.min(Number(timeoutMs || DEFAULT_TIMEOUT_MS),deadlineAt == null ? Infinity : deadlineAt-Date.now())));
+    const onAbort = () => { aborted = true; beginTeardown(); };
+    signal?.addEventListener("abort", onAbort, {once:true});
+    if (signal?.aborted) onAbort();
     const receive = (stream, chunk) => {
       if (!bounded) {
         if (stream === "stdout") stdout += chunk.toString();
