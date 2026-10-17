@@ -404,6 +404,7 @@ test("background runner builds read-only Codex invocation and scrubs API-key env
       MYOS_BACKGROUND_BACKPRESSURE_ENABLED: "0",
       OPENAI_API_KEY: "test-openai",
       CODEX_API_KEY: "test-codex",
+      MYOS_OAUTH_RECOVERY: "0",
       PATH: "/bin",
     },
     async runCommand({ env: childEnv, invocation }) {
@@ -638,6 +639,7 @@ test("assertNoAnthropicKeysInChildEnv throws on any Anthropic credential includi
 test("background runner strips all Anthropic keys from child env in both OAuth and API-key modes", async () => {
   const task = { id: "context-map", kind: "source_index_scan", prompt: "read only", writeScope: [] };
   const dirtyEnv = {
+    MYOS_OAUTH_RECOVERY: "0",
     MYOS_BACKGROUND_BACKPRESSURE_ENABLED: "0",
     OPENAI_API_KEY: "test-openai",
     ANTHROPIC_API_KEY: "test-anthropic",
@@ -825,7 +827,7 @@ test("background runner refuses cross-provider mixing when a caller provider is 
     command: "codex",
     callerProvider: "claude",
     stateFile: tempStateFile(),
-    env: { MYOS_BACKGROUND_BACKPRESSURE_ENABLED: "0", PATH: "/bin" },
+    env: { MYOS_BACKGROUND_BACKPRESSURE_ENABLED: "0", MYOS_OAUTH_RECOVERY: "0", PATH: "/bin" },
     async runCommand() {
       throw new Error("cross-provider sidecar must not execute");
     },

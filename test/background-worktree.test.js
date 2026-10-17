@@ -58,6 +58,7 @@ function optionsFor(artifactRoot, runCommand) {
       parentTaskId: "root",
     },
     env: {
+      MYOS_OAUTH_RECOVERY: "0", // This runner fixture must not read the operator's model inventory.
       PATH: process.env.PATH,
       HOME: process.env.HOME,
       MYOS_BACKGROUND_MIN_FREE_DISK_GIB: "0",
@@ -463,12 +464,12 @@ test("caller affinity accepts recognized executable paths and aliases and refuse
     ["claude", "claude-code"], ["claude", "/usr/local/bin/claude_code"],
     ["gemini", "gemini-cli"], ["gemini", "C:\\tools\\gemini.cmd"],
   ]) {
-    assert.equal(buildBackgroundWorkerInvocation({ effectiveMode: "read_only" }, { command, callerProvider, env: {} }).kind, command);
+    assert.equal(buildBackgroundWorkerInvocation({ effectiveMode: "read_only" }, { command, callerProvider, env: { MYOS_OAUTH_RECOVERY: "0" } }).kind, command);
   }
   for (const callerProvider of [undefined, null, "", "unknown", "/bin/not-codex", "codex --model x", "codex/", 42]) {
-    assert.throws(() => buildBackgroundWorkerInvocation({ effectiveMode: "read_only" }, { command: "codex", callerProvider, env: {} }), /callerProvider/);
+    assert.throws(() => buildBackgroundWorkerInvocation({ effectiveMode: "read_only" }, { command: "codex", callerProvider, env: { MYOS_OAUTH_RECOVERY: "0" } }), /callerProvider/);
   }
-  assert.throws(() => buildBackgroundWorkerInvocation({ effectiveMode: "read_only" }, { command: "codex", callerProvider: "/bin/claude-code", env: {} }), /cross-provider/);
+  assert.throws(() => buildBackgroundWorkerInvocation({ effectiveMode: "read_only" }, { command: "codex", callerProvider: "/bin/claude-code", env: { MYOS_OAUTH_RECOVERY: "0" } }), /cross-provider/);
 });
 
 test("Windows writable execution fails before allocation or invocation without scoped tree control", async () => {

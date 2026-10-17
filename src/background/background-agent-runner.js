@@ -440,7 +440,10 @@ function buildBackgroundWorkerInvocation(task = {}, options = {}) {
   return { kind, command, args, cwd, input: prompt, model: model || null, readOnly };
 }
 
-function runCommand({ command, args, cwd, input, timeoutMs, env }) {
+function runCommand({ command, args, cwd, input, timeoutMs, env, maxOutputBytes }) {
+  if (maxOutputBytes != null && (!Number.isSafeInteger(maxOutputBytes) || maxOutputBytes < 1)) {
+    throw new Error("Native process output bound must be a positive integer");
+  }
   // No scoped Windows Job Object implementation is available here. Refuse to
   // start a process without the owned-process-group cleanup used on POSIX.
   if (process.platform === "win32") {
@@ -455,6 +458,10 @@ function runCommand({ command, args, cwd, input, timeoutMs, env }) {
     });
     let stdout = "";
     let stderr = "";
+    const bounded = maxOutputBytes != null;
+    const captured = {stdout: [], stderr: []};
+    let outputBytes = 0;
+    let outputLimitExceeded = false;
     let settled = false;
     let timedOut = false;
     let closed = false;
@@ -465,6 +472,7 @@ function runCommand({ command, args, cwd, input, timeoutMs, env }) {
     let deadline;
     let killed = false;
     let ownedGroupStopped = null;
+    let cleanupErrorCode = null;
     let pollTimer;
     const groupExists = () => {
       if (!child.pid) return false;
@@ -491,8 +499,14 @@ function runCommand({ command, args, cwd, input, timeoutMs, env }) {
         child.stderr.destroy();
         child.unref();
       }
-      resolve({ code: timedOut || cleanupFailed ? null : exitCode,
+      if (bounded) {
+        const {StringDecoder} = require("node:string_decoder");
+        stdout = new StringDecoder("utf8").write(Buffer.concat(captured.stdout));
+        stderr = new StringDecoder("utf8").write(Buffer.concat(captured.stderr));
+      }
+      resolve({ code: timedOut || cleanupFailed || outputLimitExceeded ? null : exitCode,
         signal: timedOut ? "SIGTERM" : exitSignal, stdout, stderr, cleanupFailed,
+        ...(bounded ? {outputLimitExceeded,cleanupErrorCode} : {}),
         cleanupScope: "owned-process-group", ownedGroupStopped, treeQuiescence: "unverified" });
     };
     const checkTeardown = () => {
@@ -506,9 +520,11 @@ function runCommand({ command, args, cwd, input, timeoutMs, env }) {
           killed = true;
         }
       } catch (error) {
+        cleanupErrorCode = error.code || "PROCESS_GROUP_ERROR";
         stderr += `\n${error.message}`;
-        finish(true);
-        return;
+        // A just-terminated macOS process group may transiently return EPERM.
+        // Never treat that as stopped. Keep the same bounded ESRCH readback.
+        if (!bounded || error.code !== "EPERM") { finish(true); return; }
       }
       if (Date.now() >= deadline) { finish(true); return; }
       pollTimer = setTimeout(checkTeardown, 25);
@@ -520,7 +536,11 @@ function runCommand({ command, args, cwd, input, timeoutMs, env }) {
       killAt = Date.now() + 2000;
       deadline = killAt + 2000;
       try { stop("SIGTERM"); }
-      catch (error) { stderr += `\n${error.message}`; finish(true); return; }
+      catch (error) {
+        cleanupErrorCode = error.code || "PROCESS_GROUP_ERROR";
+        stderr += `\n${error.message}`;
+        if (!bounded || error.code !== "EPERM") { finish(true); return; }
+      }
       checkTeardown();
     };
     const timeout = setTimeout(() => {
@@ -529,8 +549,23 @@ function runCommand({ command, args, cwd, input, timeoutMs, env }) {
       stderr += `\nTimed out after ${timeoutMs || DEFAULT_TIMEOUT_MS}ms`;
       beginTeardown();
     }, Number(timeoutMs || DEFAULT_TIMEOUT_MS));
-    child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
-    child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+    const receive = (stream, chunk) => {
+      if (!bounded) {
+        if (stream === "stdout") stdout += chunk.toString();
+        else stderr += chunk.toString();
+        return;
+      }
+      if (settled || outputLimitExceeded) return;
+      if (outputBytes + chunk.length > maxOutputBytes) {
+        outputLimitExceeded = true;
+        beginTeardown();
+        return;
+      }
+      outputBytes += chunk.length;
+      captured[stream].push(chunk);
+    };
+    child.stdout.on("data", (chunk) => receive("stdout", chunk));
+    child.stderr.on("data", (chunk) => receive("stderr", chunk));
     child.stdin.on("error", (error) => { if (error.code !== "EPIPE") stderr += `\n${error.message}`; });
     child.on("error", (error) => {
       stderr += `\n${error.message}`;
