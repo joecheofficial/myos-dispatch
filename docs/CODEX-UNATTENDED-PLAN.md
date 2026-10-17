@@ -142,3 +142,9 @@ RED was observed before implementing selection, receipt persistence and clock
 rejection. This remains a WIP checkpoint, not an installed release or live pilot.
 GitNexus impact analysis is unavailable because the database is version 42 and the
 reader is version 40; direct caller tracing is not presented as a graph audit.
+
+Independent review of checkpoint `a49798b` over `f3a0c44` returned
+APPROVE-WITH-INTEGRATION-HOLD with no remaining P1/P2 after the clock fix.
+Git Manager save used a generic checkpoint subject; that subject does not remove
+the WIP state. Do not integrate or install until the known-red full-suite gate is
+resolved through the appropriate owned scope. Main remains unchanged.
