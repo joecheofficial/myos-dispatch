@@ -148,3 +148,45 @@ APPROVE-WITH-INTEGRATION-HOLD with no remaining P1/P2 after the clock fix.
 Git Manager save used a generic checkpoint subject; that subject does not remove
 the WIP state. Do not integrate or install until the known-red full-suite gate is
 resolved through the appropriate owned scope. Main remains unchanged.
+
+## Installation follow-through, October 17
+
+### What / why
+
+Joe directly ordered installation. Resolve the actual full-suite blockers instead
+of repeatedly polling the held checkpoint.
+
+### Approach
+
+Eleven failing runner assertions accidentally consult live OAuth inventory because
+their custom test environments omit the suite's MYOS_OAUTH_RECOVERY=0. Restore
+that isolation in the two affected test files, preserving every assertion and all
+production eligibility checks. The search test needs an owner-safe Node 24 path;
+use a private byte-identical copy via its existing MYOS_TEST_NODE24 option instead
+of weakening ancestry validation or changing system permissions. Review and merge
+through Git Manager, then verify the canonical installed source.
+
+### Acceptance criteria
+
+- The twelve reproduced failures pass without consulting live model entitlement.
+- The full suite passes with no new skips or weakened assertions.
+- Independent review accepts the exact delta; Git Manager integrates the claim.
+- Installed source and routing readback match the reviewed commit.
+
+### The check
+
+Run the package full test command with Node 24 and MYOS_TEST_NODE24 pointing to the
+verified private Node copy, then run installed routing and rejection checks.
+
+### Out of scope
+
+No account-wide changes, paid overage, inference canaries, legacy UNKNOWN-effect
+reset, automatic approval renewal, or claims of actual pilot success. The native
+Autonomizer adapter and live acceptance remain separately evidenced work.
+
+The installation follow-through full run passed 1,344 of 1,363 tests, zero
+failures and the same 19 existing skips. The copied Node launcher also required
+its matching libnode dylib; no system runtime or permissions were changed.
+Independent review approved the three-file isolation delta with no P1/P2.
+The earlier known-red integration hold is resolved by this evidence, not waived.
+Final simplification review found no useful behavior-preserving deletion.
