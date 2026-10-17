@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const { buildParallelizationPlan } = require("../src/parallelization-planner");
 const { scoreCapabilityMatch } = require("../src/capability-router");
 const { handleHookPayload } = require("../bin/myos-dispatch-hook");
+const { isolateHookHome } = require('./helpers/isolated-home');
 const signals = {
   env: { OPENAI_API_KEY: "fixture-only" },
   parallelizationStage: { capabilities: {}, state: {} },
@@ -77,4 +78,36 @@ test("actual Qwen task-class request cannot route to a palette capability", () =
   const text = "Also look at MYOS-DISPATCH.md. We need to work on that and make sure the local Qwen model is also getting called for OAuth and for the API whenever possible. For the right task class. Let's do a deep analysis of the task classes for OAuth, and also for the API after we do OAuth.";
   const capability = { id: "agent:color-palette", aliases: ["Color Palette", "color-palette", "media", "api"], description: "External/product-only color extraction and theme generation API. Do not run as an always-on local MyOS service unless explicitly working on…", priority: 50 };
   assert.ok(scoreCapabilityMatch(capability, text).evidenceScore < 10);
+});
+
+test('every context mode retains Scale 4 intake and unfinished-work obligations', t => {
+  isolateHookHome(t);
+  const plan = { branch: 'project', intentType: 'directive', actionType: 'write',
+    projectSlug: 'myos-infrastructure', searchScope: '/fixture/projects/myos-infrastructure',
+    goalScale: 4, goalMode: 'ultragoal', route: { lane: 'worker_skill' } };
+  for (const contextMode of ['full', 'compact', 'lean']) {
+    const out = handleHookPayload({ hook_event_name: 'UserPromptSubmit', prompt: 'Keep going with storage cleanup' },
+      'codex', { plan, contextMode, rewrite: false });
+    const context = out.hookSpecificOutput.additionalContext;
+    assert.match(context, /\[MyOS execution obligations\]/, contextMode);
+    assert.match(context, /Load applicable project CONTEXT\.md/);
+    assert.match(context, /existing unfinished obligations/);
+    assert.match(context, /active orchestrator owns the next safe step/);
+    assert.match(context, /Before ending.*every required outcome/);
+    assert.match(context, /stopAfterMatch limits lookup.*not task completion/);
+    assert.match(context, /does not start a background continuation worker/);
+  }
+});
+
+test('completion guidance never expands permissions or burdens trivial and disabled turns', t => {
+  isolateHookHome(t);
+  for (const [goalScale, contextMode] of [[1,'full'],[4,'none']]) {
+    const out = handleHookPayload({ hook_event_name:'UserPromptSubmit', prompt:'thanks' }, 'codex',
+      { plan:{ goalScale, actionType:'read', route:{lane:'worker_skill'} }, contextMode, rewrite:false });
+    assert.doesNotMatch(out?.hookSpecificOutput?.additionalContext || '', /\[MyOS execution obligations\]/);
+  }
+  const out = handleHookPayload({ hook_event_name:'UserPromptSubmit', prompt:'Keep going' }, 'claude',
+    { plan:{goalScale:4,actionType:'write',route:{lane:'worker_skill'}},contextMode:'compact',rewrite:false });
+  assert.match(out.hookSpecificOutput.additionalContext, /Preserve pauses, ownership, auth, protected-system, destructive-action and send gates/);
+  assert.match(out.hookSpecificOutput.additionalContext, /Goal Scale is not permission to mutate persisted goals/);
 });
