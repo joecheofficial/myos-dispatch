@@ -25,6 +25,8 @@ function validateUnattendedResult(result) {
     } else reject();
   }
   if (phase !== "done") reject();
+  if (!/^[a-zA-Z0-9_.:-]{1,200}$/.test(rows[0].thread_id)) reject();
+  return rows[0].thread_id;
 }
 
 async function executeCodexText(options, dependencies = {}) {
@@ -60,10 +62,13 @@ async function executeCodexText(options, dependencies = {}) {
         "-c", 'approval_policy="never"', "-c", 'forced_login_method="chatgpt"', "-c", 'model_provider="openai"',
         "-c", `model_reasoning_effort="${effort}"`, "-m", options.model, "-"],
       input: options.prompt, timeoutMs,
+      ...(options.signal ? {signal:options.signal} : {}),
+      ...(options.beforeSpawn ? {beforeSpawn:options.beforeSpawn} : {}),
+      ...(options.deadlineAt ? {deadlineAt:options.deadlineAt} : {}),
       ...(options.unattended === true ? {maxOutputBytes:1048576} : {}),
     });
     const parsed = parseCodexJsonl(result.stdout);
-    if (result.code !== 0 || result.signal || result.cleanupFailed || result.outputLimitExceeded || parsed.errorMessage || !parsed.summary) {
+    if (result.code !== 0 || result.signal || result.aborted || result.cleanupFailed || result.outputLimitExceeded || parsed.errorMessage || !parsed.summary) {
       const error = new Error(options.unattended === true
         ? "Native Codex execution failed; no automatic retry or provider fallback"
         : parsed.errorMessage || result.stderr || "OAuth provider returned no validated assistant output");
@@ -72,8 +77,9 @@ async function executeCodexText(options, dependencies = {}) {
       error.cleanupFailed = result.cleanupFailed;
       throw error;
     }
-    if (options.unattended === true) validateUnattendedResult(result);
-    return { text: parsed.summary, raw: { provider: "codex-oauth", model: options.model, providerReportedModel: null }, usage: parsed.usage };
+    const threadId=options.unattended === true ? validateUnattendedResult(result) : null;
+    return { text: parsed.summary, ...(threadId ? {providerResponseId:threadId} : {}),
+      raw: { provider: "codex-oauth", model: options.model, providerReportedModel: null }, usage: parsed.usage };
   } finally {
     // Only remove our empty temporary directory; never recursively clean provider output.
     try { fs.rmdirSync(cwd); } catch { /* Retain unexpected artifacts for inspection. */ }

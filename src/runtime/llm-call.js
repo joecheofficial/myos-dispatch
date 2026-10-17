@@ -2010,6 +2010,32 @@ async function myosRunBoundedAPI(options = {}) {
   return require('./bounded-api').runBoundedAPI(options, prepareBoundedApiLaunch);
 }
 
+async function myosRunBoundedCodex(options = {}) {
+  return require('./bounded-codex').runBoundedCodex(options, prepareBoundedCodexLaunch);
+}
+
+function prepareBoundedCodexLaunch(options) {
+  if (!isCanonicalTaskClass(options.taskClass) || resolveAuthMode(options.authMode) !== 'oauth') throw new Error('route');
+  const installation = require('../policy/codex-unattended').assertUnattendedCodexOptions(options,
+    {authMode: resolveAuthMode(options.authMode), executionPolicy: options.executionPolicy});
+  const policyPath = resolveSpendPolicyPath();
+  if (process.env.MYOS_SPEND_POLICY_PATH || fs.existsSync(policyPath)) {
+    const policy = JSON.parse(fs.readFileSync(policyPath, 'utf8'));
+    if (!policy || typeof policy !== 'object' || Array.isArray(policy) ||
+        (policy.killSwitch != null && typeof policy.killSwitch !== 'boolean')) throw new Error('policy');
+  }
+  const selected = {...options, model: installation.selection.model};
+  const plan = resolveExecutionPlan(selected);
+  if (plan.candidates.length !== 1) throw new Error('route');
+  spendSummaryCache = null;
+  const {candidate, spendControlAction} = applySpendPolicyToCandidate({candidate:plan.candidates[0],
+    options:selected, taskClass:options.taskClass, complianceLane:'unattended_codex',
+    caller:resolveCallerContext(selected),authLabel:resolveAuthLabel({provider:'openai',authMode:'oauth',options:selected}),authMode:'oauth'});
+  validateExecutionCandidate(plan,candidate,{authMode:'oauth'});
+  if (candidate.model !== selected.model || spendControlAction) throw new Error('route');
+  return {...installation,policyIdentity:JSON.stringify({plan,candidate,policy:loadSpendPolicy()})};
+}
+
 // Deliberately opt-in: legacy, OAuth and private bot execution are unchanged.
 function prepareBoundedApiLaunch(options) {
   if (!isCanonicalTaskClass(options.taskClass) || resolveAuthMode(options.authMode) !== 'api') {
@@ -2040,6 +2066,7 @@ function prepareBoundedApiLaunch(options) {
 }
 
 module.exports = {
+  myosRunBoundedCodex,
   myosRunBoundedAPI,
   CODEX_OAUTH_CHEAP_MODEL,
   CODEX_OAUTH_STRONG_MODEL,
