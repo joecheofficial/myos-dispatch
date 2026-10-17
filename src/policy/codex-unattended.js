@@ -3,6 +3,22 @@ const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 const {createHash} = require("node:crypto");
+const {selectCodexModel} = require("./codex-model-routing");
+
+function resolveInstalledCodexModel(options) {
+  const file=path.join(os.userInfo().homedir,".myos-dispatch","oauth-models.json");
+  let fd,state;
+  try {
+    if(fs.realpathSync(file)!==file) throw new Error("symlink");
+    fd=fs.openSync(file,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);
+    const stat=fs.fstatSync(fd);
+    if(!stat.isFile() || stat.uid!==process.getuid() || (stat.mode&0o077) || stat.size>1048576) throw new Error("unsafe registry");
+    state=JSON.parse(fs.readFileSync(fd,"utf8"));
+    if(state.version!==1 || !Number.isSafeInteger(state.revision) || state.revision<1) throw new Error("invalid registry");
+  } catch { throw new Error("unattended_codex requires a current private Codex model inventory"); }
+  finally {if(fd!==undefined) fs.closeSync(fd);}
+  return selectCodexModel(state,{taskClass:options.taskClass,model:options.model,effort:options.effort,now:Date.now()});
+}
 
 function assertNativeExecutable(options) {
   const reject = () => {throw new Error("unattended_codex requires an exact reviewed native executable SHA-256 pin");};
@@ -36,15 +52,16 @@ function loadInstallation(options) {
     const stat=fs.fstatSync(fd);
     if (!stat.isFile() || stat.uid!==process.getuid() || (stat.mode & 0o077) || stat.size>16384) reject();
     approval=JSON.parse(fs.readFileSync(fd,"utf8"));
-    if (!approval || approval.version!==1 || approval.enabled!==true || approval.accountScope!=="user_owned" ||
-        approval.environment!=="trusted_private" || approval.model!==options.model ||
+    if (!approval || approval.version!==2 || approval.enabled!==true || approval.accountScope!=="user_owned" ||
+        approval.environment!=="trusted_private" || approval.modelPolicy!=="codex_task_class" || approval.model!=null ||
         !Array.isArray(approval.taskClasses) || !approval.taskClasses.includes(options.taskClass) ||
         !Number.isFinite(Date.parse(approval.expiresAt)) || Date.parse(approval.expiresAt)<=Date.now()) reject();
   } catch {reject();}
   finally {if(fd!==undefined) fs.closeSync(fd);}
   assertNativeExecutable({codexExecutable:approval.executable,codexExecutableSha256:approval.sha256});
   if (Date.parse(approval.expiresAt)<=Date.now()) reject();
-  return Object.freeze({executable:approval.executable,expiresAt:Date.parse(approval.expiresAt)});
+  return Object.freeze({executable:approval.executable,expiresAt:Date.parse(approval.expiresAt),
+    selection:resolveInstalledCodexModel(options)});
 }
 
 // Scope is a deployment-owner assertion, not evidence of billing or entitlement.
@@ -57,9 +74,9 @@ function assertUnattendedCodexOptions(options, {authMode, executionPolicy}) {
       options.codexAccountScope !== "user_owned" || options.trustedWorkspace !== true) {
     throw new Error("unattended_codex requires explicit OAuth, internal_automation and a trusted user_owned account scope");
   }
-  if (!options.taskClass || typeof options.model !== "string" || !options.model.trim() ||
+  if (!options.taskClass || (options.model!=null && (typeof options.model !== "string" || !options.model.trim())) ||
       [options.provider, options.providerPreference, options.pinnedProvider].some(value => value != null && value !== "openai")) {
-    throw new Error("unattended_codex requires taskClass and an exact OpenAI model pin");
+    throw new Error("unattended_codex requires taskClass and Codex-only model selection");
   }
   if (options.audio != null || options.tools != null || options.searchGrounding ||
       options.budgetCapUsd != null || options.maxOutputTokens != null || options.maxInputTokens != null ||
@@ -69,10 +86,10 @@ function assertUnattendedCodexOptions(options, {authMode, executionPolicy}) {
   if (options.timeoutMs != null && (!Number.isSafeInteger(options.timeoutMs) || options.timeoutMs < 1 || options.timeoutMs > 1800000)) {
     throw new Error("unattended_codex timeoutMs must be an integer from 1 to 1800000");
   }
-  if (options.codexExecutable!=null || options.codexExecutableSha256!=null) {
-    throw new Error("unattended_codex executable approval cannot be supplied by a task");
+  if (options.codexExecutable!=null || options.codexExecutableSha256!=null || options.now!=null) {
+    throw new Error("unattended_codex executable approval and clock cannot be supplied by a task");
   }
   return loadInstallation(options);
 }
 
-module.exports = {assertUnattendedCodexOptions};
+module.exports = {assertUnattendedCodexOptions,resolveInstalledCodexModel};

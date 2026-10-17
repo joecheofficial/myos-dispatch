@@ -1383,6 +1383,10 @@ async function myosRun(options = {}) {
     }
   }
   const billingMode = unattendedCodex ? "subscription" : authMode;
+  const codexSelectionReceipt = unattendedCodex ? {
+    reasoningEffort: codexInstallation.selection.effort,
+    modelSelection: options.model ? "explicit_eligible" : "codex_task_class",
+  } : {};
 
   if (executionPolicy === "interactive_session" && complianceLane !== "interactive_oauth") {
     throw new Error(
@@ -1424,7 +1428,7 @@ async function myosRun(options = {}) {
     audio: options.audio,
     pinnedProvider: options.pinnedProvider,
     providerPreference: options.providerPreference || options.provider,
-    model: options.model,
+    model: unattendedCodex ? codexInstallation.selection.model : options.model,
     profile: options.profile,
     responseMode: options.responseMode,
   });
@@ -1508,11 +1512,14 @@ async function myosRun(options = {}) {
       const claudeOauthVerified = authMode === "oauth" && isClaudeTextRequest(options) &&
         selectModels(readState(oauthRegistry), {provider:"claude",taskClass}).some(model=>model.model===executionCandidate.model);
       validateExecutionCandidate(plan, executionCandidate, { authMode, audio: options.audio, claudeOauthVerified });
+      if (unattendedCodex) require("../policy/codex-unattended").resolveInstalledCodexModel({
+        taskClass,model:executionCandidate.model,effort:codexInstallation.selection.effort,
+      });
       const result =
         unattendedCodex
           ? await require("./oauth-text").executeCodexText({
               model: executionCandidate.model, prompt: buildCodexExecPrompt(buildMessages(options), options.responseMode),
-              effort: options.effort, timeoutMs: Math.min(options.timeoutMs || 180000,codexInstallation.expiresAt-Date.now()),
+              effort: codexInstallation.selection.effort, timeoutMs: Math.min(options.timeoutMs || 180000,codexInstallation.expiresAt-Date.now()),
               approvalExpiresAt: codexInstallation.expiresAt,
               unattended: true, command: codexInstallation.executable,
             }).then(output => ({...output, provider: "openai", model: executionCandidate.model,
@@ -1557,6 +1564,7 @@ async function myosRun(options = {}) {
       const finalResult = {
         ...result,
         ...(unattendedCodex ? {costBasis: "account_usage_unmetered", accountChargeUsd: null} : {}),
+        ...codexSelectionReceipt,
         transportAuthMode: executionCandidate.provider === "local" ? "none" : authMode,
         billingMode: executionCandidate.provider === "local" ? "local" : billingMode,
         authMode,
@@ -1591,6 +1599,7 @@ async function myosRun(options = {}) {
       attemptEvents.push({
         index,
         status: "success",
+        ...codexSelectionReceipt,
         type: executionCandidate.type,
         transportAuthMode: executionCandidate.provider === "local" ? "none" : authMode,
         billingMode: executionCandidate.provider === "local" ? "local" : billingMode,
@@ -1612,6 +1621,7 @@ async function myosRun(options = {}) {
       appendUsageEvent({
         ts: new Date().toISOString(),
         outcome: "success",
+        ...codexSelectionReceipt,
         billable: authMode === "api" && executionCandidate.type === "llm" && executionCandidate.provider !== "local",
         transportAuthMode: executionCandidate.provider === "local" ? "none" : authMode,
         billingMode: executionCandidate.provider === "local" ? "local" : billingMode,
@@ -1659,7 +1669,7 @@ async function myosRun(options = {}) {
       return finalResult;
     } catch (error) {
       lastError = error;
-      let retryableError = isRetryableProviderError(error);
+      let retryableError = unattendedCodex ? false : isRetryableProviderError(error);
       if (!unattendedCodex && authMode === "oauth" && executionCandidate.provider !== "local" && executionCandidate.type === "llm") {
         const failure = { provider: executionCandidate.provider === "anthropic" ? "claude" : "codex", model: executionCandidate.model || options.model, stderr: error.message,
           signal: error.signal, cleanupFailed: error.cleanupFailed };
@@ -1674,6 +1684,7 @@ async function myosRun(options = {}) {
       attemptEvents.push({
         index,
         status: "error",
+        ...codexSelectionReceipt,
         type: executionCandidate.type,
         transportAuthMode: executionCandidate.provider === "local" ? "none" : authMode,
         billingMode: executionCandidate.provider === "local" ? "local" : billingMode,
@@ -1713,6 +1724,7 @@ async function myosRun(options = {}) {
       appendUsageEvent({
         ts: new Date().toISOString(),
         outcome: "error",
+        ...codexSelectionReceipt,
         billable: authMode === "api" && executionCandidate.type === "llm" && executionCandidate.provider !== "local",
         transportAuthMode: executionCandidate.provider === "local" ? "none" : authMode,
         billingMode: executionCandidate.provider === "local" ? "local" : billingMode,

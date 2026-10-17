@@ -40,15 +40,20 @@ test("myosRun explicitly opts trusted user-owned automation into native Codex", 
   const bytes=Buffer.from([0xcf,0xfa,0xed,0xfe,1,2,3,4]);
   fs.writeFileSync(executable,bytes,{mode:0o700});
   const manifestFile=path.join(root,"approval.json");
-  const approval={version:1,enabled:true,accountScope:"user_owned",environment:"trusted_private",
-    executable,sha256:createHash("sha256").update(bytes).digest("hex"),model:route.model,
+  const approval={version:2,enabled:true,accountScope:"user_owned",environment:"trusted_private",
+    executable,sha256:createHash("sha256").update(bytes).digest("hex"),modelPolicy:"codex_task_class",
     taskClasses:[route.taskClass],expiresAt:new Date(Date.now()+60000).toISOString()};
   fs.writeFileSync(manifestFile,JSON.stringify(approval),{mode:0o600});
+  const registryFile=path.join(root,"models.json");
+  const inventory={version:1,revision:1,models:["gpt-5.6-terra",route.model].map(model=>({provider:"codex",model,
+    visible:true,auth:"subscription",observedAt:new Date().toISOString(),efforts:["low","medium","high"]}))};
+  fs.writeFileSync(registryFile,JSON.stringify(inventory),{mode:0o600});
   const installedPath=path.join(os.userInfo().homedir,".config","myos","dispatch","codex-unattended.json");
+  const installedRegistry=path.join(os.userInfo().homedir,".myos-dispatch","oauth-models.json");
   for (const method of ["openSync","realpathSync"]) {
     const actual=fs[method].bind(fs);
-    t.mock.method(fs,method,(file,...args)=>file===installedPath
-      ? (method==="realpathSync" ? installedPath : actual(manifestFile,...args)) : actual(file,...args));
+    t.mock.method(fs,method,(file,...args)=>[installedPath,installedRegistry].includes(file)
+      ? (method==="realpathSync" ? file : actual(file===installedPath?manifestFile:registryFile,...args)) : actual(file,...args));
   }
   let calls = 0;
   native.executeCodexText = async options => {
@@ -70,15 +75,19 @@ test("myosRun explicitly opts trusted user-owned automation into native Codex", 
     fs.readFileSync(path.join(process.env.MYOS_USAGE_LEDGER_DIR,name),"utf8").trim().split("\n").map(JSON.parse));
   assert.equal(ledger.at(-1).estimatedCostUsd,null,"account usage cost is unknown, not zero");
   assert.equal(ledger.at(-1).costBasis,"account_usage_unmetered");
+  assert.equal(ledger.at(-1).reasoningEffort,"medium");
+  assert.equal(ledger.at(-1).modelSelection,"explicit_eligible");
+  assert.equal(ledger.at(-1).attempts[0].reasoningEffort,"medium");
 
   const valid = {...route, prompt:"test", codexAccountScope:"user_owned", trustedWorkspace:true};
   const rejected = [
     {codexAccountScope:undefined}, {codexAccountScope:"shared"}, {trustedWorkspace:false},
-    {authMode:"api"}, {taskClass:undefined}, {taskClass:"made_up"}, {model:undefined},
+    {authMode:"api"}, {taskClass:undefined}, {taskClass:"made_up"}, {model:"api-only-model"},
     {provider:"claude"}, {providerPreference:"anthropic"}, {pinnedProvider:"google"},
     {executionPolicy:"product_runtime"}, {executionPolicy:"interactive_session"},
     {audio:{}}, {tools:[]}, {searchGrounding:true}, {budgetCapUsd:1}, {maxOutputTokens:100},
     {timeoutMs:0}, {timeoutMs:1800001},
+    {now:Date.now()}, {now:Date.now()-30*86400000}, {now:Date.now()+30*86400000},
     {codexExecutable:executable}, {codexExecutableSha256:approval.sha256},
     {signal:new AbortController().signal}, {deadlineAt:Date.now()+1000},
     {beforeLaunch:()=>true}, {authorizeLaunch:()=>true}, {maxInputTokens:100},
@@ -104,12 +113,36 @@ test("myosRun explicitly opts trusted user-owned automation into native Codex", 
   process.env.MYOS_INITIATOR_OAUTH_DISABLED="1";
   await assert.rejects(myosRun(valid), /rollback switch/);
   delete process.env.MYOS_INITIATOR_OAUTH_DISABLED;
-  for (const change of [{enabled:false},{accountScope:"shared"},{model:"other"},{taskClasses:[]},
+  for (const change of [{enabled:false},{accountScope:"shared"},{modelPolicy:"other"},{taskClasses:[]},
     {expiresAt:"2020-01-01T00:00:00Z"},{sha256:"0".repeat(64)}]) {
     fs.writeFileSync(manifestFile,JSON.stringify({...approval,...change}));
     await assert.rejects(myosRun(valid), /unattended_codex/);
   }
   assert.equal(calls,2,"installation and rollback failures cannot launch");
+  fs.writeFileSync(manifestFile,JSON.stringify(approval));
+  native.executeCodexText=async options=>{
+    calls++;
+    assert.equal(options.model,"gpt-5.6-terra");
+    assert.equal(options.effort,"medium");
+    return {text:"automatic",usage:{inputTokens:1,outputTokens:1}};
+  };
+  const automatic=await myosRun({...valid,model:undefined});
+  assert.equal(automatic.model,"gpt-5.6-terra");
+  assert.equal(automatic.reasoningEffort,"medium");
+  assert.equal(automatic.modelSelection,"codex_task_class");
+  assert.equal(calls,3,"automatic selection still makes exactly one call");
+  const open=fs.openSync.bind(fs);
+  let registryReads=0;
+  const race=t.mock.method(fs,"openSync",(file,...args)=>{
+    if(file===installedRegistry && ++registryReads===2) {
+      fs.writeFileSync(registryFile,JSON.stringify({...inventory,models:inventory.models.map(record=>
+        record.model==="gpt-5.6-terra" ? {...record,quarantineUntil:new Date(Date.now()+60000).toISOString()} : record)}));
+    }
+    return open(file,...args);
+  });
+  await assert.rejects(myosRun({...valid,model:undefined}),/no fresh eligible/);
+  assert.equal(calls,3,"revoked selected model cannot launch or fall back to another model");
+  race.mock.restore();
 });
 
 test("unattended candidate validation cannot admit other transports", () => {

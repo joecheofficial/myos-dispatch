@@ -2,6 +2,22 @@
 
 ## What / why
 
+October 17 correction from Joe: unattended permission applies to Codex, not one
+globally pinned model. Select the appropriate currently eligible Codex model and
+reasoning effort for each task class. Keep the selected identity exact per run.
+
+Revision approach: add `src/policy/codex-model-routing.js`, using the existing
+private OAuth inventory as read-only evidence. Installation schema v2 authorizes
+`modelPolicy:codex_task_class`, not one model. Task-specific explicit choices remain
+possible if visible, fresh, subscription-authenticated and not quarantined.
+Automatic choice ranks known capability families and newer versions within each
+family. Unknown families require an explicit eligible choice rather than invented
+capability. API catalog entries and stale/unavailable identities cannot launch.
+Revalidate the selected identity before execution. No discovery or inference probe.
+Test automatic choices, explicit alternatives, supported efforts and fail-closed
+inventory states before calling this revision ready. Existing execution/spend,
+Anthropic, bot and live-pilot boundaries remain unchanged.
+
 Joe approved a Codex-specific unattended route on 2026-10-17. OpenAI documents
 trusted noninteractive Codex runs using saved ChatGPT-managed authentication at
 https://learn.chatgpt.com/docs/non-interactive-mode. This is native CLI use, not
@@ -11,7 +27,7 @@ remain unchanged. Approval covers implementation, not a claim that pilots passed
 ## Approach
 
 Add explicit `unattended_codex` routing in `src/myos-routing.js` and an isolated
-branch in `myosRun`. Require canonical taskClass, pinned model, OAuth, an internal
+branch in `myosRun`. Require canonical taskClass, eligible per-run model, OAuth, an internal
 automation policy, and explicit user-owned/trusted-private account scope. No
 default lane changes, automatic discovery, provider/model fallback, hosted/shared
 credentials or credential shipping. The native executor uses an empty temporary
@@ -25,7 +41,7 @@ Anthropic, product-runtime and API-only protections and is rejected.
 
 - An explicit trusted user-owned Codex request resolves exactly one OpenAI OAuth
   candidate and executes through native Codex, without human-visible gating.
-- Missing scope/model/taskClass, non-internal policy, other providers, API auth,
+- Missing scope/taskClass/eligible inventory, non-internal policy, other providers, API auth,
   tools/audio and incompatible hard API-dollar budgets fail before execution.
 - Existing API routes and foreground OAuth behavior remain unchanged.
 - Native launches cannot inherit API credentials or optional MCP/app configuration.
@@ -57,25 +73,41 @@ user, mode 0600, not a symlink, and contain this schema (placeholders are invali
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "enabled": true,
   "accountScope": "user_owned",
   "environment": "trusted_private",
   "executable": "/absolute/path/to/reviewed/native/vendor/codex",
   "sha256": "exact reviewed executable SHA-256",
-  "model": "exact approved model",
+  "modelPolicy": "codex_task_class",
   "taskClasses": ["default_automation"],
   "expiresAt": "explicit approval expiry in UTC"
 }
 ```
 
-Review the installed vendor binary, digest, model and account entitlement before
+Review the installed vendor binary, digest, task-class policy and account entitlement before
 provisioning. No credentials belong in this manifest. The binary must be native,
 regular, executable, non-symlink, root/user-owned and not group/world-writable.
 Task-supplied executable pins are rejected. Do not use a wrapper that may hydrate
 credentials or rewrite authentication. Expiry bounds the launch timeout. This is
 an installation policy boundary, not protection against arbitrary code already
 running with the installation user's filesystem privileges.
+
+Version 1 single-model manifests are not silently upgraded. Version 2 deliberately
+allows all eligible Codex models rather than one installation model. Model evidence
+comes from the owner-private, non-symlink `~/.myos-dispatch/oauth-models.json` file,
+not API model catalogs or a task-supplied inventory. Evidence older than seven days,
+future-dated, hidden, non-subscription or quarantined is excluded. No last-good
+fallback can undo quarantine/revocation when the current file is malformed.
+Automatic preferences preserve Dispatch's task-family policy: Luna/Terra for cheap
+work, Terra/Sol for routine automation, Sol/Astra for synthesis/planning, and
+Astra/Sol for elite work. Newer numeric generations rank first within a family.
+These are capability preferences, not asserted account pricing or quality proof.
+New unclassified families can be explicitly selected if eligible but are not
+automatically assigned invented capabilities. Only supported reasoning efforts are
+used. Selection happens before launch and creates one exact model/effort receipt;
+a provider failure never triggers a second model call.
+The eligibility clock is installation-owned; task-supplied timestamps are rejected.
 
 Set `MYOS_INITIATOR_OAUTH_DISABLED=1`, the existing spend-policy kill switch, or
 manifest `enabled:false` to refuse subsequent launches. None terminates an already
@@ -101,3 +133,12 @@ candidate full run had 1,358 tests, 1,325 passes, 14 failures (a subset of the
 baseline failures) and 19 skips; the FIFO deadline failure did not recur.
 Those failures remain unresolved, not waived or reported green. A final expiry
 boundary regression was added afterward and is covered by the focused rerun.
+
+The multi-model revision passed 80/80 focused tests. Its full-suite run had 1,363
+tests: 1,332 passes, 12 failures and 19 skips. The 12 failures are all in the prior
+baseline set; two native-hook failures did not recur, which is not a claimed fix.
+The subsequent clock-input rejection fix passed the 80-test focused rerun.
+RED was observed before implementing selection, receipt persistence and clock
+rejection. This remains a WIP checkpoint, not an installed release or live pilot.
+GitNexus impact analysis is unavailable because the database is version 42 and the
+reader is version 40; direct caller tracing is not presented as a graph audit.
