@@ -120,3 +120,45 @@ test("bounded native result requires a native UUID thread identity",async t=>{
     stdout:f.output.stdout.replace("019a0000-1111-7111-8111-111111111111","not-a-native-thread")};});
   await assert.rejects(api.myosRunBoundedCodex(f.request),/NATIVE_INVALID_RESULT/);
 });
+
+function pngInput() {
+  const zlib=require("node:zlib");
+  const chunk=(name,data)=>{const body=Buffer.concat([Buffer.from(name),data]);let crc=0xffffffff;
+    for(const byte of body){crc^=byte;for(let bit=0;bit<8;bit++)crc=(crc>>>1)^(crc&1?0xedb88320:0);}
+    const size=Buffer.alloc(4),sum=Buffer.alloc(4);size.writeUInt32BE(data.length);sum.writeUInt32BE((crc^0xffffffff)>>>0);
+    return Buffer.concat([size,body,sum]);};
+  const header=Buffer.alloc(13);header.writeUInt32BE(1);header.writeUInt32BE(1,4);header[8]=8;header[9]=6;
+  const bytes=Buffer.concat([Buffer.from("89504e470d0a1a0a","hex"),chunk("IHDR",header),
+    chunk("IDAT",zlib.deflateSync(Buffer.from([0,255,0,0,255]))),chunk("IEND",Buffer.alloc(0))]);
+  return {bytes,sha256:createHash("sha256").update(bytes).digest("hex")};
+}
+
+test("native image is digest-bound, privately attached and cleaned after a verified turn",async t=>{
+  const f=fixture(t),input=pngInput();let file,descriptor;
+  f.request.image=input;
+  const reserve=f.request.authorizeLaunch;f.request.authorizeLaunch=d=>{descriptor=d;return reserve(d);};
+  t.mock.method(runner,"runCommand",async r=>{
+    file=r.args[r.args.indexOf("--image")+1];assert.equal(path.dirname(file),r.cwd);
+    assert.equal(fs.statSync(file).mode&0o777,0o400);
+    assert.equal(createHash("sha256").update(fs.readFileSync(file)).digest("hex"),input.sha256);
+    input.bytes.fill(0);assert.equal(r.beforeSpawn(),true);return f.output;
+  });
+  const result=await api.myosRunBoundedCodex(f.request);
+  assert.equal(descriptor.image.sha256,input.sha256);assert.equal(result.image.width,1);
+  assert.equal(fs.existsSync(file),false);assert.equal(fs.existsSync(path.dirname(file)),false);
+});
+
+test("invalid or changed native image cannot launch",async t=>{
+  const f=fixture(t),image=pngInput();let spawned=0;
+  t.mock.method(runner,"runCommand",async r=>{
+    const file=r.args[r.args.indexOf("--image")+1];fs.chmodSync(file,0o600);fs.writeFileSync(file,"changed");
+    r.beforeSpawn();spawned++;return f.output;
+  });
+  for(const input of [{...image,sha256:"0".repeat(64)},{...image,path:"/untrusted"},
+    {...image,bytes:Buffer.from(new SharedArrayBuffer(image.bytes.length))},
+    {bytes:Buffer.from("not PNG"),sha256:createHash("sha256").update("not PNG").digest("hex")}]) {
+    await assert.rejects(api.myosRunBoundedCodex({...f.request,image:input}),/NATIVE_INVALID_IMAGE/);
+  }
+  await assert.rejects(api.myosRunBoundedCodex({...f.request,image}),/NATIVE_IMAGE_CHANGED/);
+  assert.equal(spawned,0);
+});
