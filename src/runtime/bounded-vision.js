@@ -70,6 +70,11 @@ function inspectPng(bytes) {
 
 function prepareVision(image, model) {
   assertVisionPolicy(model);
+  return snapshotPng(image);
+}
+
+// Byte validation is transport-independent; API pricing/model policy stays above.
+function snapshotPng(image) {
   if (!image || typeof image !== 'object' || Array.isArray(image) ||
       Object.keys(image).some(key => !['bytes', 'sha256'].includes(key)) ||
       !Buffer.isBuffer(image.bytes) || image.bytes.buffer instanceof SharedArrayBuffer ||
@@ -82,4 +87,4 @@ function prepareVision(image, model) {
   return { bytes, receipt: Object.freeze({ sha256, byteLength: bytes.length, ...size }) };
 }
 
-module.exports = { prepareVision, assertVisionPolicy, POLICY };
+module.exports = { prepareVision, snapshotPng, assertVisionPolicy, POLICY };

@@ -17,6 +17,15 @@ not a fabricated API response. No retry/fallback. Existing generic myosRun keeps
 rejecting bounded API options. Autonomizer separately owns atomic call quotas.
 Mapping unknown account cost to zero or weakening API accounting is rejected.
 
+The image follow-through attaches one validated PNG through native `--image`,
+verified in the installed native CLI help. Reuse the existing bounded PNG decoder
+without its API-only model/pricing assertion. Limit inputs to 8 MiB and 2048 pixels
+per dimension. Bind digest/dimensions into the launch receipt, copy into a private
+read-only temporary file, recheck its inode and bytes before spawn, then remove only
+that owned input. Image input does not enable tools, image generation or API fallback.
+The temporary-path guard assumes a trusted same-principal host. Native CLI pathname
+input cannot atomically exclude a hostile same-UID writer between the check and read.
+
 ## Acceptance criteria
 
 - Reservation and final guard occur before spawn; refusal/cancellation launches none.

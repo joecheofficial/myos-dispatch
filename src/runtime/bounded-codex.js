@@ -3,16 +3,22 @@ const {createHash}=require("node:crypto");
 const {isCanonicalTaskClass}=require("../myos-routing");
 const FIELDS=new Set(["taskClass","executionPolicy","authMode","complianceLane","pinnedProvider",
   "model","effort","codexAccountScope","trustedWorkspace","prompt","systemPrompt","responseMode",
-  "agentId","project","rootTaskId","stepId","accountRef","timeoutMs","deadlineAt","signal","beforeLaunch","authorizeLaunch"]);
+  "agentId","project","rootTaskId","stepId","accountRef","timeoutMs","deadlineAt","signal","beforeLaunch","authorizeLaunch","image"]);
 const fail=code=>{throw Object.assign(new Error(code),{code});};
 const label=s=>typeof s==="string" && /^[a-zA-Z0-9_.:/-]{1,200}$/.test(s);
 const hash=s=>createHash("sha256").update(s).digest("hex");
 
 function validate(raw) {
   if(!raw || typeof raw!=="object" || Array.isArray(raw) || Object.keys(raw).some(k=>!FIELDS.has(k))) fail("NATIVE_INVALID_OPTIONS");
-  const {signal,beforeLaunch,authorizeLaunch,...data}=raw;
+  const {signal,beforeLaunch,authorizeLaunch,image,...data}=raw;
   if(!(signal instanceof AbortSignal) || typeof beforeLaunch!=="function" || typeof authorizeLaunch!=="function") fail("NATIVE_LAUNCH_CONTRACT_REQUIRED");
   const options=structuredClone(data);
+  let vision=null;
+  if(image!==undefined) {
+    try { vision=require("./bounded-vision").snapshotPng(image); }
+    catch { fail("NATIVE_INVALID_IMAGE"); }
+    options.image=vision.receipt;
+  }
   if(!isCanonicalTaskClass(options.taskClass) || options.executionPolicy!=="internal_automation" || options.authMode!=="oauth" ||
     options.complianceLane!=="unattended_codex" || options.codexAccountScope!=="user_owned" || options.trustedWorkspace!==true ||
     (options.pinnedProvider!=null && options.pinnedProvider!=="openai")) fail("NATIVE_INVALID_ROUTE");
@@ -22,11 +28,11 @@ function validate(raw) {
     Buffer.byteLength(options.prompt)+Buffer.byteLength(options.systemPrompt||"")>262144) fail("NATIVE_INVALID_INPUT");
   if(!Number.isSafeInteger(options.timeoutMs) || options.timeoutMs<1 || options.timeoutMs>1800000 ||
     !Number.isSafeInteger(options.deadlineAt)) fail("NATIVE_INVALID_DEADLINE");
-  return {options,signal,beforeLaunch,authorizeLaunch};
+  return {options,signal,beforeLaunch,authorizeLaunch,vision};
 }
 
 async function runBoundedCodex(raw,prepare) {
-  const {options,signal,beforeLaunch,authorizeLaunch}=validate(raw);
+  const {options,signal,beforeLaunch,authorizeLaunch,vision}=validate(raw);
   let deadline=Math.min(Date.now()+options.timeoutMs,options.deadlineAt);
   const controller=new AbortController();
   const combined=AbortSignal.any([signal,controller.signal]);
@@ -44,7 +50,8 @@ async function runBoundedCodex(raw,prepare) {
     requestDigest=digest;
     const descriptor=Object.freeze({rootTaskId:options.rootTaskId,stepId:options.stepId,taskClass:options.taskClass,
       accountRef:options.accountRef,model:launch.selection.model,reasoningEffort:launch.selection.effort,
-      requestDigest:digest,deadline,maximumAttempts:1,quotaKind:"codex_account_call",quotaUnits:1});
+      requestDigest:digest,deadline,maximumAttempts:1,quotaKind:"codex_account_call",quotaUnits:1,
+      ...(vision?{image:vision.receipt}:{})});
     const expiration=new Promise((_,reject)=>{
       onAbort=()=>reject(Object.assign(new Error(signal.aborted?"NATIVE_CANCELLED":"NATIVE_DEADLINE"),
         {code:signal.aborted?"NATIVE_CANCELLED":"NATIVE_DEADLINE"}));
@@ -74,6 +81,7 @@ async function runBoundedCodex(raw,prepare) {
       ? `${options.systemPrompt||""}\n\n${options.prompt}\n\nReturn only valid JSON.`
       : `${options.systemPrompt||""}\n\n${options.prompt}`;
     const output=await require("./oauth-text").executeCodexText({model:launch.selection.model,effort:launch.selection.effort,prompt,
+      ...(vision?{image:{bytes:vision.bytes,sha256:vision.receipt.sha256}}:{}),
       command:launch.executable,unattended:true,approvalExpiresAt:launch.expiresAt,
       timeoutMs:Math.max(1,Math.min(deadline,reservation.expiresAt)-Date.now()),deadlineAt:Math.min(deadline,reservation.expiresAt),
       signal:combined,beforeSpawn:finalGuard});

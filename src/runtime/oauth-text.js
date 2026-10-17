@@ -2,6 +2,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
+const {createHash}=require("node:crypto");
 
 function validateUnattendedResult(result) {
   const reject = () => { throw new Error("Native Codex returned an incomplete or unverified text turn"); };
@@ -30,6 +31,8 @@ function validateUnattendedResult(result) {
 }
 
 async function executeCodexText(options, dependencies = {}) {
+  const image=options.image===undefined ? null : require("./bounded-vision").snapshotPng(options.image);
+  if(image && options.unattended!==true) throw new Error("Native images require isolated unattended execution");
   if (options.unattended === true && options.timeoutMs != null &&
       (!Number.isSafeInteger(options.timeoutMs) || options.timeoutMs < 1 || options.timeoutMs > 1800000)) {
     throw new Error("Native Codex execution deadline is expired or invalid");
@@ -50,7 +53,27 @@ async function executeCodexText(options, dependencies = {}) {
   if (options.unattended === true) env.MYOS_INITIATOR = "unattended";
   const effort = ["low", "medium", "high", "xhigh", "max", "ultra"].includes(options.effort) ? options.effort : "low";
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "myos-oauth-text-"));
+  const imagePath=image?path.join(cwd,"input.png"):null;
+  let imageStat;
   try {
+    if(image) {
+      fs.writeFileSync(imagePath,image.bytes,{mode:0o400,flag:"wx"});
+      imageStat=fs.lstatSync(imagePath);
+    }
+    const beforeSpawn=()=>{
+      if(image) {
+        let fd;
+        try {
+          fd=fs.openSync(imagePath,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);
+          const stat=fs.fstatSync(fd);
+          if(!stat.isFile() || stat.ino!==imageStat.ino || stat.dev!==imageStat.dev || stat.nlink!==1 ||
+            stat.size!==image.bytes.length || (stat.mode&0o777)!==0o400 ||
+            createHash("sha256").update(fs.readFileSync(fd)).digest("hex")!==image.receipt.sha256) throw new Error("changed");
+        } catch { throw Object.assign(new Error("NATIVE_IMAGE_CHANGED"),{code:"NATIVE_IMAGE_CHANGED"}); }
+        finally {if(fd!==undefined)fs.closeSync(fd);}
+      }
+      return options.beforeSpawn ? options.beforeSpawn() : true;
+    };
     let timeoutMs = options.timeoutMs ?? 180000;
     if (options.unattended === true && options.approvalExpiresAt != null) {
       timeoutMs = Math.min(timeoutMs, options.approvalExpiresAt - Date.now());
@@ -60,10 +83,11 @@ async function executeCodexText(options, dependencies = {}) {
       command: options.command || "codex", cwd, env,
       args: ["exec", ...nativeIsolation, "--json", "--ephemeral", "--skip-git-repo-check", "-s", "read-only",
         "-c", 'approval_policy="never"', "-c", 'forced_login_method="chatgpt"', "-c", 'model_provider="openai"',
-        "-c", `model_reasoning_effort="${effort}"`, "-m", options.model, "-"],
+        "-c", `model_reasoning_effort="${effort}"`, "-m", options.model,
+        ...(imagePath?["--image",imagePath]:[]), "-"],
       input: options.prompt, timeoutMs,
       ...(options.signal ? {signal:options.signal} : {}),
-      ...(options.beforeSpawn ? {beforeSpawn:options.beforeSpawn} : {}),
+      ...((options.beforeSpawn || image) ? {beforeSpawn} : {}),
       ...(options.deadlineAt ? {deadlineAt:options.deadlineAt} : {}),
       ...(options.unattended === true ? {maxOutputBytes:1048576} : {}),
     });
@@ -81,6 +105,12 @@ async function executeCodexText(options, dependencies = {}) {
     return { text: parsed.summary, ...(threadId ? {providerResponseId:threadId} : {}),
       raw: { provider: "codex-oauth", model: options.model, providerReportedModel: null }, usage: parsed.usage };
   } finally {
+    // Only the exact input inode created by this invocation may be removed.
+    if(imageStat) {
+      try {const current=fs.lstatSync(imagePath);
+        if(current.ino===imageStat.ino && current.dev===imageStat.dev && current.isFile())fs.unlinkSync(imagePath);
+      } catch { /* Retain unexpected replacement artifacts. */ }
+    }
     // Only remove our empty temporary directory; never recursively clean provider output.
     try { fs.rmdirSync(cwd); } catch { /* Retain unexpected artifacts for inspection. */ }
   }
