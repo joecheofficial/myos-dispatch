@@ -49,6 +49,7 @@ test("normalizes task classes and falls back unknown values to default automatio
     "interactive_oauth",
     "unattended_api",
     "unattended_local",
+    "unattended_codex",
   ]);
 
   assert.equal(routing.normalizeTaskClass(" planning "), "planning");

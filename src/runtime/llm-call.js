@@ -1369,6 +1369,20 @@ async function myosRun(options = {}) {
     taskClass,
     audio: options.audio,
   });
+  const unattendedCodex = complianceLane === "unattended_codex";
+  let codexInstallation;
+  if (unattendedCodex) {
+    codexInstallation = require("../policy/codex-unattended").assertUnattendedCodexOptions(options, {authMode, executionPolicy});
+    const policyPath = resolveSpendPolicyPath();
+    if (process.env.MYOS_SPEND_POLICY_PATH || fs.existsSync(policyPath)) {
+      const policy = JSON.parse(fs.readFileSync(policyPath, "utf8"));
+      if (!policy || typeof policy !== "object" || Array.isArray(policy) ||
+          (policy.killSwitch != null && typeof policy.killSwitch !== "boolean")) {
+        throw new Error("Invalid unattended_codex spend policy");
+      }
+    }
+  }
+  const billingMode = unattendedCodex ? "subscription" : authMode;
 
   if (executionPolicy === "interactive_session" && complianceLane !== "interactive_oauth") {
     throw new Error(
@@ -1382,7 +1396,7 @@ async function myosRun(options = {}) {
     );
   }
 
-  if (complianceLane !== "interactive_oauth" && authMode !== "api") {
+  if (complianceLane !== "interactive_oauth" && !unattendedCodex && authMode !== "api") {
     throw new Error(
       `MyOS automation cannot run with auth_mode=${authMode}; unattended flows must use API auth`
     );
@@ -1414,7 +1428,7 @@ async function myosRun(options = {}) {
     profile: options.profile,
     responseMode: options.responseMode,
   });
-  const oauthRegistry = authMode === "oauth" ? registryPath() : null;
+  const oauthRegistry = authMode === "oauth" && !unattendedCodex ? registryPath() : null;
   let oauthState = readState(oauthRegistry);
   const oauthDeadline = Date.now() + Number(options.timeoutMs || 180000);
   const registryDefaultRoute = oauthState && plan.allowsLocalProvider === true && plan.routingSource === "taskClass" && !options.profile && plan.candidates.some(candidate => candidate.type === "llm");
@@ -1495,7 +1509,15 @@ async function myosRun(options = {}) {
         selectModels(readState(oauthRegistry), {provider:"claude",taskClass}).some(model=>model.model===executionCandidate.model);
       validateExecutionCandidate(plan, executionCandidate, { authMode, audio: options.audio, claudeOauthVerified });
       const result =
-        executionCandidate.provider === "local"
+        unattendedCodex
+          ? await require("./oauth-text").executeCodexText({
+              model: executionCandidate.model, prompt: buildCodexExecPrompt(buildMessages(options), options.responseMode),
+              effort: options.effort, timeoutMs: Math.min(options.timeoutMs || 180000,codexInstallation.expiresAt-Date.now()),
+              approvalExpiresAt: codexInstallation.expiresAt,
+              unattended: true, command: codexInstallation.executable,
+            }).then(output => ({...output, provider: "openai", model: executionCandidate.model,
+              estimatedCostUsd: null, json: maybeParseJson(output.text, options.responseMode)}))
+          : executionCandidate.provider === "local"
           ? await executeLocalCandidate(executionCandidate, { ...options, taskClass,
               ...(authMode === "oauth" ? {
                 timeoutMs: Math.max(1, Math.min(10000, oauthDeadline - Date.now())),
@@ -1534,8 +1556,9 @@ async function myosRun(options = {}) {
 
       const finalResult = {
         ...result,
+        ...(unattendedCodex ? {costBasis: "account_usage_unmetered", accountChargeUsd: null} : {}),
         transportAuthMode: executionCandidate.provider === "local" ? "none" : authMode,
-        billingMode: executionCandidate.provider === "local" ? "local" : authMode,
+        billingMode: executionCandidate.provider === "local" ? "local" : billingMode,
         authMode,
         authLabel,
         caller,
@@ -1570,7 +1593,7 @@ async function myosRun(options = {}) {
         status: "success",
         type: executionCandidate.type,
         transportAuthMode: executionCandidate.provider === "local" ? "none" : authMode,
-        billingMode: executionCandidate.provider === "local" ? "local" : authMode,
+        billingMode: executionCandidate.provider === "local" ? "local" : billingMode,
         providerOrTool:
           executionCandidate.type === "deterministic"
             ? executionCandidate.tool
@@ -1581,7 +1604,7 @@ async function myosRun(options = {}) {
             : finalResult.resolvedModelOrEngine || executionCandidate.model || null,
         latencyMs: Date.now() - attemptStartedAt,
         retryable: false,
-        estimatedCostUsd: Number(result.estimatedCostUsd || 0),
+        estimatedCostUsd: unattendedCodex ? null : Number(result.estimatedCostUsd || 0),
         inputTokens: Number(result.usage?.inputTokens || 0),
         outputTokens: Number(result.usage?.outputTokens || 0),
         spendControlAction,
@@ -1591,7 +1614,7 @@ async function myosRun(options = {}) {
         outcome: "success",
         billable: authMode === "api" && executionCandidate.type === "llm" && executionCandidate.provider !== "local",
         transportAuthMode: executionCandidate.provider === "local" ? "none" : authMode,
-        billingMode: executionCandidate.provider === "local" ? "local" : authMode,
+        billingMode: executionCandidate.provider === "local" ? "local" : billingMode,
         caller,
         taskClass,
         intent,
@@ -1606,7 +1629,7 @@ async function myosRun(options = {}) {
         resolvedProfile: finalResult.resolvedProfile,
         fallbackIndex: index,
         authLabel: finalResult.authLabel,
-        estimatedCostUsd: Number(finalResult.estimatedCostUsd || 0),
+        estimatedCostUsd: unattendedCodex ? null : Number(finalResult.estimatedCostUsd || 0),
         inputTokens: Number(result.usage?.inputTokens || 0),
         outputTokens: Number(result.usage?.outputTokens || 0),
         totalLatencyMs: Date.now() - runStartedAt,
@@ -1637,7 +1660,7 @@ async function myosRun(options = {}) {
     } catch (error) {
       lastError = error;
       let retryableError = isRetryableProviderError(error);
-      if (authMode === "oauth" && executionCandidate.provider !== "local" && executionCandidate.type === "llm") {
+      if (!unattendedCodex && authMode === "oauth" && executionCandidate.provider !== "local" && executionCandidate.type === "llm") {
         const failure = { provider: executionCandidate.provider === "anthropic" ? "claude" : "codex", model: executionCandidate.model || options.model, stderr: error.message,
           signal: error.signal, cleanupFailed: error.cleanupFailed };
         retryableError = recordFailure({ revision: 0, models: [] }, failure).lastFailure.retryAllowed && Date.now() < oauthDeadline;
@@ -1653,7 +1676,7 @@ async function myosRun(options = {}) {
         status: "error",
         type: executionCandidate.type,
         transportAuthMode: executionCandidate.provider === "local" ? "none" : authMode,
-        billingMode: executionCandidate.provider === "local" ? "local" : authMode,
+        billingMode: executionCandidate.provider === "local" ? "local" : billingMode,
         providerOrTool:
           executionCandidate.type === "deterministic"
             ? executionCandidate.tool
@@ -1674,7 +1697,7 @@ async function myosRun(options = {}) {
       if (fallbackCandidate && retryableError) {
         continue;
       }
-      await maybeNotifyProviderIssue({
+      if (!unattendedCodex) await maybeNotifyProviderIssue({
         provider:
           executionCandidate.type === "llm"
             ? executionCandidate.provider
@@ -1692,7 +1715,7 @@ async function myosRun(options = {}) {
         outcome: "error",
         billable: authMode === "api" && executionCandidate.type === "llm" && executionCandidate.provider !== "local",
         transportAuthMode: executionCandidate.provider === "local" ? "none" : authMode,
-        billingMode: executionCandidate.provider === "local" ? "local" : authMode,
+        billingMode: executionCandidate.provider === "local" ? "local" : billingMode,
         caller,
         taskClass,
         intent,

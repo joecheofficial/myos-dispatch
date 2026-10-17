@@ -23,6 +23,7 @@ const COMPLIANCE_LANES = Object.freeze([
   "interactive_oauth",
   "unattended_api",
   "unattended_local",
+  "unattended_codex",
 ]);
 
 const ROUTING_POLICY_CANDIDATES = Object.freeze([
@@ -323,6 +324,7 @@ function mergeRouteOverrides(baseRoute, overrideRoute) {
 
 function resolveRouteEntry({ taskClass, intent, complianceLane }) {
   const lane = normalizeComplianceLane(complianceLane);
+
   const normalizedTaskClass = normalizeTaskClass(taskClass);
   const localPreference = resolveLocalRoutePreference(normalizedTaskClass, lane);
   const routeOverrides = readLaneState().routeOverrides || {};
@@ -416,6 +418,22 @@ function resolveExecutionPlan({ taskClass, intent, complianceLane, executionPoli
   const normalizedTaskClass = normalizeTaskClass(taskClass);
   const lane = normalizeComplianceLane(complianceLane);
 
+  // Native user-owned Codex only, without generic fallback tables or aliases.
+  if (lane === "unattended_codex") {
+    const providers = [pinnedProvider, providerPreference].filter(value => value != null);
+    if (!model || providers.some(value => value !== "openai") ||
+        executionPolicy !== "internal_automation" || authMode !== "oauth") {
+      throw new Error("unattended_codex requires a pinned model, OpenAI, internal_automation and oauth");
+    }
+    return {
+      taskClass: normalizedTaskClass, intent: intent || null, complianceLane: lane,
+      routeKey: intent || normalizedTaskClass, routingSource: "explicit_override",
+      deterministicBypassReason: null, executionPolicy, authMode,
+      candidates: [{ type: "llm", provider: "openai", profile: profile || normalizedTaskClass,
+        model, authMode: "oauth" }],
+    };
+  }
+
   if (model || pinnedProvider || providerPreference) {
     const explicitProvider = normalizeProvider(pinnedProvider || providerPreference || "openai");
     return {
@@ -484,6 +502,15 @@ function resolveExecutionPlan({ taskClass, intent, complianceLane, executionPoli
 function validateExecutionCandidate(plan, candidate, { authMode, audio, claudeOauthVerified = false } = {}) {
   if (!candidate) {
     throw new Error(`No MyOS candidates available for ${plan.routeKey}:${plan.complianceLane}`);
+  }
+
+  if (plan.complianceLane === "unattended_codex") {
+    if (authMode !== "oauth" || plan.executionPolicy !== "internal_automation" ||
+        candidate.type !== "llm" || candidate.provider !== "openai" ||
+        candidate.authMode !== "oauth" || !candidate.model || audio) {
+      throw new Error("unattended_codex permits only native OpenAI OAuth text execution");
+    }
+    return;
   }
 
   if (plan.complianceLane === "interactive_oauth" && authMode !== "oauth") {
