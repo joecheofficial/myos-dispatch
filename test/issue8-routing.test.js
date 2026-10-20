@@ -310,8 +310,13 @@ const NOT_AN_INVOCATION = [
   'test results from the doctor came in', 'doctor appointment is at 3pm, put it on my calendar',
   'doctor my oauth setup', 'book a doctor appointment for tuesday',
   'check the stripe payment from Hans', 'verify the stripe payment from Hans', 'check whatsapp for Kirsty reply',
-  'spotify playlist for the party',
+  'spotify playlist for the party', 'check whatsapp for the team',
 ];
+// Real owner invocations whose owners also have recipes that change things
+// (git-manager start-work, organizer index-workspace, zoom dequeue/download):
+// they may route to the owner, but only to a read-only recipe.
+const READ_ONLY_INVOCATIONS = ['check the git-manager', 'check the git manager', 'run the zoom', 'run the organizer', 'run the stripe'];
+const WRITE_RECIPE_RE = /\/(?:start-work|index-workspace|dequeue[\w-]*|download[\w-]*|create[\w-]*|send[\w-]*|delete[\w-]*|update[\w-]*)$/;
 
 test('regression: owner invocation does not capture personal, noun-modifier or authoring mentions of an owner', t => {
   const install = freshInstall(t);
@@ -334,8 +339,15 @@ test('regression: the over-match negatives also hold on a real organizer index',
     const route = selectExecutionLane(prompt, { indexPath, scanDir: path.dirname(indexPath) });
     assert.notEqual(route.reason, 'owner_recipe_invocation', `${JSON.stringify(prompt)} -> ${route.candidates[0]?.capability?.id}`);
     if (/^(?:check|verify)\b/.test(prompt)) {
-      assert.ok(!(route.lane === 'recipe_dispatcher' && /\/(?:create|send|delete|update)-/.test(route.candidates[0]?.capability?.id || '')),
+      assert.ok(!(route.lane === 'recipe_dispatcher' && WRITE_RECIPE_RE.test(route.candidates[0]?.capability?.id || '')),
         `${JSON.stringify(prompt)} selected a mutating recipe ${route.candidates[0]?.capability?.id}`);
+    }
+  }
+  for (const prompt of READ_ONLY_INVOCATIONS) {
+    const route = selectExecutionLane(prompt, { indexPath, scanDir: path.dirname(indexPath) });
+    if (route.lane !== 'recipe_dispatcher') continue;
+    for (const entry of route.candidates) {
+      assert.doesNotMatch(entry.capability?.id || '', WRITE_RECIPE_RE, `${JSON.stringify(prompt)} offered a mutating recipe`);
     }
   }
 });
@@ -343,10 +355,13 @@ test('regression: the over-match negatives also hold on a real organizer index',
 test('regression: owner invocation never selects a recipe that changes something', () => {
   const { selectExecutionLane } = require('../src/capability-router');
   const indexPath = path.join(FIXTURE, 'workspace/capabilities-index.json');
-  for (const prompt of ['run stripe', 'check the stripe', 'verify stripe', 'run the stripe on my account']) {
+  for (const prompt of ['run stripe', 'check the stripe', 'verify stripe', 'run the stripe on my account', ...READ_ONLY_INVOCATIONS,
+    'run the git manager', 'check git-manager on my repo']) {
     const route = selectExecutionLane(prompt, { indexPath });
     assert.ok(!route.candidates.some(entry => /create-payment-link/.test(entry.capability?.id || '')) || route.lane !== 'recipe_dispatcher',
       `${JSON.stringify(prompt)} selected a payment-link recipe: ${route.lane} ${route.reason}`);
+    assert.ok(!route.candidates.some(entry => /start-work/.test(entry.capability?.id || '')) || route.lane !== 'recipe_dispatcher',
+      `${JSON.stringify(prompt)} selected a worktree-creating recipe: ${route.lane} ${route.reason}`);
     assert.notEqual(route.reason, 'owner_recipe_invocation', JSON.stringify(prompt));
   }
 });

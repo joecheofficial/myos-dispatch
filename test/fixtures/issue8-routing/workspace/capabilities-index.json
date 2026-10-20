@@ -142,6 +142,25 @@
       "avoid_when": [],
       "priority": 90,
       "version": "1"
+    },
+    {
+      "id": "recipe:agent/git-manager/start-work",
+      "type": "recipe",
+      "execution_lane": "recipe_dispatcher",
+      "source_path": "agents/git-manager/recipes/start-work.recipe.json",
+      "description": "Start a work session in a fresh worktree",
+      "aliases": [
+        "Start a work session in a fresh worktree",
+        "agent/git-manager/start-work",
+        "check in with git manager",
+        "start work on a branch"
+      ],
+      "use_when": [
+        "Start a work session in a fresh worktree"
+      ],
+      "avoid_when": [],
+      "priority": 90,
+      "version": "1"
     }
   ]
 }

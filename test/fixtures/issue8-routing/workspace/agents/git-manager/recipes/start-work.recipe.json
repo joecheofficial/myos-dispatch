@@ -1,0 +1,15 @@
+{
+  "id": "agent/git-manager/start-work",
+  "layer": "agent",
+  "owner": "git-manager",
+  "title": "Start a work session in a fresh worktree",
+  "tags": ["git", "worktree", "claim"],
+  "phrases": ["check in with git manager", "start work on a branch"],
+  "actions": ["start-work"],
+  "safety": { "destructive": false, "notes": "Creates a worktree and an owner-prefixed branch and records a claim." },
+  "inputMode": "structured",
+  "requiredContext": [],
+  "outputMode": "text",
+  "fallbackPolicy": "worker_optional",
+  "handler": "./start-work.js"
+}
