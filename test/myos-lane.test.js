@@ -259,3 +259,30 @@ test("myosRun preserves GPT 5.5 for foreground planning evaluation OAuth calls",
     }
   }
 });
+
+// Issue #8: a saved model catalog with unassigned or subscription-registry
+// entries must not switch off the OAuth registry default route.
+test("saved unassigned and oauth-registry catalog entries keep the registry default route", (t) => {
+  const fs = require("node:fs");
+  const os = require("node:os");
+  const path = require("node:path");
+  const routing = require("../src/myos-routing");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "myos-catalog-"));
+  const file = path.join(dir, "model-catalog.local.json");
+  const previous = process.env.MYOS_MODEL_CATALOG_LOCAL;
+  process.env.MYOS_MODEL_CATALOG_LOCAL = file;
+  t.after(() => {
+    if (previous === undefined) delete process.env.MYOS_MODEL_CATALOG_LOCAL; else process.env.MYOS_MODEL_CATALOG_LOCAL = previous;
+    routing.clearLocalAssignmentsCache();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  const plan = (assignment) => {
+    fs.writeFileSync(file, JSON.stringify({ version: 1, assignments: { planning: assignment }, overrides: {} }));
+    routing.clearLocalAssignmentsCache();
+    return routing.resolveExecutionPlan({ taskClass: "planning", complianceLane: "interactive_oauth", authMode: "oauth" });
+  };
+  assert.equal(plan({ unassigned: true, reason: "none", enableWith: "x" }).allowsLocalProvider, true);
+  assert.equal(plan({ type: "llm", provider: "openai", model: "gpt-6.1-sol", authMode: "oauth", lane: "interactive_oauth", source: "oauth-registry" }).allowsLocalProvider, true);
+  // An explicit saved catalog assignment still takes precedence over the registry.
+  assert.equal(plan({ type: "llm", provider: "openai", profile: "heavy_synthesis", model: "openai.gpt-5.4", authMode: "oauth", lane: "interactive_oauth", source: "auto" }).allowsLocalProvider, false);
+});
