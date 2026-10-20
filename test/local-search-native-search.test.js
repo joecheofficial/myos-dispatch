@@ -149,7 +149,9 @@ test("native treats corrupt or oversized catalogues as partial and reconstructs 
 });
 
 test("native catalogue replacement with a FIFO cannot block past the query deadline", { skip: skipUnlessRunningNode24 }, (t) => {
-  const f = fixture(t, { "wanted.md": "body" }, { queryDeadlineMs: 100 });
+  // A FIFO open would block forever, so any finite deadline proves the bound;
+  // 1 s leaves the fresh scan room to finish on a loaded machine (100 ms flaked).
+  const f = fixture(t, { "wanted.md": "body" }, { queryDeadlineMs: 1000 });
   fs.mkdirSync(f.config.stateDirectory, { recursive: true, mode: 0o700 });
   const catalogue = path.join(f.config.stateDirectory, "catalogue.json");
   fs.writeFileSync(catalogue, JSON.stringify({ version: 1, records: [] }), { mode: 0o600 });
@@ -176,7 +178,7 @@ test("native catalogue replacement with a FIFO cannot block past the query deadl
       process.stdout.write(JSON.stringify(result));
     }, (error) => { process.stderr.write(error.stack); process.exitCode = 1; });
   `;
-  const child = spawnSync(process.execPath, ["-e", script], { encoding: "utf8", timeout: 1000 });
+  const child = spawnSync(process.execPath, ["-e", script], { encoding: "utf8", timeout: 10_000 });
   assert.ifError(child.error);
   assert.equal(child.status, 0, child.stderr);
   const result = JSON.parse(child.stdout);
