@@ -33,6 +33,13 @@ const FOLLOW_UP_HINTS = /\b(also|this|that|it|they|them|these|those|here|there|s
 const READ_HINTS = /\b(what|what is|what's|what are|where is|where's|which|who is|who's|how many|show|find|get|look up|count|list|tell me|give me|retrieve|check)\b/;
 const WRITE_HINTS = /\b(add|update|save|mark|put|attach|send|forward|message|dm|notify|share|create|record|store|log|set|change|fix|repair|replace|redirect|deploy|commit|push|publish|implement|edit|upload|remove|delete|move|rename|prove|improve|upgrade|finish)\b/;
 const PROJECT_OPERATION_HINTS = /\b(giveaway(?:s)? page|mentorship page|promo code|promo link|payment link|onboarding|calendar|invite|rsvp|signups?|cohort|participant|participants?)\b/;
+// A request to produce something new ("build a launch for Lumen", "create an email
+// sequence for Lumen") may USE a project's data source, but it is not a lookup of
+// it. Issue #8 F-27: these were short-circuited into a read-only BRAIN.md lookup.
+const AUTHORING_REQUEST_RE = /^(?:(?:please|can you|could you|i want you to|help me)\s+)?(?:build|create|write|draft|make|design|generate|produce|plan|implement|develop|compose|prepare|launch|redesign|rewrite|set up)\b/;
+function isAuthoringRequest(query) {
+  return AUTHORING_REQUEST_RE.test(normalizeText(query).trim());
+}
 const STATUS_HINTS = /\b(are you awake|are you there|your status|what's your status|what is your status)\b/;
 const WHATSAPP_OPERATION_HINTS = /\b(whatsapp link|whatsapp group|social media team on whatsapp|team destination|telegram workflows?|whatsapp\/telegram workflows?)\b/;
 const GENERIC_RESEARCH_HINTS = /\b(research a product|research a competitor|research a tool|research .* if it(?:'s| is) useful|tell me if it(?:'s| is) useful)\b/;
@@ -626,7 +633,9 @@ function chooseSourceOwner({ query, actionType, projectMatches, dataSources, rou
   const text = normalizeText(query);
   const primaryProject = projectMatches[0] || null;
   const hasProject = Boolean(primaryProject);
-  const hasData = dataSources.length > 0;
+  const authoring = isAuthoringRequest(text);
+  // Authoring requests keep their data sources as context but never become the data owner.
+  const hasData = dataSources.length > 0 && !authoring;
   const primaryCapability = route?.candidates?.[0] || null;
   const preferOverProject = getPreferOverProjectSources(dataSourceOptions);
   const hasPreferredDataSource = dataSources.some((source) => preferOverProject.has(source));
@@ -640,7 +649,7 @@ function chooseSourceOwner({ query, actionType, projectMatches, dataSources, rou
 
   // A data source can declare `preferOverProject` in config so directive
   // lookups route to the data lane before any project alias match.
-  if (hasPreferredDataSource && intentType === "directive") {
+  if (hasPreferredDataSource && !authoring && intentType === "directive") {
     return "data";
   }
 
@@ -655,7 +664,7 @@ function chooseSourceOwner({ query, actionType, projectMatches, dataSources, rou
     return "data";
   }
 
-  const dataOwnedSources = dataSources.filter((source) =>
+  const dataOwnedSources = authoring ? [] : dataSources.filter((source) =>
     !["websites"].includes(source) && !preferOverProject.has(source)
   );
   if (dataOwnedSources.length > 0 && dataOwnedSources.every((source) => source === "entities") && intentType !== "exploratory") {
@@ -726,6 +735,12 @@ function collectDispatchSignals(query, options = {}) {
 
   return {
     query,
+    // The hook's working folder and event reach the parallelization planner so it
+    // can scope repository lanes (issue #8 F-26: every lane was dropped as
+    // no_repository_scope because cwd never arrived).
+    cwd: options.cwd || "",
+    hookEventName: options.hookEventName || "",
+    hookSurface: options.hookSurface || "",
     parallelizationStateFile: options.parallelizationStateFile || "",
     callerProvider: options.callerProvider || options.hookSurface,
     env: options.env || process.env,
@@ -1532,6 +1547,7 @@ module.exports = {
   inferIntentType,
   inferActionType,
   inferGoalScale,
+  isAuthoringRequest,
   listProjectRecipes,
   loadFastpaths,
   matchFastpaths,

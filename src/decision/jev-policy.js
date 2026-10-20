@@ -28,10 +28,19 @@ function circuit(env, key) {
     },
   };
 }
-function executableIntent(text) {
-  if (/\b(?:implement|redesign|deploy|redeploy|install|upgrade|edit|rewrite|change|delete|remove|move|rename|symlink|create|build|fix|repair|write|send|pay)\b/i.test(text)) return false;
-  if (/\b(?:get|take)\b.{0,80}\boff\b|\b(?:don't|do not|no longer)\b.{0,30}\bkeep\b/i.test(text)) return false;
-  if (text.length > 240 || /[\n;]/.test(text)) return false;
-  return /^(?:please\s+)?(?:check|report|lookup|look up|find|show|list|retrieve|provide)\b|^(?:[\w-]+\s+){0,4}(?:health|status)\??$/i.test(text.trim());
+// Why a request is or is not an executable operation. Returns null when it is,
+// otherwise the name of the first check that failed, so a skip in the routing
+// log says which rule rejected the request (issue #8: every skip was the bare
+// string no_executable_intent).
+function executableIntentCheck(text) {
+  const value = String(text || '');
+  if (/\b(?:implement|redesign|deploy|redeploy|install|upgrade|edit|rewrite|change|delete|remove|move|rename|symlink|create|build|fix|repair|write|send|pay)\b/i.test(value)) return 'mutating_verb';
+  if (/\b(?:get|take)\b.{0,80}\boff\b|\b(?:don't|do not|no longer)\b.{0,30}\bkeep\b/i.test(value)) return 'negated_or_removal_phrasing';
+  if (value.length > 240 || /[\n;]/.test(value)) return 'multi_step_or_too_long';
+  if (/^(?:please\s+)?(?:check|report|lookup|look up|find|show|list|retrieve|provide|run|diagnose)\b|^(?:[\w-]+\s+){0,4}(?:health|status)\??$/i.test(value.trim())) return null;
+  return 'no_operational_verb';
 }
-module.exports = { mode, credentials, circuit, executableIntent };
+function executableIntent(text) {
+  return executableIntentCheck(text) === null;
+}
+module.exports = { mode, credentials, circuit, executableIntent, executableIntentCheck };

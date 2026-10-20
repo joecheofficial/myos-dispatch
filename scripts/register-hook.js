@@ -620,4 +620,5 @@ module.exports = {
   MARKER_RE,
   executesDispatchHook,
   HOME_ENV_KEY,
+  isEphemeralPath,
 };

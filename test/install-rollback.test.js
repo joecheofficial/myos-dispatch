@@ -9,8 +9,37 @@ const assert = require("node:assert/strict");
 
 const REPO_ROOT = path.resolve(__dirname, "..");
 const INSTALL_SH = path.join(REPO_ROOT, "bin", "install.sh");
+// install.sh registers <checkout>/bin/myos-dispatch-hook, and register-hook.js
+// refuses a hook inside a temporary directory (the OS reaps it and routing dies
+// silently). A checkout under /tmp or /var/folders can therefore never complete
+// these installs. That is the installer working, not a Node version problem: the
+// "8 failures on Node 24" in All-Sorted/support #8 came from a clone in a temp
+// folder. Run the full transactions from a permanent checkout; from a temporary
+// one, assert the refusal instead.
+const { isEphemeralPath } = require("../scripts/register-hook.js");
+const EPHEMERAL_CHECKOUT = isEphemeralPath(INSTALL_SH);
+const needsDurableCheckout = EPHEMERAL_CHECKOUT
+  ? { skip: `checkout is in a temporary directory (${REPO_ROOT}); the installer refuses to register its hook there` }
+  : {};
 
-test("failure after optional registration restores exact settings and shell rc bytes", () => {
+test("a checkout in a temporary directory is refused before any settings are written", { skip: !EPHEMERAL_CHECKOUT && "checkout is permanent; the full install transactions run instead" }, () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "install-ephemeral-checkout-"));
+  try {
+    const settings = path.join(home, ".claude", "settings.json");
+    fs.mkdirSync(path.dirname(settings), { recursive: true });
+    const original = '{ "model": "keep", "hooks": {} }\n';
+    fs.writeFileSync(settings, original);
+    const result = require("node:child_process").spawnSync("bash", [INSTALL_SH, "--yes"], {
+      env: { HOME: home, PATH: process.env.PATH, MYOS_HOME_ROOT: path.join(home, "data"), MYOS_BACKGROUND_AGENTS_ENABLED: "0", MYOS_AUTO_FANOUT: "0", MYOS_BACKGROUND_BACKPRESSURE_ENABLED: "0" },
+      encoding: "utf8", timeout: 30000,
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stdout + result.stderr, /refusing to register a hook inside a temporary directory/);
+    assert.equal(fs.readFileSync(settings, "utf8"), original);
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});
+
+test("failure after optional registration restores exact settings and shell rc bytes", needsDurableCheckout, () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "install-optional-rollback-"));
   try {
     const settings = path.join(home, ".claude", "settings.json");
@@ -45,7 +74,7 @@ test("failure after optional registration restores exact settings and shell rc b
 });
 
 for (const scenario of ["optional-two-failure", "foreign-settings", "foreign-shell-rc", "nonzero-smoke"]) {
-  test(`selected runtime transaction handles ${scenario}`, () => {
+  test(`selected runtime transaction handles ${scenario}`, needsDurableCheckout, () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "install-transaction-"));
     try {
       const settings = path.join(home, ".claude", "settings.json");
@@ -91,7 +120,7 @@ for (const scenario of ["optional-two-failure", "foreign-settings", "foreign-she
   });
 }
 
-test("smoke failure rolls back newly added main hook, title hook, rabbithole hook, and shell rc line", () => {
+test("smoke failure rolls back newly added main hook, title hook, rabbithole hook, and shell rc line", needsDurableCheckout, () => {
   const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "myos-install-rollback-"));
   const zshrcPath = path.join(tmpHome, ".zshrc");
   fs.writeFileSync(zshrcPath, "# User zshrc\nexport FOO=bar\n", "utf8");
@@ -130,7 +159,7 @@ test("smoke failure rolls back newly added main hook, title hook, rabbithole hoo
   }
 });
 
-test("smoke failure preserves pre-existing hooks and shell rc lines", () => {
+test("smoke failure preserves pre-existing hooks and shell rc lines", needsDurableCheckout, () => {
   const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "myos-install-rollback-pre-"));
   const claudeDir = path.join(tmpHome, ".claude");
   fs.mkdirSync(claudeDir, { recursive: true });
@@ -184,7 +213,7 @@ test("smoke failure preserves pre-existing hooks and shell rc lines", () => {
   }
 });
 
-test("bash runtime both installs twice stably, preserves config, and rolls back failed update", () => {
+test("bash runtime both installs twice stably, preserves config, and rolls back failed update", needsDurableCheckout, () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "install-runtime-"));
   const settings = path.join(home, ".claude", "settings.json");
   const codexSettings = path.join(home, "custom-codex", "hooks.json");

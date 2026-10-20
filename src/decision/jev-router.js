@@ -83,6 +83,45 @@ function shortlist(text, recipes, minimumOverlap = 1) {
   }).filter(row => row.score >= minimumOverlap).sort((a, b) => b.score - a.score || a.recipe.id.localeCompare(b.recipe.id)).slice(0, 12).map(row => row.recipe);
 }
 
+// Map the baseline route's recipe to the registry manifest. Registry ids are
+// "agent/doctor/run-full-diagnostic", but organizer-built indexes slug them to
+// "recipe:agent-doctor-run-full-diagnostic", so an exact id lookup never found the
+// recipe or its approval (issue #8). Match the exact id, then the slug, then the
+// manifest file the route already points at.
+function slugRecipeId(id) {
+  return String(id || '').toLowerCase().replace(/^recipe:/, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+function samePath(a, b) {
+  if (!a || !b) return false;
+  const real = value => { try { return fs.realpathSync(value); } catch { return path.resolve(value); } };
+  return real(a) === real(b);
+}
+function resolveBaselineRecipe(baseline, recipes) {
+  const capabilityId = String(baseline.capabilityId || '');
+  const scope = typeof baseline.searchScope === 'string' && baseline.searchScope.endsWith('.recipe.json') ? baseline.searchScope : '';
+  if (!capabilityId && !scope) return null;
+  const bare = capabilityId.replace(/^recipe:/, '');
+  const exact = recipes.find(recipe => recipe.id === capabilityId || recipe.id === bare);
+  if (exact) return exact;
+  // Slugs are lossy ("a/b-c" and "a-b/c" collide), so a slug match must also be
+  // the manifest the route points at whenever the route names one.
+  const slug = slugRecipeId(capabilityId);
+  const bySlug = slug ? recipes.filter(recipe => slugRecipeId(recipe.id) === slug) : [];
+  if (scope) return bySlug.find(recipe => samePath(recipe.filePath, scope))
+    || (bySlug.length ? null : recipes.find(recipe => samePath(recipe.filePath, scope)) || null);
+  return bySlug.length === 1 ? bySlug[0] : null;
+}
+
+// Words of the request that also describe the recipe (id, title, phrases, tags).
+function recipeOverlap(text, recipe) {
+  const stop = new Set(['the', 'and', 'for', 'this', 'that', 'with', 'you', 'please', 'can', 'get', 'run', 'make', 'want', 'need',
+    'check', 'show', 'list', 'find', 'report', 'my', 'our', 'your']);
+  const words = new Set((String(text).toLowerCase().match(/[a-z0-9]{3,}/g) || []).filter(word => !stop.has(word)));
+  const terms = new Set(`${recipe.id} ${recipe.owner || ''} ${recipe.title} ${(recipe.phrases || []).join(' ')} ${(recipe.tags || []).join(' ')}`
+    .toLowerCase().match(/[a-z0-9]{3,}/g) || []);
+  return [...words].filter(word => terms.has(word)).length;
+}
+
 function disableFanout(plan) {
   if (!plan.parallelizationPlan) return undefined;
   return { ...plan.parallelizationPlan, mode: 'none', aggression: 'off', depth: 0, reason: 'deterministic_recipe_selected',
@@ -104,22 +143,34 @@ async function routeWithJev(text, baseline, opts = {}) {
   };
   if (economy.mode(env) === 'off') return finish(baseline, { reason: 'disabled' });
   // Already executable exact/data routes need no semantic classification. A project reference alone is not an executable route.
+  const registry = () => opts.recipes || require('../task-dispatcher').getRecipeRegistry().recipes;
   if (baseline.branch === 'recipe' || baseline.route?.lane === 'data_lookup') {
-    const id = baseline.branch === 'recipe' ? baseline.capabilityId?.replace(/^recipe:/, '') || null : null;
-    const recipe = id ? (opts.recipes || require('../task-dispatcher').getRecipeRegistry().recipes).find(r => r.id === id) : null;
+    const recipe = baseline.branch === 'recipe' ? resolveBaselineRecipe(baseline, registry()) : null;
+    const id = recipe ? recipe.id : baseline.branch === 'recipe' ? baseline.capabilityId?.replace(/^recipe:/, '') || null : null;
     return finish(baseline, { reason: 'deterministic_match', recipeId: id, recipeFingerprint: recipe ? approvalFingerprint(recipe,env) : null,
       directExecution: recipe ? directExecutionAllowed(recipe, env) : false });
   }
   if (!text || text.length > 4000) return finish(baseline, { reason: 'input_budget' });
-  if (!opts.stepDecision && !economy.executableIntent(text)) {
+  // The cheap verb check runs before the recipe registry is loaded (hook hot path).
+  const intentCheck = opts.stepDecision ? null : economy.executableIntentCheck(text);
+  if (intentCheck) {
     const plan = ['recipe_dispatcher', 'workflow'].includes(baseline.route?.lane)
       ? { ...baseline, branch: 'fallback', capabilityId: null, searchScope: '', stopAfterMatch: false,
         route: { lane: 'worker_skill', reason: 'no_executable_intent', candidates: [] } } : baseline;
-    return finish(plan, { reason: 'no_executable_intent' });
+    return finish(plan, { reason: 'no_executable_intent', intentCheck });
   }
-  const recipes = opts.recipes || require('../task-dispatcher').getRecipeRegistry().recipes;
-  const candidates = shortlist(text, recipes.filter(r => (!r.handler || directExecutionAllowed(r, env)) &&
-    (!baseline.projectSlug || r.layer !== 'project' || r.owner === baseline.projectSlug)), opts.stepDecision ? 1 : 2);
+  const recipes = registry();
+  const baselineRecipe = baseline.route?.lane === 'recipe_dispatcher' ? resolveBaselineRecipe(baseline, recipes) : null;
+  const eligible = recipe => (!recipe.handler || directExecutionAllowed(recipe, env)) &&
+    (!baseline.projectSlug || recipe.layer !== 'project' || recipe.owner === baseline.projectSlug);
+  // The recipe the deterministic router already chose is a candidate on its own
+  // evidence; it does not also need two words in common with the request.
+  // It still has to share a word with the request, so a mis-scored baseline
+  // cannot put an unrelated approved recipe in front of the classifier.
+  const seeded = baselineRecipe && eligible(baselineRecipe) && executableRecipe(baselineRecipe)
+    && recipeOverlap(text, baselineRecipe) >= 1 ? [baselineRecipe] : [];
+  const candidates = [...seeded, ...shortlist(text, recipes.filter(recipe => eligible(recipe) && !seeded.includes(recipe)),
+    opts.stepDecision ? 1 : 2)].slice(0, 12);
   if (!candidates.length) return finish(baseline, { reason: 'no_candidates' });
   const criteria = { none: 'None of these actions fully fulfills the request. Includes requests to implement, redesign or discuss a system rather than run an existing operation, negated actions, and multi-step work exceeding any single action.' };
   candidates.forEach((recipe, i) => { criteria[`r${i}`] = `${recipe.title}. Examples: ${(recipe.phrases || []).slice(0, 3).join('; ')}`.slice(0, 300); });
@@ -184,4 +235,4 @@ async function routeWithJev(text, baseline, opts = {}) {
   { ...usage, confidence: answer.confidence, applied: true, reason: 'recipe_selected', recipeId: recipe.id, recipeFingerprint: approvalFingerprint(recipe,env), directExecution: directExecutionAllowed(recipe, env) });
 }
 
-module.exports = { routeWithJev, appendRoutingEvent, shortlist, executableRecipe, directExecutionAllowed, canonicalCwd, approvalFingerprint, fingerprint: recipeFingerprint, POLICY };
+module.exports = { routeWithJev, appendRoutingEvent, shortlist, resolveBaselineRecipe, executableRecipe, directExecutionAllowed, canonicalCwd, approvalFingerprint, fingerprint: recipeFingerprint, POLICY };
