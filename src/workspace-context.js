@@ -37,6 +37,9 @@ const PROJECT_OPERATION_HINTS = /\b(giveaway(?:s)? page|mentorship page|promo co
 // sequence for Lumen") may USE a project's data source, but it is not a lookup of
 // it. Issue #8 F-27: these were short-circuited into a read-only BRAIN.md lookup.
 const AUTHORING_REQUEST_RE = /^(?:(?:please|can you|could you|i want you to|help me)\s+)?(?:build|create|write|draft|make|design|generate|produce|plan|implement|develop|compose|prepare|launch|redesign|rewrite|set up)\b/;
+function isAuthoringRequest(query) {
+  return AUTHORING_REQUEST_RE.test(normalizeText(query).trim());
+}
 const STATUS_HINTS = /\b(are you awake|are you there|your status|what's your status|what is your status)\b/;
 const WHATSAPP_OPERATION_HINTS = /\b(whatsapp link|whatsapp group|social media team on whatsapp|team destination|telegram workflows?|whatsapp\/telegram workflows?)\b/;
 const GENERIC_RESEARCH_HINTS = /\b(research a product|research a competitor|research a tool|research .* if it(?:'s| is) useful|tell me if it(?:'s| is) useful)\b/;
@@ -630,7 +633,7 @@ function chooseSourceOwner({ query, actionType, projectMatches, dataSources, rou
   const text = normalizeText(query);
   const primaryProject = projectMatches[0] || null;
   const hasProject = Boolean(primaryProject);
-  const authoring = AUTHORING_REQUEST_RE.test(text.trim());
+  const authoring = isAuthoringRequest(text);
   // Authoring requests keep their data sources as context but never become the data owner.
   const hasData = dataSources.length > 0 && !authoring;
   const primaryCapability = route?.candidates?.[0] || null;
@@ -1544,6 +1547,7 @@ module.exports = {
   inferIntentType,
   inferActionType,
   inferGoalScale,
+  isAuthoringRequest,
   listProjectRecipes,
   loadFastpaths,
   matchFastpaths,

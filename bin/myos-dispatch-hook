@@ -17,6 +17,7 @@ const { buildPromptPack, buildToolPack } = require("../src/decision/jev-packs");
 const WORKSPACE_ROOT = path.resolve(__dirname, "..");
 const {
   finalizeDispatchPlan,
+  isAuthoringRequest,
   resolveDispatchPlan,
   resolveToolSafetyPlan,
   resolveToolSafetyMetadata,
@@ -1624,7 +1625,10 @@ async function prepareJev(payload, surface) {
       if (result.verified) { plan.stepEvidence=result; plan.partialStep=true; }
       else plan.stepHandoff=result.reason;
     }
-    if (!embedded && text.length <= 300 && !/[\n;]/.test(text) && plan.actionType === 'read' && !plan.requiresApproval && !plan.blockedBy?.length && plan.dataSources?.length) {
+    // Authoring requests keep data sources as context only; a read-only lookup
+    // answered "from the evidence" would replace the work (issue #8 F-27).
+    if (!embedded && text.length <= 300 && !/[\n;]/.test(text) && plan.actionType === 'read' && !plan.requiresApproval && !plan.blockedBy?.length && plan.dataSources?.length
+      && !isAuthoringRequest(text)) {
       const registry = require('../src/data-source-registry');
       const supported = plan.dataSources.filter(id => {
         const source = registry.getDataSource(id);

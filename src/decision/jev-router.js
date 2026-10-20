@@ -101,11 +101,25 @@ function resolveBaselineRecipe(baseline, recipes) {
   const scope = typeof baseline.searchScope === 'string' && baseline.searchScope.endsWith('.recipe.json') ? baseline.searchScope : '';
   if (!capabilityId && !scope) return null;
   const bare = capabilityId.replace(/^recipe:/, '');
+  const exact = recipes.find(recipe => recipe.id === capabilityId || recipe.id === bare);
+  if (exact) return exact;
+  // Slugs are lossy ("a/b-c" and "a-b/c" collide), so a slug match must also be
+  // the manifest the route points at whenever the route names one.
   const slug = slugRecipeId(capabilityId);
-  return recipes.find(recipe => recipe.id === capabilityId || recipe.id === bare)
-    || (slug ? recipes.find(recipe => slugRecipeId(recipe.id) === slug || slugRecipeId(`${recipe.layer}-${recipe.owner}-${String(recipe.id).split('/').pop()}`) === slug) : null)
-    || (scope ? recipes.find(recipe => samePath(recipe.filePath, scope)) : null)
-    || null;
+  const bySlug = slug ? recipes.filter(recipe => slugRecipeId(recipe.id) === slug) : [];
+  if (scope) return bySlug.find(recipe => samePath(recipe.filePath, scope))
+    || (bySlug.length ? null : recipes.find(recipe => samePath(recipe.filePath, scope)) || null);
+  return bySlug.length === 1 ? bySlug[0] : null;
+}
+
+// Words of the request that also describe the recipe (id, title, phrases, tags).
+function recipeOverlap(text, recipe) {
+  const stop = new Set(['the', 'and', 'for', 'this', 'that', 'with', 'you', 'please', 'can', 'get', 'run', 'make', 'want', 'need',
+    'check', 'show', 'list', 'find', 'report', 'my', 'our', 'your']);
+  const words = new Set((String(text).toLowerCase().match(/[a-z0-9]{3,}/g) || []).filter(word => !stop.has(word)));
+  const terms = new Set(`${recipe.id} ${recipe.owner || ''} ${recipe.title} ${(recipe.phrases || []).join(' ')} ${(recipe.tags || []).join(' ')}`
+    .toLowerCase().match(/[a-z0-9]{3,}/g) || []);
+  return [...words].filter(word => terms.has(word)).length;
 }
 
 function disableFanout(plan) {
@@ -137,10 +151,8 @@ async function routeWithJev(text, baseline, opts = {}) {
       directExecution: recipe ? directExecutionAllowed(recipe, env) : false });
   }
   if (!text || text.length > 4000) return finish(baseline, { reason: 'input_budget' });
-  const recipeLane = baseline.route?.lane === 'recipe_dispatcher';
-  const baselineRecipe = recipeLane ? resolveBaselineRecipe(baseline, registry()) : null;
-  const intentCheck = opts.stepDecision ? null
-    : economy.executableIntentCheck(text, { invocationTerms: baselineRecipe?.owner ? [baselineRecipe.owner] : [] });
+  // The cheap verb check runs before the recipe registry is loaded (hook hot path).
+  const intentCheck = opts.stepDecision ? null : economy.executableIntentCheck(text);
   if (intentCheck) {
     const plan = ['recipe_dispatcher', 'workflow'].includes(baseline.route?.lane)
       ? { ...baseline, branch: 'fallback', capabilityId: null, searchScope: '', stopAfterMatch: false,
@@ -148,11 +160,15 @@ async function routeWithJev(text, baseline, opts = {}) {
     return finish(plan, { reason: 'no_executable_intent', intentCheck });
   }
   const recipes = registry();
+  const baselineRecipe = baseline.route?.lane === 'recipe_dispatcher' ? resolveBaselineRecipe(baseline, recipes) : null;
   const eligible = recipe => (!recipe.handler || directExecutionAllowed(recipe, env)) &&
     (!baseline.projectSlug || recipe.layer !== 'project' || recipe.owner === baseline.projectSlug);
   // The recipe the deterministic router already chose is a candidate on its own
   // evidence; it does not also need two words in common with the request.
-  const seeded = baselineRecipe && eligible(baselineRecipe) && executableRecipe(baselineRecipe) ? [baselineRecipe] : [];
+  // It still has to share a word with the request, so a mis-scored baseline
+  // cannot put an unrelated approved recipe in front of the classifier.
+  const seeded = baselineRecipe && eligible(baselineRecipe) && executableRecipe(baselineRecipe)
+    && recipeOverlap(text, baselineRecipe) >= 1 ? [baselineRecipe] : [];
   const candidates = [...seeded, ...shortlist(text, recipes.filter(recipe => eligible(recipe) && !seeded.includes(recipe)),
     opts.stepDecision ? 1 : 2)].slice(0, 12);
   if (!candidates.length) return finish(baseline, { reason: 'no_candidates' });

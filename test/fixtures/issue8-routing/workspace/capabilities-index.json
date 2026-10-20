@@ -123,6 +123,25 @@
       "avoid_when": [],
       "priority": 90,
       "version": "1"
+    },
+    {
+      "id": "recipe:agent/stripe/create-payment-link",
+      "type": "recipe",
+      "execution_lane": "recipe_dispatcher",
+      "source_path": "agents/stripe/recipes/create-payment-link.recipe.json",
+      "description": "Create a Stripe payment link",
+      "aliases": [
+        "Create a Stripe payment link",
+        "agent/stripe/create-payment-link",
+        "create a payment link",
+        "make a stripe payment link"
+      ],
+      "use_when": [
+        "Create a Stripe payment link"
+      ],
+      "avoid_when": [],
+      "priority": 90,
+      "version": "1"
     }
   ]
 }
