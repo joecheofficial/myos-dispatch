@@ -54,7 +54,12 @@ const SCRIPT_NAME_ALIASES = new Set([
 // invocation. Communication verbs (call, ask) are deliberately excluded.
 const INVOCATION_VERBS = "run|use|launch|start|check|diagnose|scan|verify|test";
 const INVOCATION_LEAD = "^(?:(?:please|can you|could you)\\s+)?";
-const INVOCATION_TAIL = "(?:\\s*[.!?]?\\s*$|\\s+(?:now|again|please)\\s*[.!?]?\\s*$|\\s+(?:on|for|against|over)\\s+(?:my|our|the|this|these)\\b)";
+const INVOCATION_TAIL = "(?:\\s*[.!?]?\\s*$|\\s+(?:now|again|please)\\s*[.!?]?\\s*$|\\s+(?:on|for|against|over)\\s+(?:my|our|this|these)\\b)";
+// Owner invocation selects only recipes that are clearly read-only: the
+// operation name is a read operation, or the manifest declares read-only. A
+// denylist of write verbs missed "start-work", "index-workspace" and
+// "dequeue-next-recording" in review.
+const READ_OPERATION_RE = /^(?:check|list|show|get|read|count|status|verify|preflight|inspect|diagnose|report|summari[sz]e|find|search|lookup|look up|view|describe|explain|audit|scan|health|run(?: a| the)?(?: full)?(?: read only)?(?: diagnostic| health check| audit| report))\b/;
 // Owner invocation never selects a recipe that changes something: the request
 // names the agent, not a write operation.
 const READ_REQUEST_RE = /^(?:(?:please|can you|could you)\s+)?(?:check|verify|test|scan|diagnose|show|list|find|look\s+up|lookup|review|inspect|what|which|who|when|where|is|are|did|does|has|have|how)\b/;
@@ -250,6 +255,26 @@ function invokedOwner(haystack, owners) {
   return null;
 }
 
+function readRecipeManifest(capability = {}) {
+  try {
+    const manifestPath = path.resolve(capability.scan_dir || WORKSPACE_ROOT, String(capability.source_path || ""));
+    return manifestPath.endsWith(".recipe.json") ? readJsonCached(manifestPath) : null;
+  } catch {
+    return null;
+  }
+}
+
+function isClearlyReadOnlyRecipe(capability = {}) {
+  if (isMutatingRecipe(capability)) return false;
+  const operation = String(capability.id || "").replace(/^recipe:/, "").split("/").pop()
+    .replace(/[-_]+/g, " ").toLowerCase();
+  if (READ_OPERATION_RE.test(operation)) return true;
+  const manifest = readRecipeManifest(capability);
+  return manifest?.readOnly === true
+    || (Array.isArray(manifest?.tags) && manifest.tags.some((tag) => normalizeText(tag) === "read-only"))
+    || /^read[ -]only\b/i.test(String(manifest?.safety?.rule || ""));
+}
+
 function isMutatingRecipe(capability = {}) {
   const operation = String(capability.id || "").replace(/^recipe:/, "").split("/").pop()
     .replace(/[-_]+/g, " ").toLowerCase();
@@ -286,7 +311,7 @@ function ownerRecipeInvocation(text, options = {}, workerCandidates = []) {
   const candidates = recipes
     .filter((capability) => recipeOwner(capability) === owner)
     .map((capability) => ({ ...capability, ...(scanDir ? { scan_dir: scanDir } : {}) }))
-    .filter((capability) => !isMutatingRecipe(capability))
+    .filter((capability) => isClearlyReadOnlyRecipe(capability))
     .map((capability) => {
       const match = scoreCapabilityMatch(capability, text);
       const terms = new Set(tokenize(`${capability.id} ${(capability.aliases || []).join(" ")}`));
