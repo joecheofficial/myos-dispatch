@@ -81,7 +81,7 @@ test("doctor CLI exposes unlock and rejects unknown flags", () => {
   assert.equal(bad.status, 2);
 });
 
-test("a successful probe whose registry write fails is reported and is not ok", async (t) => {
+test("a successful probe whose registry write fails is reported and is not ok", { skip: process.platform === "win32" || process.getuid?.() === 0 }, async (t) => {
   const file = registry(t, [claude("claude-sonnet-5-5")]);
   fs.chmodSync(path.dirname(file), 0o500);
   let report;
