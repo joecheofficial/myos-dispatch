@@ -16,6 +16,7 @@ const { buildPromptPack, buildToolPack } = require("../src/decision/jev-packs");
 
 const WORKSPACE_ROOT = path.resolve(__dirname, "..");
 const {
+  finalizeDispatchPlan,
   resolveDispatchPlan,
   resolveToolSafetyPlan,
   resolveToolSafetyMetadata,
@@ -1583,6 +1584,22 @@ function shouldSamplePrompt(text, state, env = process.env) {
   return bucket < fraction;
 }
 
+// The baseline fanout plan was computed for a deterministic recipe or workflow
+// lane, which never fans out, and scoped to that recipe's file. When Jev vetoes
+// the lane back to worker_skill, that plan is stale: re-plan fanout for the
+// worker route the agent will actually take (issue #8 F-26).
+function replanAfterJevVeto(text, baseline, plan, { env, cwd, surface }) {
+  const deterministic = ["recipe_dispatcher", "workflow"];
+  if (!deterministic.includes(baseline.route?.lane) || deterministic.includes(plan.route?.lane)) return plan;
+  try {
+    const hookEnv = { ...env, MYOS_DESKTOP_BOUNDED_ROUTING: "1",
+      MYOS_BACKGROUND_ORCHESTRATOR: env.MYOS_BACKGROUND_ORCHESTRATOR || "myos-dispatch" };
+    const { parallelizationPlan: _stale, ...rest } = plan;
+    return finalizeDispatchPlan(text, rest, { env: hookEnv, cwd: cwd || "", hookSurface: surface,
+      callerProvider: surface, hookEventName: "UserPromptSubmit" });
+  } catch { return plan; }
+}
+
 async function prepareJev(payload, surface) {
   const event = readHookEventName(payload);
   const tool = event === "PreToolUse";
@@ -1604,8 +1621,9 @@ async function prepareJev(payload, surface) {
     rootTaskId:payload.turn_id || payload.turnId || null });
   try {
     const env = readArg('--no-jev') === '1' ? { ...process.env, MYOS_JEV_MODE: 'off' } : process.env;
-    const plan = await routeWithJev(text, baseline, { env, cwd: payload.cwd, sessionId,
+    let plan = await routeWithJev(text, baseline, { env, cwd: payload.cwd, sessionId,
       rootTaskId: payload.turn_id || payload.turnId || null });
+    plan = replanAfterJevVeto(text, baseline, plan, { env, cwd: payload.cwd, surface });
     const sourceRegistry = require('../src/data-source-registry');
     const embedded = require('../src/decision/embedded-read').embeddedRead(text, plan, sourceRegistry);
     if (embedded) {
@@ -1644,7 +1662,9 @@ async function prepareJev(payload, surface) {
     }
     plan.jev = { stage: 'routing', engine: plan.jevRouting.engine, routing: plan.jevRouting,
       latencyMs: plan.jevRouting.latencyMs, usage: { input_tokens: plan.jevRouting.inputTokens }, model: plan.jevRouting.model };
-    if (!['recipe_selected', 'no_match', 'deterministic_match'].includes(plan.jevRouting.reason)) plan.jev.skipped = plan.jevRouting.reason;
+    if (!['recipe_selected', 'no_match', 'deterministic_match'].includes(plan.jevRouting.reason)) {
+      plan.jev.skipped = plan.jevRouting.intentCheck ? `${plan.jevRouting.reason} (${plan.jevRouting.intentCheck})` : plan.jevRouting.reason;
+    }
     return { plan };
   } catch { return { plan: { ...baseline, jev: { skipped: 'routing_internal_error' } } }; }
 }

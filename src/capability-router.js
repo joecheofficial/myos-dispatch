@@ -36,6 +36,20 @@ const GENERIC_TOKENS = new Set([
 ]);
 // Cross-domain tags are useful metadata but cannot identify a capability.
 const GENERIC_CAPABILITY_ALIASES = new Set(["api", "media", "myos", "service", "tool", "agent", "memory", "database", "launch", "files", "storage", "status"]);
+// Organizer-built indexes alias a project capability with its package.json script
+// names. Every Node project has "start", "test", "check" or "status", so one of
+// those words in a prompt is no evidence for any particular project (issue #8
+// F-23: "check status" scoped every prompt to the web fetch module). Recipes keep
+// their curated tags; only non-recipe capabilities drop these single-word aliases.
+const SCRIPT_NAME_ALIASES = new Set([
+  "bench", "build", "check", "clean", "coverage", "deploy", "dev", "format", "install",
+  "lint", "postinstall", "preflight", "prepare", "preinstall", "release", "restart", "run",
+  "serve", "setup", "smoke", "start", "status", "stop", "test", "typecheck", "verify", "watch",
+]);
+// An operator invoking an agent's recipe by the agent's name ("run the doctor",
+// "doctor my oauth setup") is deterministic work even when no recipe phrase matches.
+const INVOCATION_VERB_RE = /^(?:(?:please|can you|could you)\s+)?(?:run|check|use|ask|call|start|open|launch|diagnose|scan|verify|test)\b/;
+const NON_INVOCATION_DETERMINER_RE = /\b(?:my|a|an|your|our|his|her|their|some)\s+$/;
 
 function normalizeText(value) {
   return String(value || '').toLowerCase();
@@ -99,6 +113,23 @@ function scorePhrases(haystack, tokens, phrases = []) {
   return score;
 }
 
+// The agent or project that owns a recipe. Registry ids are "agent/<owner>/<name>",
+// but organizer indexes slug them ("recipe:agent-doctor-run-full-diagnostic"), so
+// fall back to the recipe's source path (agents/<owner>/recipes/...).
+function recipeOwner(capability = {}) {
+  const id = String(capability.id || "");
+  if (/^(?:recipe:)?(?:agent|project|core)\/[^/]+\//.test(id)) return id.replace(/^recipe:/, "").split("/")[1];
+  const source = String(capability.source_path || "").replace(/\\/g, "/");
+  const match = source.match(/(?:^|\/)(?:agents|projects)\/([^/]+)\/recipes\//);
+  return match ? match[1] : null;
+}
+
+function isIdentifyingAlias(capability, alias) {
+  const needle = normalizeText(alias).trim();
+  if (GENERIC_CAPABILITY_ALIASES.has(needle)) return false;
+  return capability.type === "recipe" || !SCRIPT_NAME_ALIASES.has(needle);
+}
+
 function scoreCapabilityMatch(capability, text) {
   const haystack = normalizeText(text);
   const tokens = new Set(meaningfulTokens(text));
@@ -107,12 +138,12 @@ function scoreCapabilityMatch(capability, text) {
   if (capability.type === "recipe") {
     const phrases = [...(capability.aliases || []), ...(capability.use_when || [])]
       .filter(phrase => !GENERIC_CAPABILITY_ALIASES.has(normalizeText(phrase).trim()));
-    const owner = String(capability.id || "").split("/")[1];
+    const owner = recipeOwner(capability);
     if (!phrases.some(phrase => hasBoundedPhrase(haystack, phrase))
         && !(owner && hasBoundedPhrase(haystack, owner))) return {score: 0, evidenceScore: 0};
   }
   evidenceScore += scorePhrases(haystack, tokens, (capability.aliases || [])
-    .filter((alias) => !GENERIC_CAPABILITY_ALIASES.has(normalizeText(alias).trim())));
+    .filter((alias) => isIdentifyingAlias(capability, alias)));
   evidenceScore += scorePhrases(haystack, tokens, (capability.use_when || []).filter((phrase) => !GENERIC_CAPABILITY_ALIASES.has(normalizeText(phrase).trim())));
 
   const description = normalizeText(capability.description || '');
@@ -186,6 +217,27 @@ function shortlistCapabilities(text, lane = null, limit = 5, options = {}) {
   return scored;
 }
 
+// "run the doctor", "check dispatch health with doctor", "doctor my oauth setup":
+// the request starts with an invocation verb (or with the owner's name used as
+// one) and names the agent that owns a shortlisted recipe. "book a doctor
+// appointment" and "check my doctor appointment" are not invocations.
+function ownerRecipeInvocation(text, recipeCandidates = []) {
+  const haystack = normalizeText(text).trim();
+  if (!haystack || haystack.length > 160 || /[\n;]/.test(haystack)) return null;
+  for (const candidate of recipeCandidates) {
+    const owner = recipeOwner(candidate.capability);
+    if (!owner || owner.length < 3 || GENERIC_TOKENS.has(owner)) continue;
+    const ownerPattern = new RegExp(`\\b${escapeRegex(owner)}\\b`, 'i');
+    const at = haystack.search(ownerPattern);
+    if (at < 0) continue;
+    if (NON_INVOCATION_DETERMINER_RE.test(haystack.slice(0, at))) continue;
+    const ownerLed = at === 0 || /^(?:(?:please|can you|could you)\s+)$/.test(haystack.slice(0, at));
+    if (!ownerLed && !INVOCATION_VERB_RE.test(haystack)) continue;
+    return recipeCandidates.filter((entry) => recipeOwner(entry.capability) === owner);
+  }
+  return null;
+}
+
 function selectExecutionLane(text, options = {}) {
   const signals = inferExecutionSignals(text);
   const workflowCandidates = shortlistCapabilities(text, 'workflow', 3, options);
@@ -210,6 +262,15 @@ function selectExecutionLane(text, options = {}) {
       lane: 'recipe_dispatcher',
       reason: 'deterministic_operational_match',
       candidates: recipeCandidates,
+    };
+  }
+
+  const invocation = signals.mentionsAdaptiveWork ? null : ownerRecipeInvocation(text, recipeCandidates);
+  if (invocation) {
+    return {
+      lane: 'recipe_dispatcher',
+      reason: 'owner_recipe_invocation',
+      candidates: invocation,
     };
   }
 
@@ -252,6 +313,7 @@ module.exports = {
   CAPABILITIES_INDEX_PATH,
   inferExecutionSignals,
   loadCapabilityIndex,
+  recipeOwner,
   scoreCapability,
   scoreCapabilityMatch,
   selectExecutionLane,

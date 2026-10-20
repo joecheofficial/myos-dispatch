@@ -29,8 +29,8 @@ for (const surface of ['claude', 'codex']) {
       JSON.parse(missing);
       if (payload.hook_event_name === 'UserPromptSubmit') {
         assert.match(disabled, /\[Jev\] skipped: disabled/);
-        assert.match(missing, /\[Jev\] skipped: no_executable_intent/);
-        assert.equal(missing.replace('no_executable_intent', 'disabled'), disabled);
+        assert.match(missing, /\[Jev\] skipped: no_executable_intent \(no_operational_verb\)/);
+        assert.equal(missing.replace(/no_executable_intent \([\w-]+\)/, 'disabled'), disabled);
       } else {
         assert.equal(missing, disabled);
         assert.doesNotMatch(missing, /jev=/);
@@ -39,7 +39,7 @@ for (const surface of ['claude', 'codex']) {
     const rendered = run('Explain the report format', ['--render-route']);
     assert.match(rendered, /\[Jev\] skipped: disabled/);
     assert.equal(rendered, run('Explain the report format', ['--render-route', '--no-jev'], '1'));
-    assert.equal(run('Explain the report format', ['--render-route'], '1').replace('no_executable_intent', 'disabled'), rendered);
+    assert.equal(run('Explain the report format', ['--render-route'], '1').replace(/no_executable_intent \([\w-]+\)/, 'disabled'), rendered);
     const records = fs.readFileSync(path.join(home, 'logs/myos-dispatch-hooks.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
     const prompt = records.find(row => row.hookEventName === 'UserPromptSubmit');
     for (const key of ['intentType', 'actionType', 'goalScale', 'goalMode', 'goalConfidence', 'aggression', 'depth', 'requiresPlan', 'requiresApproval', 'blockedBy', 'jev']) assert.ok(Object.hasOwn(prompt, key), key);

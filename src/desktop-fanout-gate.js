@@ -10,8 +10,10 @@ function gateDesktopFanout(text, plan) {
     owner.candidateCount <= 1 && owner.nestedRepositoryCount <= 1;
   const blocked = plan.requiresApproval || plan.blockedBy?.length || parallel.blockedReasons?.length ||
     plan.stepEvidence || ['data_lookup','deterministic_data_lookup','recipe_dispatcher','workflow'].includes(plan.route?.lane);
-  const substantial = /\b(?:implement|build|refactor|migrate|investigate|audit)\b/i.test(text) &&
-    /\b(?:verify|test|review|audit)\b/i.test(text) &&
+  // Substantial = build-or-investigate work that also asks for checking. Plural
+  // "tests" and research-then-review requests count (issue #8 F-26).
+  const substantial = /\b(?:implement|build|refactor|migrate|investigate|audit|research)\b/i.test(text) &&
+    /\b(?:verify|test(?:s|ing)?|review|audit)\b/i.test(text) &&
     !/\b(?:wrong project|not that project|instead of|do not|don't)\b/i.test(text);
   const deliverables = {
     context: 'Locate the implementation entry points with exact file references.',
