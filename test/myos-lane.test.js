@@ -270,9 +270,12 @@ test("saved unassigned and oauth-registry catalog entries keep the registry defa
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "myos-catalog-"));
   const file = path.join(dir, "model-catalog.local.json");
   const previous = process.env.MYOS_MODEL_CATALOG_LOCAL;
+  const previousLane = process.env.MYOS_LANE_STATE_PATH;
   process.env.MYOS_MODEL_CATALOG_LOCAL = file;
+  process.env.MYOS_LANE_STATE_PATH = path.join(dir, "lane.json");
   t.after(() => {
     if (previous === undefined) delete process.env.MYOS_MODEL_CATALOG_LOCAL; else process.env.MYOS_MODEL_CATALOG_LOCAL = previous;
+    if (previousLane === undefined) delete process.env.MYOS_LANE_STATE_PATH; else process.env.MYOS_LANE_STATE_PATH = previousLane;
     routing.clearLocalAssignmentsCache();
     fs.rmSync(dir, { recursive: true, force: true });
   });
