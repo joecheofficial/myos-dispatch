@@ -40,12 +40,16 @@ test("explicit no-delegation wins over independent work clauses", () => {
   assert.ok(buildParallelizationPlan("Do not change files. Audit routing and compare providers.", base, signals).backgroundTasks.length > 0);
 });
 
-test("full prompt context does not encourage teams for a lightweight turn", () => {
+test("full prompt context does not encourage teams for a lightweight turn", (t) => {
+  // handleHookPayload appends route logs under MYOS_HOME_ROOT; keep them out of live state.
+  isolateHookHome(t);
   const output = handleHookPayload({ hook_event_name: "UserPromptSubmit", prompt: "thanks" }, "codex", { contextMode: "full", rewrite: false });
   assert.doesNotMatch(output?.hookSpecificOutput?.additionalContext || "", /Fan out FIRST|widen the fanout|maximum safe fanout/);
 });
 
-test("shell source text cannot request agents or writable runners", () => {
+test("shell source text cannot request agents or writable runners", (t) => {
+  // handleHookPayload appends route logs under MYOS_HOME_ROOT; keep them out of live state.
+  isolateHookHome(t);
   const plan = buildParallelizationPlan("node -e 'const fix = 1; const build = 2; console.log(fix, build)'", { ...base, actionType: "write" }, { ...signals, hookEventName: "PreToolUse" });
   assert.equal(plan.backgroundTasks.length, 0);
   for (const contextMode of ["full", "compact"]) {
@@ -55,7 +59,9 @@ test("shell source text cannot request agents or writable runners", () => {
   }
 });
 
-test("per-tool safety evidence remains visible", () => {
+test("per-tool safety evidence remains visible", (t) => {
+  // handleHookPayload appends route logs under MYOS_HOME_ROOT; keep them out of live state.
+  isolateHookHome(t);
   const output = handleHookPayload({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "rm -rf /example/fixture" } }, "codex", { contextMode: "compact", rewrite: false });
   assert.match(output?.hookSpecificOutput?.additionalContext || "", /destructive_or_approval_sensitive/);
 });
