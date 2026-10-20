@@ -68,17 +68,17 @@ test("OpenAI catalog resolves cheap_routing to gpt-5-mini", () => {
   assert.equal(resolved.model.id, "openai.gpt-5-mini");
 });
 
-test("Anthropic catalog exposes Fable 5 as the advisor route with Opus fallback", () => {
+test("Anthropic catalog exposes Fable 5.1 as the advisor route with Opus 5.5 fallback (issue #8)", () => {
   const catalog = loadCatalog("anthropic");
   const resolved = resolveProfileModel(catalog, "anthropic_advisor");
 
   assert.equal(resolved.profile.id, "anthropic_advisor");
-  assert.equal(resolved.model.id, "anthropic.claude-fable-5");
+  assert.equal(resolved.model.id, "anthropic.claude-fable-5-1");
   assert.equal(resolved.model.pricing_per_1m_tokens.input_usd, 10);
   assert.equal(resolved.model.pricing_per_1m_tokens.output_usd, 50);
   assert.deepEqual(resolved.model.allowed_auth_modes, ["oauth"]);
   assert.equal(resolved.model.api_allowed, false);
-  assert.deepEqual(resolved.profile.fallback, ["anthropic.claude-opus-4-8"]);
+  assert.deepEqual(resolved.profile.fallback, ["anthropic.claude-opus-5-5"]);
   assert.equal(resolved.model.fallback_policy.fallback_profile, "anthropic_safety_fallback");
   assert.equal(resolved.model.cost_control.myos_policy, "oauth_only");
 });
@@ -126,4 +126,18 @@ test("Google catalog deep-research model is marked blocked_interactions_api", ()
   assert.ok(model, "deep-research-pro model must exist in catalog");
   assert.equal(model.status, "blocked_interactions_api");
   assert.ok(model.notes.includes("Interactions API"), "notes must document the API restriction");
+});
+
+test("Anthropic routing profiles prefer the current model generation (issue #8)", () => {
+  const catalog = loadCatalog("anthropic");
+  const ids = new Set(catalog.models.map((entry) => entry.id));
+  for (const id of ["anthropic.claude-fable-5-1", "anthropic.claude-opus-5-5", "anthropic.claude-sonnet-5-5", "anthropic.claude-haiku-5-5"]) {
+    assert.ok(ids.has(id), `${id} present`);
+  }
+  for (const profile of catalog.routing_profiles) {
+    for (const id of [...profile.preferred, ...profile.fallback]) {
+      assert.ok(ids.has(id), `${profile.id} references a catalog model: ${id}`);
+      assert.match(id, /claude-(fable-5-1|opus-5-5|sonnet-5-5|haiku-5-5)$/, `${profile.id} uses a current model: ${id}`);
+    }
+  }
 });

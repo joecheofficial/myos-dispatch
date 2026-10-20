@@ -119,11 +119,22 @@ function buildCommand(nodePath, hookPath, surface, home = "") {
   return `${quote(nodePath)} ${quote(hookPath)} --surface=${surface}`;
 }
 
+// Older installs (v3.x hand registrations, npm-bin shims, flags placed before
+// --surface, the .js entrypoint) registered the same hook executable without the
+// exact `myos-dispatch-hook --surface` shape. They must be replaced on upgrade,
+// not left beside the new entry (Dispatch then ran twice per prompt). The
+// executable basename must be a whole token, so wrapper names that merely
+// contain the substring stay foreign.
+const LEGACY_MARKER_RE = /(^|[/\\"'\s])myos-dispatch-hook(\.js)?(?=["'\s]|$)/;
+// Private Uni/Juno runtime hooks are protected; never strip or replace them.
+const PROTECTED_RE = /[/\\]agents[/\\]shared[/\\]/;
+
 function isOurHookEntry(entry) {
-  return entry
+  return Boolean(entry
     && typeof entry === "object"
     && typeof entry.command === "string"
-    && MARKER_RE.test(entry.command);
+    && !PROTECTED_RE.test(entry.command)
+    && (MARKER_RE.test(entry.command) || LEGACY_MARKER_RE.test(entry.command)));
 }
 
 // Human-readable description of an unexpected value, for error messages.
@@ -586,5 +597,6 @@ module.exports = {
   isOurHookEntry,
   MARKER,
   MARKER_RE,
+  LEGACY_MARKER_RE,
   HOME_ENV_KEY,
 };

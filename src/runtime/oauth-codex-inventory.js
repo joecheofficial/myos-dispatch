@@ -6,7 +6,7 @@ const os = require("node:os");
 async function readCodexInventory(options = {}) {
   if (process.platform === "win32" && !options.spawnImpl) return null;
   return new Promise(resolve => {
-    const child = (options.spawnImpl || spawn)("codex", ["app-server", "-c", 'forced_login_method="chatgpt"', "-c", 'model_provider="openai"'], {
+    const child = (options.spawnImpl || spawn)(options.command || "codex", ["app-server", "-c", 'forced_login_method="chatgpt"', "-c", 'model_provider="openai"'], {
       env: options.env, cwd: options.cwd || os.homedir(), detached: true, stdio: ["pipe", "pipe", "pipe"],
     });
     let output = null, stopping = false, id = 0, bytes = 0, hardStop;

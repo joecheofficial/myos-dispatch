@@ -46,6 +46,10 @@ function defaultProbeEnv(env = process.env) {
   return env;
 }
 
+const { resolveProviderBinary, childPath } = require("../src/runtime/provider-binaries");
+const OAUTH_TEXT_CLASSES = ["cheap_routing", "default_automation", "heavy_synthesis", "task_class_is_elite", "planning"];
+const OAUTH_PROVIDER = { openai: "codex", anthropic: "claude" };
+
 function commandExists(command) {
   const result = process.platform === "win32"
     ? spawnSync("cmd", ["/d", "/s", "/c", `where ${command} >nul 2>nul`], {
@@ -84,7 +88,10 @@ function probeLoginStatus(command, run = spawnSync, env = process.env) {
   const args = command === "codex" ? ["login", "status"]
     : command === "claude" ? ["auth", "status", "--json"] : null;
   if (!args) return "unknown";
-  const result = run(command, args, { env, encoding: "utf8", timeout: 3000, maxBuffer: 65536 });
+  // Codex and Claude often live outside PATH (macOS app bundles, ~/.local/bin).
+  const binary = run === spawnSync ? resolveProviderBinary(command, { env }) : null;
+  const result = run(binary || command, args, { env: binary ? { ...env, PATH: childPath(binary, env) } : env,
+    encoding: "utf8", timeout: 8000, maxBuffer: 65536 });
   if (result.error || result.signal) return "unknown";
   if (command === "claude") {
     try {
@@ -106,7 +113,11 @@ function defaultProbes(env = process.env) {
   return {
     loginStatus(command) { return probeLoginStatus(command, spawnSync, env); },
     cliAvailable(command) {
+      if (command === "codex" || command === "claude") return Boolean(resolveProviderBinary(command, { env }));
       return commandExists(command);
+    },
+    cliPath(command) {
+      return command === "codex" || command === "claude" ? resolveProviderBinary(command, { env }) : null;
     },
     envHas(key) {
       return Boolean(String(defaultProbeEnv(env)[key] || "").trim());
@@ -133,8 +144,10 @@ function normalizeProviderAvailability(probes, env = process.env) {
     const oauth = loginStatus === "oauth";
     const apiKey = Boolean((PROVIDER_ENV_KEYS[provider] || []).some((key) => probes.envHas(key)));
     if (!installed && !apiKey) continue;
+    const cliPath = installed && probes.cliPath ? probes.cliPath(cli) : null;
     availability[provider] = {
       oauthCli: installed ? cli : undefined,
+      ...(cliPath ? { cliPath } : {}),
       installed,
       loginStatus,
       oauth,
@@ -232,6 +245,9 @@ function chooseAssignment(taskClass, providers, local) {
 }
 
 function firstEnablementHint(taskClass) {
+  if (OAUTH_TEXT_CLASSES.includes(taskClass)) {
+    return "a Codex or Claude subscription sign-in (Codex: `codex login` or the ChatGPT/Codex app; Claude: `claude auth login --claudeai`; then `node bin/myos-oauth-doctor.js scan`), or an API key such as GEMINI_API_KEY or OPENAI_API_KEY";
+  }
   const routes = ROUTING_POLICY.taskClasses[taskClass] || {};
   for (const lane of ["unattended_api", "interactive_oauth", "unattended_local"]) {
     const route = routes[lane];
@@ -253,10 +269,26 @@ function firstEnablementHint(taskClass) {
   return "enable a supported provider";
 }
 
-function buildAssignments(providers, local) {
+// The subscription path: models discovered from the signed-in Codex/Claude
+// CLIs (the same registry the OAuth runtime routes on). Codex first, then Claude.
+function chooseOauthAssignment(taskClass, providers, oauthState) {
+  if (!oauthState || !OAUTH_TEXT_CLASSES.includes(taskClass)) return null;
+  const { selectModels } = require("../src/runtime/oauth-registry");
+  for (const provider of ["openai", "anthropic"]) {
+    if (!providers[provider]?.oauth) continue;
+    const [chosen] = selectModels(oauthState, { provider: OAUTH_PROVIDER[provider], taskClass });
+    if (!chosen) continue;
+    return { type: "llm", provider, profile: null, model: chosen.model, effort: chosen.effort,
+      authMode: "oauth", lane: "interactive_oauth", source: "oauth-registry", taskClass,
+      ...(chosen.firstCall ? { firstCall: true } : {}) };
+  }
+  return null;
+}
+
+function buildAssignments(providers, local, oauthState = null) {
   const assignments = {};
   for (const taskClass of CANONICAL_TASK_CLASSES) {
-    const candidate = chooseAssignment(taskClass, providers, local);
+    const candidate = chooseOauthAssignment(taskClass, providers, oauthState) || chooseAssignment(taskClass, providers, local);
     if (candidate) {
       assignments[taskClass] = candidate;
       continue;
@@ -271,10 +303,10 @@ function buildAssignments(providers, local) {
   return assignments;
 }
 
-function buildModelCatalog({ homeRoot = preferredHomeRoot(), probes = defaultProbes(), now = probes.now?.bind(probes) || (() => new Date()), existing = null } = {}) {
+function buildModelCatalog({ homeRoot = preferredHomeRoot(), probes = defaultProbes(), now = probes.now?.bind(probes) || (() => new Date()), existing = null, oauthState = null } = {}) {
   const providers = normalizeProviderAvailability(probes);
   const local = normalizeLocalAvailability(probes);
-  const assignments = buildAssignments(providers, local);
+  const assignments = buildAssignments(providers, local, oauthState);
   const overrides = existing && existing.overrides && typeof existing.overrides === "object" && !Array.isArray(existing.overrides)
     ? existing.overrides
     : {};
@@ -308,12 +340,16 @@ function formatAssignmentLine(taskClass, assignment) {
     : assignment.lane === "unattended_api"
       ? "unattended_api"
       : "unattended_local";
+  if (assignment.source === "oauth-registry") {
+    const via = assignment.provider === "anthropic" ? "your Claude subscription (Claude CLI)" : "your ChatGPT/Codex subscription (Codex CLI)";
+    return `Assigned: ${assignment.model}, through ${via}; no API key needed.${assignment.firstCall ? " Its first call unlocks it (or run `node bin/myos-oauth-doctor.js unlock`)." : ""}`;
+  }
   return `Assigned: ${assignment.model}, available through ${laneLabel} because ${assignment.authMode === "oauth" ? "CLI OAuth login was verified when assigned" : "an API key is present"}.`;
 }
 
 function describeDetectedProvider(provider, state) {
   const parts = [];
-  if (state.installed) parts.push(`${state.oauthCli} CLI installed; login: ${state.loginStatus}`);
+  if (state.installed) parts.push(`${state.oauthCli} CLI installed${state.cliPath ? ` at ${state.cliPath}` : ""}; login: ${state.loginStatus}`);
   if (state.apiKey) parts.push("API key detected in your environment (not tested)");
   return `- ${provider}: ${parts.join(", plus an ")}`;
 }
@@ -337,6 +373,20 @@ function renderDetectedModels(catalog) {
   return lines;
 }
 
+// Explain the subscription (OAuth) path, which needs no API key, and why it
+// was or was not detected on this machine.
+function renderSubscriptionPath(catalog) {
+  const lines = ["Subscription path (no API key needed): Dispatch can run text task classes on your ChatGPT/Codex or Claude plan through their signed-in CLIs."];
+  for (const [provider, cli, signIn] of [["openai", "codex", "`codex login` or sign in to the ChatGPT/Codex app"], ["anthropic", "claude", "`claude auth login --claudeai`"]]) {
+    const state = catalog.providers?.[provider];
+    if (!state?.installed) lines.push(`- ${cli}: CLI not found (searched PATH, ~/.local/bin, /opt/homebrew/bin, /usr/local/bin and the macOS app bundles). Install it or set MYOS_${cli.toUpperCase()}_BIN to its path.`);
+    else if (!state.oauth) lines.push(`- ${cli}: found, but not signed in with a subscription (login: ${state.loginStatus}). Run ${signIn}.`);
+    else lines.push(`- ${cli}: signed in with a subscription; used for the text task classes below.`);
+  }
+  lines.push("After signing in, run `node bin/myos-oauth-doctor.js scan`; `node bin/myos-oauth-doctor.js unlock` makes the first Claude call for each model.");
+  return lines;
+}
+
 function renderReport(catalog) {
   const lines = [];
   lines.push("MyOS Dispatch is a routing layer for prompts and tasks.");
@@ -348,6 +398,8 @@ function renderReport(catalog) {
   lines.push("");
   lines.push("These are the provider installations and credentials detected on this machine:");
   lines.push(...renderDetectedModels(catalog));
+  lines.push("");
+  lines.push(...renderSubscriptionPath(catalog));
   lines.push("");
   lines.push("I've made my best guess assigning the eight task classes to them:");
 
@@ -423,15 +475,38 @@ function parseArgs(argv) {
   return args;
 }
 
-function main(argv = process.argv.slice(2)) {
+// Read-only subscription inventory: the saved registry merged with a fresh
+// metadata scan (sign-in status and model lists only; never inference or login).
+async function loadOauthState(probes, env = process.env) {
+  const { registryPath } = require("../src/runtime/oauth-doctor");
+  const file = registryPath(env);
+  if (!file) return null;
+  const signedIn = ["codex", "claude"].filter(cli => probes.cliAvailable(cli) && probes.loginStatus?.(cli) === "oauth");
+  if (!signedIn.length) return null;
+  const { readState } = require("../src/runtime/oauth-state");
+  const { mergeDiscovery } = require("../src/runtime/oauth-registry");
+  const { discoverInventory } = require("../src/runtime/oauth-discovery");
+  try {
+    const inventory = await discoverInventory({ env });
+    const auth = new Map(inventory.providers.map(provider => [provider.provider, provider.auth]));
+    const merged = mergeDiscovery(readState(file), inventory.models);
+    return { ...merged, models: merged.models.map(model => ({ ...model, auth: auth.get(model.provider) || model.auth })) };
+  } catch {
+    return readState(file);
+  }
+}
+
+async function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
   const homeRoot = args.home || process.env.MYOS_HOME_ROOT || preferredHomeRoot();
   const targetPath = resolveModelCatalogLocalPath(homeRoot);
   const existing = readExistingCatalog(targetPath);
+  const probes = defaultProbes();
   const catalog = buildModelCatalog({
     homeRoot,
-    probes: defaultProbes(),
+    probes,
     existing,
+    oauthState: await loadOauthState(probes),
   });
   const { homeRoot: ignoredHome, ...preview } = catalog;
   const written = args.report ? preview : writeModelCatalog(targetPath, catalog);
@@ -451,12 +526,10 @@ function main(argv = process.argv.slice(2)) {
 }
 
 if (require.main === module) {
-  try {
-    main();
-  } catch (error) {
+  main().catch((error) => {
     process.stderr.write(`${error.message}\n`);
     process.exitCode = 1;
-  }
+  });
 }
 
 module.exports = {
@@ -464,6 +537,9 @@ module.exports = {
   TASK_DESCRIPTIONS,
   buildAssignments,
   buildModelCatalog,
+  chooseOauthAssignment,
+  loadOauthState,
+  renderSubscriptionPath,
   defaultProbes,
   formatAssignmentLine,
   firstEnablementHint,
