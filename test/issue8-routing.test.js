@@ -309,7 +309,7 @@ const NOT_AN_INVOCATION = [
   'check the doctor appointment time', 'doctor who season 3 recap', 'call the doctor tomorrow',
   'test results from the doctor came in', 'doctor appointment is at 3pm, put it on my calendar',
   'doctor my oauth setup', 'book a doctor appointment for tuesday',
-  'check the stripe payment from Hans', 'verify the stripe payment from Hans', 'check whatsapp for Kirsty reply',
+  'check the stripe payment from Alex', 'verify the stripe payment from Alex', 'check whatsapp for Sam reply',
   'spotify playlist for the party', 'check whatsapp for the team',
 ];
 // Real owner invocations whose owners also have recipes that change things

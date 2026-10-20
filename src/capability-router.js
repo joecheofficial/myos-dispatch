@@ -50,7 +50,7 @@ const SCRIPT_NAME_ALIASES = new Set([
 // health with doctor") asks for one of that agent's recipes even when no recipe
 // phrase matches. The owner must be the direct object of a run/check verb, or
 // the tool named at the end ("... with doctor"); a noun modifier ("check the
-// doctor appointment time", "check the stripe payment from Hans") is not an
+// doctor appointment time", "check the stripe payment from Alex") is not an
 // invocation. Communication verbs (call, ask) are deliberately excluded.
 const INVOCATION_VERBS = "run|use|launch|start|check|diagnose|scan|verify|test";
 const INVOCATION_LEAD = "^(?:(?:please|can you|could you)\\s+)?";
@@ -332,7 +332,7 @@ function selectExecutionLane(text, options = {}) {
   const signals = inferExecutionSignals(text);
   const workflowCandidates = shortlistCapabilities(text, 'workflow', 3, options);
   // A read request (check, verify, show, ...) never routes to a recipe that
-  // changes something, whatever its score ("check the stripe payment from Hans"
+  // changes something, whatever its score ("check the stripe payment from Alex"
   // is not "create a payment link").
   const readRequest = READ_REQUEST_RE.test(normalizeText(text).trim());
   const recipeCandidates = shortlistCapabilities(text, 'recipe_dispatcher', 3, options)
