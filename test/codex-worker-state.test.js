@@ -7,18 +7,29 @@ const { spawnSync } = require("node:child_process");
 
 const stateModulePath = require.resolve("../src/background/codex-worker-state");
 
+// State roots resolve from MYOS_HOME_ROOT / OPENCLAW_HOME_ROOT before HOME, so
+// all three must point at the temporary home or an ambient MYOS_HOME_ROOT
+// (set on real installs) sends these writes into the live state directory.
+const HOME_KEYS = ["HOME", "MYOS_HOME_ROOT", "OPENCLAW_HOME_ROOT"];
+
 function withTempHome(fn) {
-  const originalHome = process.env.HOME;
+  const original = Object.fromEntries(HOME_KEYS.map((key) => [key, process.env[key]]));
   const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "codex-worker-state-"));
   process.env.HOME = tempHome;
+  process.env.MYOS_HOME_ROOT = path.join(tempHome, ".myos");
+  process.env.OPENCLAW_HOME_ROOT = path.join(tempHome, ".openclaw");
   delete require.cache[stateModulePath];
   const state = require("../src/background/codex-worker-state");
 
   try {
     return fn(state, tempHome);
   } finally {
-    process.env.HOME = originalHome;
+    for (const [key, value] of Object.entries(original)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
     delete require.cache[stateModulePath];
+    fs.rmSync(tempHome, { recursive: true, force: true });
   }
 }
 

@@ -12,7 +12,9 @@ const service = require("../packages/local-search/service");
 const serviceCli = require("../packages/local-search/service-cli");
 const runner = require("../packages/local-search/service-runner");
 const serviceEntrypoint = path.resolve(__dirname, "../bin/myos-search-service.js");
-const node24 = "/Users/myos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node";
+// Real Node 24 runtime (running, MYOS_TEST_NODE24, or discovered); tests that
+// need it skip cleanly when this machine has none.
+const { NODE24: node24, skipUnlessNode24Found } = require("./helpers/node24");
 
 function fixture(t, enabled = true) {
   const base = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "myos-search-service-"));
@@ -125,7 +127,7 @@ test("outer bridge accepts only strict optional metadata freshness fields", () =
   assert.equal(require("../bin/myos-search-service").sanitizePublicOutput({ ...valid, privatePath: "/secret" }, "status"), null);
 });
 
-test("CLI and runner main handlers expose only finite public error statuses", async () => {
+test("CLI and runner main handlers expose only finite public error statuses", { skip: skipUnlessNode24Found }, async () => {
   const cliPath = path.resolve(__dirname, "../packages/local-search/service-cli.js");
   const invalid = require("node:child_process").spawnSync(node24, [cliPath, "status", "--config", "relative/private"], { encoding: "utf8" });
   assert.deepEqual(JSON.parse(invalid.stdout), {
@@ -138,7 +140,7 @@ test("CLI and runner main handlers expose only finite public error statuses", as
   });
 });
 
-test("persistent freshness is default-off and does not register disabled configuration", async (t) => {
+test("persistent freshness is default-off and does not register disabled configuration", { skip: skipUnlessNode24Found }, async (t) => {
   const item = fixture(t, false);
   await assert.rejects(
     service.enable({ configPath: item.configPath, node24, confirm: true }, item.dependencies),
@@ -148,7 +150,7 @@ test("persistent freshness is default-off and does not register disabled configu
   assert.equal(fs.existsSync(path.join(item.config.stateDirectory, "service")), false);
 });
 
-test("explicit enable writes an owned plist and observes startup acknowledgement", async (t) => {
+test("explicit enable writes an owned plist and observes startup acknowledgement", { skip: skipUnlessNode24Found }, async (t) => {
   const item = fixture(t);
   item.launchctl.onBootstrap = ({ identity }) => ack(identity.statusPath, identity);
   const result = await service.enable({ configPath: item.configPath, node24, confirm: true }, item.dependencies);
@@ -165,7 +167,7 @@ test("explicit enable writes an owned plist and observes startup acknowledgement
   assert.deepEqual(Object.keys(result), ["version", "id", "name", "enabled", "taskClass", "complianceLane", "scheduler", "phase", "lastHeartbeat", "lastRun", "lastStatus", "nextReconciliationAt", "errorCode", "metadataRefreshedAt", "metadataSweepCompletedAt", "metadataPending"]);
 });
 
-test("enable requires confirmation and refuses an unowned plist collision", async (t) => {
+test("enable requires confirmation and refuses an unowned plist collision", { skip: skipUnlessNode24Found }, async (t) => {
   const item = fixture(t);
   await assert.rejects(service.enable({ configPath: item.configPath, node24 }, item.dependencies), (error) => error.code === "confirmationRequired");
   const identity = service.deriveIdentity(item.configPath, item.config, item.dependencies);
@@ -175,7 +177,7 @@ test("enable requires confirmation and refuses an unowned plist collision", asyn
   assert.deepEqual(item.calls, []);
 });
 
-test("enable fails closed before creating artifacts when registration state is unknown", async (t) => {
+test("enable fails closed before creating artifacts when registration state is unknown", { skip: skipUnlessNode24Found }, async (t) => {
   const item = fixture(t);
   item.launchctl.print = async () => ({ loaded: null });
   await assert.rejects(
@@ -188,7 +190,7 @@ test("enable fails closed before creating artifacts when registration state is u
   assert.equal(fs.existsSync(identity.markerPath), false);
 });
 
-test("enable requires the service runner to be ready before creating artifacts", async (t) => {
+test("enable requires the service runner to be ready before creating artifacts", { skip: skipUnlessNode24Found }, async (t) => {
   const item = fixture(t);
   item.dependencies.installationRoot = path.join(item.base, "missing-installation");
   await assert.rejects(
@@ -200,7 +202,7 @@ test("enable requires the service runner to be ready before creating artifacts",
   assert.equal(fs.existsSync(identity.receiptPath), false);
 });
 
-test("runner code may be non-executable but must remain a trusted readable regular file", async (t) => {
+test("runner code may be non-executable but must remain a trusted readable regular file", { skip: skipUnlessNode24Found }, async (t) => {
   const accepted = fixture(t);
   const installationRoot = path.join(accepted.base, "installed");
   const installedRunner = path.join(installationRoot, "packages", "local-search", "service-runner.js");
@@ -244,7 +246,7 @@ test("runner code may be non-executable but must remain a trusted readable regul
   }
 });
 
-test("missing startup acknowledgement rolls back only newly-created service artifacts", async (t) => {
+test("missing startup acknowledgement rolls back only newly-created service artifacts", { skip: skipUnlessNode24Found }, async (t) => {
   const item = fixture(t);
   await assert.rejects(service.enable({ configPath: item.configPath, node24, confirm: true }, item.dependencies), (error) => error.code === "startupAckTimeout");
   const identity = service.deriveIdentity(item.configPath, item.config, item.dependencies);
@@ -255,7 +257,7 @@ test("missing startup acknowledgement rolls back only newly-created service arti
   assert.equal(fs.existsSync(item.configPath), true);
 });
 
-test("status requires registration and a fresh heartbeat", async (t) => {
+test("status requires registration and a fresh heartbeat", { skip: skipUnlessNode24Found }, async (t) => {
   const item = fixture(t);
   const startedAt = Date.now();
   item.dependencies.now = () => startedAt;
@@ -268,7 +270,7 @@ test("status requires registration and a fresh heartbeat", async (t) => {
   assert.equal(Object.values(result).some((value) => typeof value === "string" && value.includes(item.base)), false);
 });
 
-test("status reports an unknown launchctl observation as degraded", async (t) => {
+test("status reports an unknown launchctl observation as degraded", { skip: skipUnlessNode24Found }, async (t) => {
   const item = fixture(t);
   item.launchctl.onBootstrap = ({ identity }) => ack(identity.statusPath, identity);
   await service.enable({ configPath: item.configPath, node24, confirm: true }, item.dependencies);
@@ -279,7 +281,7 @@ test("status reports an unknown launchctl observation as degraded", async (t) =>
   assert.equal(Object.keys(result).length, 16);
 });
 
-test("disable operates only on a matching owned registration and verifies stop", async (t) => {
+test("disable operates only on a matching owned registration and verifies stop", { skip: skipUnlessNode24Found }, async (t) => {
   const item = fixture(t);
   item.launchctl.onBootstrap = ({ identity }) => ack(identity.statusPath, identity);
   await service.enable({ configPath: item.configPath, node24, confirm: true }, item.dependencies);
@@ -292,7 +294,7 @@ test("disable operates only on a matching owned registration and verifies stop",
   assert.equal(fs.existsSync(item.configPath), true);
 });
 
-test("disable preserves owned artifacts when registration state cannot be verified", async (t) => {
+test("disable preserves owned artifacts when registration state cannot be verified", { skip: skipUnlessNode24Found }, async (t) => {
   const item = fixture(t);
   item.launchctl.onBootstrap = ({ identity }) => ack(identity.statusPath, identity);
   await service.enable({ configPath: item.configPath, node24, confirm: true }, item.dependencies);
@@ -324,7 +326,7 @@ test("disable removes an exactly owned service after its startup executables are
   assert.equal(fs.existsSync(identity.plistPath), false);
 });
 
-test("disable rejects a redirected service-directory ancestor before bootout", async (t) => {
+test("disable rejects a redirected service-directory ancestor before bootout", { skip: skipUnlessNode24Found }, async (t) => {
   const item = fixture(t);
   item.launchctl.onBootstrap = ({ identity }) => ack(identity.statusPath, identity);
   await service.enable({ configPath: item.configPath, node24, confirm: true }, item.dependencies);
@@ -337,7 +339,7 @@ test("disable rejects a redirected service-directory ancestor before bootout", a
   assert.equal(fs.existsSync(path.join(redirected, "owner-receipt.json")), true);
 });
 
-test("runner acknowledges before watch startup, recovers after a clock gap, and drains on SIGHUP", async (t) => {
+test("runner acknowledges before watch startup, recovers after a clock gap, and drains on SIGHUP", { skip: skipUnlessNode24Found }, async (t) => {
   const item = fixture(t);
   const identity = service.deriveIdentity(item.configPath, item.config, item.dependencies);
   item.launchctl.onBootstrap = ({ identity: launched }) => ack(launched.statusPath, launched);
@@ -376,7 +378,7 @@ test("runner acknowledges before watch startup, recovers after a clock gap, and 
   assert.equal(stopped, 1);
 });
 
-test("failed rollback preserves ownership artifacts until process stop is verified", async (t) => {
+test("failed rollback preserves ownership artifacts until process stop is verified", { skip: skipUnlessNode24Found }, async (t) => {
   const item = fixture(t);
   item.launchctl.bootout = async () => { item.calls.push("bootout"); return { ok: false, errorCode: "busy" }; };
   await assert.rejects(
@@ -389,7 +391,7 @@ test("failed rollback preserves ownership artifacts until process stop is verifi
   assert.equal(fs.existsSync(identity.markerPath), true);
 });
 
-test("rollback preserves ownership artifacts when post-bootout observation is unknown", async (t) => {
+test("rollback preserves ownership artifacts when post-bootout observation is unknown", { skip: skipUnlessNode24Found }, async (t) => {
   const item = fixture(t);
   let prints = 0;
   item.launchctl.print = async () => ({ loaded: prints++ === 0 ? false : null });
@@ -405,7 +407,7 @@ test("rollback preserves ownership artifacts when post-bootout observation is un
   assert.equal(fs.existsSync(identity.markerPath), true);
 });
 
-test("startup acknowledgement rejects stale, future, and unacknowledged generations", async (t) => {
+test("startup acknowledgement rejects stale, future, and unacknowledged generations", { skip: skipUnlessNode24Found }, async (t) => {
   for (const offset of [-60_000, 60_000, 0]) {
     const item = fixture(t);
     const startedAt = 100_000;
@@ -423,7 +425,7 @@ test("startup acknowledgement rejects stale, future, and unacknowledged generati
   }
 });
 
-test("existing owned registration is reused only with its current generation and registration", async (t) => {
+test("existing owned registration is reused only with its current generation and registration", { skip: skipUnlessNode24Found }, async (t) => {
   const item = fixture(t);
   const startedAt = 200_000;
   item.dependencies.now = () => startedAt;
@@ -435,7 +437,7 @@ test("existing owned registration is reused only with its current generation and
   assert.equal(item.calls.filter((call) => call === "bootstrap").length, bootstraps);
 });
 
-test("existing enable preserves its receipt and marker when acknowledgement observation becomes unknown", async (t) => {
+test("existing enable preserves its receipt and marker when acknowledgement observation becomes unknown", { skip: skipUnlessNode24Found }, async (t) => {
   const item = fixture(t);
   item.launchctl.onBootstrap = ({ identity }) => ack(identity.statusPath, identity);
   await service.enable({ configPath: item.configPath, node24, confirm: true }, item.dependencies);
@@ -449,7 +451,7 @@ test("existing enable preserves its receipt and marker when acknowledgement obse
   assert.deepEqual(fs.readFileSync(identity.markerPath), marker);
 });
 
-test("filesystem boundaries reject redirected service and LaunchAgents ancestors", async (t) => {
+test("filesystem boundaries reject redirected service and LaunchAgents ancestors", { skip: skipUnlessNode24Found }, async (t) => {
   const serviceLink = fixture(t);
   fs.mkdirSync(serviceLink.config.stateDirectory, { mode: 0o700 });
   const redirect = path.join(serviceLink.base, "redirect");
@@ -466,7 +468,7 @@ test("filesystem boundaries reject redirected service and LaunchAgents ancestors
   assert.deepEqual(fs.readdirSync(outside), []);
 });
 
-test("private receipt, marker, and status hard links are rejected", async (t) => {
+test("private receipt, marker, and status hard links are rejected", { skip: skipUnlessNode24Found }, async (t) => {
   const item = fixture(t);
   const startedAt = 300_000;
   item.dependencies.now = () => startedAt;
@@ -478,17 +480,23 @@ test("private receipt, marker, and status hard links are rejected", async (t) =>
   assert.equal(result.errorCode, "ownershipCollision");
 });
 
-test("actual owner-readable Node 24 executable is accepted without a probe bypass", async (t) => {
+test("actual owner-readable Node 24 executable is accepted without a probe bypass", { skip: skipUnlessNode24Found }, async (t) => {
   const item = fixture(t);
   const startedAt = 400_000;
   item.dependencies.now = () => startedAt;
   item.launchctl.onBootstrap = ({ identity }) => ack(identity.statusPath, identity, startedAt);
+  const modeBefore = fs.statSync(node24).mode & 0o7777;
   const result = await service.enable({ configPath: item.configPath, node24, confirm: true }, item.dependencies);
   assert.equal(result.enabled, true);
-  assert.equal(fs.statSync(node24).mode & 0o777, 0o755);
+  // Installed runtimes vary (0755 official tarballs, 0555 Homebrew); enable must
+  // accept any owner/root-owned, non-group/world-writable executable unchanged.
+  const modeAfter = fs.statSync(node24).mode & 0o7777;
+  assert.equal(modeAfter, modeBefore);
+  assert.equal(modeAfter & 0o022, 0);
+  assert.notEqual(modeAfter & 0o111, 0);
 });
 
-test("status rejects extra private fields, malformed types, and raw error text", async (t) => {
+test("status rejects extra private fields, malformed types, and raw error text", { skip: skipUnlessNode24Found }, async (t) => {
   const item = fixture(t);
   const startedAt = 500_000;
   item.dependencies.now = () => startedAt;
@@ -551,7 +559,7 @@ test("watcher state projects paused, unhealthy, and index-not-ready without fake
   assert.equal(runner.projectWatcherState({ stopped: false, running: false, runs: 1, last: { ok: true }, healthErrors: [] }).errorCode, "indexNotReady");
 });
 
-test("runner publishes paused and startup-error watcher truth", async (t) => {
+test("runner publishes paused and startup-error watcher truth", { skip: skipUnlessNode24Found }, async (t) => {
   for (const kind of ["paused", "error"]) {
     const item = fixture(t);
     const identity = await prepareOwned(item, kind === "paused" ? 600_000 : 700_000);
@@ -576,7 +584,7 @@ test("runner publishes paused and startup-error watcher truth", async (t) => {
   }
 });
 
-test("runner lastRun advances only when the completed watcher run count advances", async (t) => {
+test("runner lastRun advances only when the completed watcher run count advances", { skip: skipUnlessNode24Found }, async (t) => {
   const item = fixture(t);
   let clock = 750_000;
   const identity = await prepareOwned(item, clock);
@@ -607,7 +615,7 @@ test("runner lastRun advances only when the completed watcher run count advances
   await running;
 });
 
-test("runner projects only confirmed metadata refresh timestamps", async (t) => {
+test("runner projects only confirmed metadata refresh timestamps", { skip: skipUnlessNode24Found }, async (t) => {
   const item = fixture(t);
   const clock = 770_000;
   const identity = await prepareOwned(item, clock);
@@ -629,7 +637,7 @@ test("runner projects only confirmed metadata refresh timestamps", async (t) => 
   await running;
 });
 
-test("runner records a completed startup callback before the watcher is assigned", async (t) => {
+test("runner records a completed startup callback before the watcher is assigned", { skip: skipUnlessNode24Found }, async (t) => {
   const item = fixture(t);
   const clock = 780_000;
   const identity = await prepareOwned(item, clock);
@@ -651,7 +659,7 @@ test("runner records a completed startup callback before the watcher is assigned
   await running;
 });
 
-test("runner uses a completed callback count when watcher state has not caught up", async (t) => {
+test("runner uses a completed callback count when watcher state has not caught up", { skip: skipUnlessNode24Found }, async (t) => {
   const item = fixture(t);
   let clock = 790_000;
   const identity = await prepareOwned(item, clock);
@@ -676,7 +684,7 @@ test("runner uses a completed callback count when watcher state has not caught u
   await running;
 });
 
-test("clock-gap wake reports no-op and failure from watcher state", async (t) => {
+test("clock-gap wake reports no-op and failure from watcher state", { skip: skipUnlessNode24Found }, async (t) => {
   for (const kind of ["noop", "failure"]) {
     const item = fixture(t);
     let clock = kind === "noop" ? 800_000 : 900_000;
@@ -704,7 +712,7 @@ test("clock-gap wake reports no-op and failure from watcher state", async (t) =>
   }
 });
 
-test("runner serializes overlapping ticks and drains an active tick before stopped heartbeat", async (t) => {
+test("runner serializes overlapping ticks and drains an active tick before stopped heartbeat", { skip: skipUnlessNode24Found }, async (t) => {
   const item = fixture(t);
   let clock = 1_000_000;
   const identity = await prepareOwned(item, clock);
@@ -736,7 +744,7 @@ test("runner serializes overlapping ticks and drains an active tick before stopp
   assert.equal(JSON.parse(fs.readFileSync(identity.statusPath, "utf8")).phase, "stopped");
 });
 
-test("startup heartbeat publication failure stops before watch and removes temporary output", { concurrency: false }, async (t) => {
+test("startup heartbeat publication failure stops before watch and removes temporary output", { skip: skipUnlessNode24Found, concurrency: false }, async (t) => {
   const item = fixture(t);
   const identity = await prepareOwned(item, 1_100_000);
   const rename = fs.renameSync;
@@ -754,7 +762,7 @@ test("startup heartbeat publication failure stops before watch and removes tempo
   assert.equal(fs.readdirSync(identity.serviceDirectory).some((name) => name.endsWith(".tmp")), false);
 });
 
-test("outer bridge bounds nested output and real Node 24 status stays cheap-routing", (t) => {
+test("outer bridge bounds nested output and real Node 24 status stays cheap-routing", { skip: skipUnlessNode24Found }, (t) => {
   const item = fixture(t);
   const statusChild = require("node:child_process").spawnSync(process.execPath, [serviceEntrypoint, "--node24", node24, "status", "--config", item.configPath], { encoding: "utf8" });
   const statusResult = JSON.parse(statusChild.stdout);
