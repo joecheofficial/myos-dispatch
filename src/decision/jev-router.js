@@ -83,6 +83,31 @@ function shortlist(text, recipes, minimumOverlap = 1) {
   }).filter(row => row.score >= minimumOverlap).sort((a, b) => b.score - a.score || a.recipe.id.localeCompare(b.recipe.id)).slice(0, 12).map(row => row.recipe);
 }
 
+// Map the baseline route's recipe to the registry manifest. Registry ids are
+// "agent/doctor/run-full-diagnostic", but organizer-built indexes slug them to
+// "recipe:agent-doctor-run-full-diagnostic", so an exact id lookup never found the
+// recipe or its approval (issue #8). Match the exact id, then the slug, then the
+// manifest file the route already points at.
+function slugRecipeId(id) {
+  return String(id || '').toLowerCase().replace(/^recipe:/, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+function samePath(a, b) {
+  if (!a || !b) return false;
+  const real = value => { try { return fs.realpathSync(value); } catch { return path.resolve(value); } };
+  return real(a) === real(b);
+}
+function resolveBaselineRecipe(baseline, recipes) {
+  const capabilityId = String(baseline.capabilityId || '');
+  const scope = typeof baseline.searchScope === 'string' && baseline.searchScope.endsWith('.recipe.json') ? baseline.searchScope : '';
+  if (!capabilityId && !scope) return null;
+  const bare = capabilityId.replace(/^recipe:/, '');
+  const slug = slugRecipeId(capabilityId);
+  return recipes.find(recipe => recipe.id === capabilityId || recipe.id === bare)
+    || (slug ? recipes.find(recipe => slugRecipeId(recipe.id) === slug || slugRecipeId(`${recipe.layer}-${recipe.owner}-${String(recipe.id).split('/').pop()}`) === slug) : null)
+    || (scope ? recipes.find(recipe => samePath(recipe.filePath, scope)) : null)
+    || null;
+}
+
 function disableFanout(plan) {
   if (!plan.parallelizationPlan) return undefined;
   return { ...plan.parallelizationPlan, mode: 'none', aggression: 'off', depth: 0, reason: 'deterministic_recipe_selected',
@@ -104,22 +129,32 @@ async function routeWithJev(text, baseline, opts = {}) {
   };
   if (economy.mode(env) === 'off') return finish(baseline, { reason: 'disabled' });
   // Already executable exact/data routes need no semantic classification. A project reference alone is not an executable route.
+  const registry = () => opts.recipes || require('../task-dispatcher').getRecipeRegistry().recipes;
   if (baseline.branch === 'recipe' || baseline.route?.lane === 'data_lookup') {
-    const id = baseline.branch === 'recipe' ? baseline.capabilityId?.replace(/^recipe:/, '') || null : null;
-    const recipe = id ? (opts.recipes || require('../task-dispatcher').getRecipeRegistry().recipes).find(r => r.id === id) : null;
+    const recipe = baseline.branch === 'recipe' ? resolveBaselineRecipe(baseline, registry()) : null;
+    const id = recipe ? recipe.id : baseline.branch === 'recipe' ? baseline.capabilityId?.replace(/^recipe:/, '') || null : null;
     return finish(baseline, { reason: 'deterministic_match', recipeId: id, recipeFingerprint: recipe ? approvalFingerprint(recipe,env) : null,
       directExecution: recipe ? directExecutionAllowed(recipe, env) : false });
   }
   if (!text || text.length > 4000) return finish(baseline, { reason: 'input_budget' });
-  if (!opts.stepDecision && !economy.executableIntent(text)) {
+  const recipeLane = baseline.route?.lane === 'recipe_dispatcher';
+  const baselineRecipe = recipeLane ? resolveBaselineRecipe(baseline, registry()) : null;
+  const intentCheck = opts.stepDecision ? null
+    : economy.executableIntentCheck(text, { invocationTerms: baselineRecipe?.owner ? [baselineRecipe.owner] : [] });
+  if (intentCheck) {
     const plan = ['recipe_dispatcher', 'workflow'].includes(baseline.route?.lane)
       ? { ...baseline, branch: 'fallback', capabilityId: null, searchScope: '', stopAfterMatch: false,
         route: { lane: 'worker_skill', reason: 'no_executable_intent', candidates: [] } } : baseline;
-    return finish(plan, { reason: 'no_executable_intent' });
+    return finish(plan, { reason: 'no_executable_intent', intentCheck });
   }
-  const recipes = opts.recipes || require('../task-dispatcher').getRecipeRegistry().recipes;
-  const candidates = shortlist(text, recipes.filter(r => (!r.handler || directExecutionAllowed(r, env)) &&
-    (!baseline.projectSlug || r.layer !== 'project' || r.owner === baseline.projectSlug)), opts.stepDecision ? 1 : 2);
+  const recipes = registry();
+  const eligible = recipe => (!recipe.handler || directExecutionAllowed(recipe, env)) &&
+    (!baseline.projectSlug || recipe.layer !== 'project' || recipe.owner === baseline.projectSlug);
+  // The recipe the deterministic router already chose is a candidate on its own
+  // evidence; it does not also need two words in common with the request.
+  const seeded = baselineRecipe && eligible(baselineRecipe) && executableRecipe(baselineRecipe) ? [baselineRecipe] : [];
+  const candidates = [...seeded, ...shortlist(text, recipes.filter(recipe => eligible(recipe) && !seeded.includes(recipe)),
+    opts.stepDecision ? 1 : 2)].slice(0, 12);
   if (!candidates.length) return finish(baseline, { reason: 'no_candidates' });
   const criteria = { none: 'None of these actions fully fulfills the request. Includes requests to implement, redesign or discuss a system rather than run an existing operation, negated actions, and multi-step work exceeding any single action.' };
   candidates.forEach((recipe, i) => { criteria[`r${i}`] = `${recipe.title}. Examples: ${(recipe.phrases || []).slice(0, 3).join('; ')}`.slice(0, 300); });
@@ -184,4 +219,4 @@ async function routeWithJev(text, baseline, opts = {}) {
   { ...usage, confidence: answer.confidence, applied: true, reason: 'recipe_selected', recipeId: recipe.id, recipeFingerprint: approvalFingerprint(recipe,env), directExecution: directExecutionAllowed(recipe, env) });
 }
 
-module.exports = { routeWithJev, appendRoutingEvent, shortlist, executableRecipe, directExecutionAllowed, canonicalCwd, approvalFingerprint, fingerprint: recipeFingerprint, POLICY };
+module.exports = { routeWithJev, appendRoutingEvent, shortlist, resolveBaselineRecipe, executableRecipe, directExecutionAllowed, canonicalCwd, approvalFingerprint, fingerprint: recipeFingerprint, POLICY };
