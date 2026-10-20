@@ -1,0 +1,21 @@
+{
+  "id": "agent/doctor/status",
+  "layer": "agent",
+  "owner": "doctor",
+  "title": "Check self-diagnosis configuration status",
+  "tags": ["doctor", "diagnostics", "status", "configuration", "setup"],
+  "phrases": [
+    "is doctor configured",
+    "check doctor status",
+    "doctor configuration check",
+    "is my self diagnosis set up",
+    "what would a health check actually look at",
+    "do I need credentials to run diagnostics",
+    "is my install pointed at the right directory"
+  ],
+  "inputMode": "structured",
+  "requiredContext": [],
+  "outputMode": "text",
+  "fallbackPolicy": "worker_optional",
+  "handler": "./status.js"
+}
