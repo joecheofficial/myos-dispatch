@@ -119,11 +119,43 @@ function buildCommand(nodePath, hookPath, surface, home = "") {
   return `${quote(nodePath)} ${quote(hookPath)} --surface=${surface}`;
 }
 
+// Older installs (v3.x hand registrations, npm-bin shims, flags placed before
+// --surface, the .js entrypoint) registered the same hook executable without the
+// exact `myos-dispatch-hook --surface` shape. They must be replaced on upgrade,
+// not left beside the new entry (Dispatch then ran twice per prompt). The
+// executable basename must be a whole token, so wrapper names that merely
+// contain the substring stay foreign.
+const HOOK_BASENAME_RE = /^myos-dispatch-hook(\.js)?$/;
+const NODE_BASENAME_RE = /^(node|nodejs)(\.exe)?$/i;
+
+// Split a hook command into shell-like words (simple quotes only).
+function commandWords(command) {
+  return [...command.matchAll(/"((?:\\.|[^"\\])*)"|'([^']*)'|(\S+)/g)]
+    // Only \" and \\ are escapes, so Windows paths keep their backslashes.
+    .map(match => (match[1] !== undefined ? match[1].replace(/\\(["\\])/g, "$1") : match[2] !== undefined ? match[2] : match[3]));
+}
+
+// True when the command EXECUTES the Dispatch hook: the hook is the program,
+// or the first argument of a node interpreter, after optional `env` and
+// VAR=value prefixes. A hook merely named as an argument stays foreign.
+function executesDispatchHook(command) {
+  const words = commandWords(command);
+  let index = 0;
+  if (words[index] === "env" || /(^|\/)env$/.test(words[index] || "")) index += 1;
+  while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index] || "")) index += 1;
+  const base = word => String(word || "").split(/[\\/]/).pop();
+  if (HOOK_BASENAME_RE.test(base(words[index]))) return true;
+  return NODE_BASENAME_RE.test(base(words[index])) && HOOK_BASENAME_RE.test(base(words[index + 1]));
+}
+// Private Uni/Juno runtime hooks are protected; never strip or replace them.
+const PROTECTED_RE = /[/\\]agents[/\\]shared[/\\]/;
+
 function isOurHookEntry(entry) {
-  return entry
+  return Boolean(entry
     && typeof entry === "object"
     && typeof entry.command === "string"
-    && MARKER_RE.test(entry.command);
+    && !PROTECTED_RE.test(entry.command)
+    && (MARKER_RE.test(entry.command) || executesDispatchHook(entry.command)));
 }
 
 // Human-readable description of an unexpected value, for error messages.
@@ -586,5 +618,6 @@ module.exports = {
   isOurHookEntry,
   MARKER,
   MARKER_RE,
+  executesDispatchHook,
   HOME_ENV_KEY,
 };

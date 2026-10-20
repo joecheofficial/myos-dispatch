@@ -314,7 +314,7 @@ test("report is read-only; setup preserves metadata and choices with backup and 
   const target = path.join(home, "config", "model-catalog.local.json");
   const { spawnSync } = require("node:child_process");
   const run = (...args) => spawnSync(process.execPath, [path.resolve(__dirname, "../scripts/setup-model-catalog.js"), "--home", home, ...args], {
-    encoding: "utf8", env: { HOME: home, PATH: "", MYOS_MODEL_CATALOG_LOCAL: target },
+    encoding: "utf8", env: { HOME: home, PATH: "", MYOS_MODEL_CATALOG_LOCAL: target, MYOS_PROVIDER_SEARCH: "path" },
   });
   assert.equal(run("--report").status, 0);
   assert.equal(fs.existsSync(target), false);
@@ -389,7 +389,57 @@ test("CLI detection does not source shell startup files during report", () => {
   const marker = path.join(home, "profile-ran");
   fs.writeFileSync(path.join(home, ".profile"), "printf x > \"$HOME/profile-ran\"\n");
   const { spawnSync } = require("node:child_process");
-  const result = spawnSync(process.execPath, [path.resolve(__dirname, "../scripts/setup-model-catalog.js"), "--home", home, "--report"], { env: { HOME: home, PATH: "/usr/bin:/bin" }, encoding: "utf8" });
+  const result = spawnSync(process.execPath, [path.resolve(__dirname, "../scripts/setup-model-catalog.js"), "--home", home, "--report"], { env: { HOME: home, PATH: "/usr/bin:/bin", MYOS_PROVIDER_SEARCH: "path" }, encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(fs.existsSync(marker), false);
+});
+
+// Issue #8 item 11: every class was "Unassigned" with only API-key advice even
+// though the Codex/Claude subscription path existed.
+test("(issue8) subscription sign-in assigns text classes from the OAuth registry", () => {
+  const { mergeDiscovery } = require("../src/runtime/oauth-registry");
+  const now = new Date().toISOString();
+  const oauthState = mergeDiscovery(null, [
+    ...["gpt-6.1-sol", "gpt-6-astra", "gpt-6-luna", "gpt-5.6-terra"].map((model) => ({ provider: "codex", model, visible: true, auth: "subscription", observedAt: now })),
+    { provider: "claude", model: "claude-opus-5-5", visible: true, auth: "subscription", observedAt: now },
+  ]);
+  const catalog = setup.buildModelCatalog({ homeRoot: "/tmp/myos", probes: fakeProbes({ cli: ["codex", "claude"], login: "oauth" }), oauthState });
+  assert.equal(catalog.assignments.cheap_routing.model, "gpt-6-luna");
+  assert.equal(catalog.assignments.heavy_synthesis.model, "gpt-6.1-sol");
+  assert.equal(catalog.assignments.task_class_is_elite.model, "gpt-6-astra");
+  assert.equal(catalog.assignments.planning.source, "oauth-registry");
+  assert.equal(catalog.assignments.planning.authMode, "oauth");
+  const report = setup.renderReport(catalog);
+  assert.match(report, /Subscription path \(no API key needed\)/);
+  assert.match(report, /Assigned: gpt-6-luna, through your ChatGPT\/Codex subscription/);
+  assert.ok(!report.includes("—"));
+
+  // Claude-only subscription still routes, flagged as a first call.
+  const claudeOnly = setup.buildModelCatalog({ homeRoot: "/tmp/myos", probes: { ...fakeProbes({ cli: ["claude"], login: "oauth" }) }, oauthState });
+  assert.equal(claudeOnly.assignments.heavy_synthesis.model, "claude-opus-5-5");
+  assert.equal(claudeOnly.assignments.heavy_synthesis.firstCall, true);
+  assert.match(setup.renderReport(claudeOnly), /first call unlocks it/);
+});
+
+test("(issue8) unassigned text classes explain the subscription path, not only API keys", () => {
+  const nothing = setup.buildModelCatalog({ homeRoot: "/tmp/myos", probes: fakeProbes() });
+  assert.match(nothing.assignments.planning.enableWith, /codex login/);
+  assert.match(nothing.assignments.planning.enableWith, /claude auth login --claudeai/);
+  assert.match(nothing.assignments.planning.enableWith, /GEMINI_API_KEY|OPENAI_API_KEY/);
+  const report = setup.renderReport(nothing);
+  assert.match(report, /codex: CLI not found \(searched PATH/);
+  const installed = setup.renderReport(setup.buildModelCatalog({ homeRoot: "/tmp/myos", probes: fakeProbes({ cli: ["claude"], login: "unauthenticated" }) }));
+  assert.match(installed, /claude: found, but not signed in with a subscription/);
+});
+
+test("(issue8) CLI detection finds installs outside PATH (~/.local/bin)", (t) => {
+  const home = fs.realpathSync(tempDir("catalog-bin-"));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const bin = path.join(home, ".local", "bin");
+  fs.mkdirSync(bin, { recursive: true });
+  fs.writeFileSync(path.join(bin, "claude"), "#!/bin/sh\necho '{\"loggedIn\":true,\"authMethod\":\"claude.ai\"}'\n", { mode: 0o755 });
+  const probes = setup.defaultProbes({ HOME: home, PATH: "/usr/bin:/bin" });
+  assert.equal(probes.cliAvailable("claude"), true);
+  assert.equal(probes.cliPath("claude"), path.join(bin, "claude"));
+  assert.equal(probes.loginStatus("claude"), "oauth");
 });

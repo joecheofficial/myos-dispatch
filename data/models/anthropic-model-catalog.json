@@ -1,5 +1,5 @@
 {
-  "version": "2026-06-11",
+  "version": "2026-10-20",
   "provider": "anthropic",
   "purpose": "Anthropic-only model routing catalog for selective context loading.",
   "principles": {
@@ -17,13 +17,16 @@
   "platform_policies": {
     "data_retention": {
       "default_days": 30,
-      "applies_to": ["inputs", "outputs"],
+      "applies_to": [
+        "inputs",
+        "outputs"
+      ],
       "note": "Claude Platform requests and responses are retained for 30 days for safety work. Use a separate workspace before enabling sensitive org workloads."
     },
     "safety_fallback": {
       "blocked_request_error": true,
       "fallback_profile": "anthropic_safety_fallback",
-      "note": "If Fable 5 is blocked by safety classifiers, automatic fallback should continue through Opus 4.8 when the workload and policy lane permit it."
+      "note": "If Fable 5.1 is blocked by safety classifiers, automatic fallback should continue through Opus 5.5 when the workload and policy lane permit it."
     }
   },
   "selection_dimensions": [
@@ -39,10 +42,26 @@
     "source": "https://docs.anthropic.com/en/api/rate-limits",
     "note": "Limits are tier-based and increase with billing history. Tiers: Build (entry) through Scale (high volume). Contact Anthropic for custom limits. Batch API available at 50% cost for async jobs.",
     "typical_paid_tier": {
-      "claude-fable-5": { "rpm": 1000, "tpm": 32000, "tokens_per_day": "unlimited" },
-      "claude-opus-4-8": { "rpm": 1000, "tpm": 40000, "tokens_per_day": "unlimited" },
-      "claude-sonnet-4-6": { "rpm": 1000, "tpm": 80000, "tokens_per_day": "unlimited" },
-      "claude-haiku-4-5": { "rpm": 1000, "tpm": 200000, "tokens_per_day": "unlimited" }
+      "claude-fable-5-1": {
+        "rpm": 1000,
+        "tpm": 32000,
+        "tokens_per_day": "unlimited"
+      },
+      "claude-opus-5-5": {
+        "rpm": 1000,
+        "tpm": 40000,
+        "tokens_per_day": "unlimited"
+      },
+      "claude-sonnet-5-5": {
+        "rpm": 1000,
+        "tpm": 80000,
+        "tokens_per_day": "unlimited"
+      },
+      "claude-haiku-5-5": {
+        "rpm": 1000,
+        "tpm": 200000,
+        "tokens_per_day": "unlimited"
+      }
     },
     "batch_api": {
       "discount": "50% off standard pricing",
@@ -52,12 +71,14 @@
   },
   "models": [
     {
-      "id": "anthropic.claude-fable-5",
+      "id": "anthropic.claude-fable-5-1",
       "family": "claude",
-      "model": "claude-fable-5",
+      "model": "claude-fable-5-1",
       "tier": "apex",
       "status": "active",
-      "allowed_auth_modes": ["oauth"],
+      "allowed_auth_modes": [
+        "oauth"
+      ],
       "api_allowed": false,
       "context_window": 1000000,
       "max_output_tokens": 128000,
@@ -90,7 +111,168 @@
         "simple extraction",
         "high-volume cheap jobs"
       ],
-      "notes": "New apex tier above Opus. Same API surface as Opus 4.8: adaptive thinking only, no sampling params, no budget_tokens. Breaking change vs 4.8: explicit thinking:{type:disabled} returns 400, omit the param instead. 2x Opus cost; use on Max plan or for highest-value decisions.",
+      "notes": "Current apex tier (successor to Fable 5, same price). Thinking is always on (adaptive only); explicit disabled thinking, budget_tokens and sampling params return 400; forced tool_choice any/tool returns 400. Effort low|medium|high|xhigh|max. Use on Max plan or for highest-value decisions.",
+      "api_notes": {
+        "thinking": "adaptive only, thinking:{type:adaptive} or omit entirely",
+        "effort": "low|medium|high|xhigh|max all supported",
+        "sampling_params": "temperature/top_p/top_k removed, will 400",
+        "budget_tokens": "removed, will 400"
+      },
+      "fallback_policy": {
+        "fallback_profile": "anthropic_safety_fallback",
+        "fallback_model": "anthropic.claude-opus-5-5",
+        "reason": "Safety classifier blocks on Fable 5.1 can continue on Opus 5.5 when the lane allows automatic fallback."
+      },
+      "cost_control": {
+        "myos_policy": "oauth_only",
+        "reason": "Fable 5.1 is reserved for foreground Advisory Strategist checks and must not run from API automation."
+      }
+    },
+    {
+      "id": "anthropic.claude-opus-5-5",
+      "family": "claude",
+      "model": "claude-opus-5-5",
+      "tier": "top",
+      "status": "active",
+      "context_window": 1000000,
+      "max_output_tokens": 128000,
+      "supports_text": true,
+      "supports_tools": true,
+      "supports_vision": true,
+      "supports_streaming": true,
+      "pricing_per_1m_tokens": {
+        "input_usd": 4.0,
+        "output_usd": 20.0
+      },
+      "strengths": [
+        "deep reasoning",
+        "high-stakes synthesis",
+        "complex code review",
+        "dense business writing",
+        "long-horizon agentic work"
+      ],
+      "best_for": [
+        "hardest reasoning tasks",
+        "multi-file architecture work",
+        "executive memos",
+        "complex tool-using agents"
+      ],
+      "avoid_for": [
+        "cheap high-volume jobs",
+        "simple extraction",
+        "routine summaries"
+      ],
+      "notes": "Current Opus (successor to Opus 5). Thinking cannot be disabled; effort is the only control and defaults to medium. Forced tool_choice any/tool returns 400."
+    },
+    {
+      "id": "anthropic.claude-sonnet-5-5",
+      "family": "claude",
+      "model": "claude-sonnet-5-5",
+      "tier": "premium-default",
+      "status": "active",
+      "context_window": 1000000,
+      "max_output_tokens": 128000,
+      "supports_text": true,
+      "supports_tools": true,
+      "supports_vision": true,
+      "supports_streaming": true,
+      "pricing_per_1m_tokens": {
+        "input_usd": 2.0,
+        "output_usd": 10.0
+      },
+      "strengths": [
+        "balanced reasoning",
+        "good writing quality",
+        "general coding",
+        "workflow orchestration"
+      ],
+      "best_for": [
+        "everyday premium agent work",
+        "document synthesis",
+        "planning",
+        "business copy"
+      ],
+      "avoid_for": [
+        "budget-sensitive bulk automation",
+        "very cheap tagging or triage"
+      ],
+      "notes": "Current Sonnet and main Anthropic default candidate. thinking disabled returns 400 (use between_tools); effort defaults to high."
+    },
+    {
+      "id": "anthropic.claude-haiku-5-5",
+      "family": "claude",
+      "model": "claude-haiku-5-5",
+      "tier": "fast",
+      "status": "active",
+      "context_window": 1000000,
+      "max_output_tokens": 128000,
+      "supports_text": true,
+      "supports_tools": true,
+      "supports_vision": true,
+      "supports_streaming": true,
+      "pricing_per_1m_tokens": {
+        "input_usd": 0.1,
+        "output_usd": 0.5
+      },
+      "strengths": [
+        "fast responses",
+        "lightweight summaries",
+        "utility tasks"
+      ],
+      "best_for": [
+        "simple classification",
+        "short summaries",
+        "basic extraction"
+      ],
+      "avoid_for": [
+        "highest quality writing",
+        "complex reasoning",
+        "price-sensitive workloads if cheaper alternatives are good enough"
+      ],
+      "notes": "Current Haiku: fast, lowest-cost Anthropic lane. Prices apply up to 100K input tokens ($0.50/$2.50 beyond). Effort defaults to medium."
+    },
+    {
+      "id": "anthropic.claude-fable-5",
+      "family": "claude",
+      "model": "claude-fable-5",
+      "tier": "apex",
+      "status": "legacy",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "context_window": 1000000,
+      "max_output_tokens": 128000,
+      "supports_text": true,
+      "supports_tools": true,
+      "supports_vision": true,
+      "supports_streaming": true,
+      "pricing_per_1m_tokens": {
+        "input_usd": 10.0,
+        "output_usd": 50.0
+      },
+      "strengths": [
+        "long-horizon agentic execution",
+        "hardest reasoning and synthesis",
+        "superior writing quality",
+        "complex multi-file architecture",
+        "high-stakes trade and investment decisions",
+        "large context synthesis"
+      ],
+      "best_for": [
+        "professor nightly review fleet",
+        "multi-model consensus engine",
+        "shaman long-context synthesis",
+        "flagship content and audiobook",
+        "decision council architectural decisions",
+        "investment manager deep analysis"
+      ],
+      "avoid_for": [
+        "routine summaries",
+        "simple extraction",
+        "high-volume cheap jobs"
+      ],
+      "notes": "New apex tier above Opus. Same API surface as Opus 4.8: adaptive thinking only, no sampling params, no budget_tokens. Breaking change vs 4.8: explicit thinking:{type:disabled} returns 400, omit the param instead. 2x Opus cost; use on Max plan or for highest-value decisions. Previous generation; kept for explicit pins only.",
       "api_notes": {
         "thinking": "adaptive only, thinking:{type:adaptive} or omit entirely",
         "effort": "low|medium|high|xhigh|max all supported",
@@ -112,7 +294,7 @@
       "family": "claude",
       "model": "claude-opus-4-8",
       "tier": "top",
-      "status": "active",
+      "status": "legacy",
       "context_window": 1000000,
       "max_output_tokens": 128000,
       "supports_text": true,
@@ -141,14 +323,14 @@
         "simple extraction",
         "routine summaries"
       ],
-      "notes": "Current top Opus. Adaptive thinking only, no sampling params."
+      "notes": "Current top Opus. Adaptive thinking only, no sampling params. Previous generation; kept for explicit pins only."
     },
     {
       "id": "anthropic.claude-opus-4-6",
       "family": "claude",
       "model": "claude-opus-4-6",
       "tier": "top",
-      "status": "active",
+      "status": "legacy",
       "context_window": 1000000,
       "max_output_tokens": 64000,
       "supports_text": true,
@@ -176,14 +358,14 @@
         "simple extraction",
         "routine summaries"
       ],
-      "notes": "Use only when quality edge justifies premium cost."
+      "notes": "Use only when quality edge justifies premium cost. Previous generation; kept for explicit pins only."
     },
     {
       "id": "anthropic.claude-sonnet-4-6",
       "family": "claude",
       "model": "claude-sonnet-4-6",
       "tier": "premium-default",
-      "status": "active",
+      "status": "legacy",
       "context_window": 1000000,
       "max_output_tokens": 64000,
       "supports_text": true,
@@ -210,14 +392,14 @@
         "budget-sensitive bulk automation",
         "very cheap tagging or triage"
       ],
-      "notes": "Main Anthropic default candidate."
+      "notes": "Main Anthropic default candidate. Previous generation; kept for explicit pins only."
     },
     {
       "id": "anthropic.claude-haiku-4-5",
       "family": "claude",
       "model": "claude-haiku-4-5",
       "tier": "fast",
-      "status": "active",
+      "status": "legacy",
       "context_window": 200000,
       "max_output_tokens": 64000,
       "supports_text": true,
@@ -243,17 +425,17 @@
         "complex reasoning",
         "price-sensitive workloads if cheaper alternatives are good enough"
       ],
-      "notes": "Fast Anthropic lane, but not ultra-cheap."
+      "notes": "Fast Anthropic lane, but not ultra-cheap. Previous generation; kept for explicit pins only."
     }
   ],
   "routing_profiles": [
     {
       "id": "bot_default",
       "preferred": [
-        "anthropic.claude-sonnet-4-6"
+        "anthropic.claude-sonnet-5-5"
       ],
       "fallback": [
-        "anthropic.claude-haiku-4-5"
+        "anthropic.claude-haiku-5-5"
       ],
       "use_for": [
         "telegram bot default",
@@ -264,10 +446,10 @@
     {
       "id": "bot_smart",
       "preferred": [
-        "anthropic.claude-opus-4-8"
+        "anthropic.claude-opus-5-5"
       ],
       "fallback": [
-        "anthropic.claude-sonnet-4-6"
+        "anthropic.claude-sonnet-5-5"
       ],
       "use_for": [
         "harder bot reasoning",
@@ -278,10 +460,10 @@
     {
       "id": "anthropic_heavy_reasoning",
       "preferred": [
-        "anthropic.claude-opus-4-8"
+        "anthropic.claude-opus-5-5"
       ],
       "fallback": [
-        "anthropic.claude-sonnet-4-6"
+        "anthropic.claude-sonnet-5-5"
       ],
       "use_for": [
         "complex planning",
@@ -293,10 +475,10 @@
     {
       "id": "anthropic_elite",
       "preferred": [
-        "anthropic.claude-fable-5"
+        "anthropic.claude-fable-5-1"
       ],
       "fallback": [
-        "anthropic.claude-opus-4-8"
+        "anthropic.claude-opus-5-5"
       ],
       "use_for": [
         "professor nightly review fleet",
@@ -310,10 +492,10 @@
     {
       "id": "anthropic_advisor",
       "preferred": [
-        "anthropic.claude-fable-5"
+        "anthropic.claude-fable-5-1"
       ],
       "fallback": [
-        "anthropic.claude-opus-4-8"
+        "anthropic.claude-opus-5-5"
       ],
       "use_for": [
         "advisor model for cheaper worker plans",
@@ -326,10 +508,10 @@
     {
       "id": "anthropic_safety_fallback",
       "preferred": [
-        "anthropic.claude-opus-4-8"
+        "anthropic.claude-opus-5-5"
       ],
       "fallback": [
-        "anthropic.claude-sonnet-4-6"
+        "anthropic.claude-sonnet-5-5"
       ],
       "use_for": [
         "policy-allowed continuation after Fable 5 safety classifier blocks",
@@ -340,10 +522,10 @@
     {
       "id": "anthropic_premium_default",
       "preferred": [
-        "anthropic.claude-sonnet-4-6"
+        "anthropic.claude-sonnet-5-5"
       ],
       "fallback": [
-        "anthropic.claude-haiku-4-5"
+        "anthropic.claude-haiku-5-5"
       ],
       "use_for": [
         "general Anthropic bot calls",
@@ -355,10 +537,10 @@
     {
       "id": "anthropic_fast_utility",
       "preferred": [
-        "anthropic.claude-haiku-4-5"
+        "anthropic.claude-haiku-5-5"
       ],
       "fallback": [
-        "anthropic.claude-sonnet-4-6"
+        "anthropic.claude-sonnet-5-5"
       ],
       "use_for": [
         "simple classification",
