@@ -100,7 +100,8 @@ function selectModels(state, { provider, taskClass, now = Date.now(), policy } =
   const override = policy === undefined ? loadPolicyOverride() : policy;
   const classPolicy = resolveClassPolicy(provider, taskClass, override);
   if (!classPolicy) return [];
-  const pool = (state?.models || []).filter(record => eligible(record, provider, now));
+  // Alias records are inventory; execution needs an exact ID.
+  const pool = (state?.models || []).filter(record => record?.alias !== true && eligible(record, provider, now));
   const picked = [];
   const take = record => {
     if (!picked.includes(record)) picked.push(record);
@@ -135,7 +136,7 @@ function recordFailure(state, { provider, model, stderr = "", now = Date.now(), 
   if (cleanupFailed || signal) kind = "interrupted";
   else if (/401|403|not authenticated|not logged in|login required|authentication failed/i.test(text)) kind = "auth";
   else if (/429|quota|rate.?limit|usage limit|credits|billing/i.test(text)) kind = "quota";
-  else if (/(model.{0,160}(?:not supported|unsupported|not found|unavailable)|unsupported.{0,60}model|model_not_found)/i.test(text)) kind = "unsupported_model";
+  else if (/(model.{0,160}(?:not supported|unsupported|not found|unavailable)|unsupported.{0,60}model|model_not_found|issue with the selected model|may not exist or you may not have access)/i.test(text)) kind = "unsupported_model";
   const retryAllowed = kind === "unsupported_model";
   return {
     ...state, revision: state.revision + 1,

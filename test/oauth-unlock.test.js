@@ -43,7 +43,8 @@ test("unlock learns the exact ID through the alias when a catalog ID is unavaila
   const file = registry(t, [claude("claude-opus-5-5")]);
   const report = await unlockClaude(file, { policy: null, execute: async (request) => {
     if (request.aliasProbe) return { model: "claude-opus-5-6", text: "OK" };
-    throw new Error("model claude-opus-5-5 is not supported for this account");
+    // Wording printed by the real Claude CLI for a model the plan cannot use.
+    throw new Error("There's an issue with the selected model (claude-opus-5-5). It may not exist or you may not have access to it.");
   } });
   assert.equal(report.results[0].status, "learned");
   assert.equal(report.results[0].learnedModel, "claude-opus-5-6");
