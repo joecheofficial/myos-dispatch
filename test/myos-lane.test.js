@@ -193,7 +193,7 @@ test("explicit Fable model IDs are blocked from API auth outside the advisory pr
   };
 
   for (const provider of ["anthropic", "openrouter", "openai"]) {
-    for (const model of ["claude-fable-5", "anthropic.claude-fable-5"]) {
+    for (const model of ["claude-fable-5", "anthropic.claude-fable-5", "claude-fable-5-1", "anthropic.claude-fable-5-1"]) {
       assert.throws(
         () =>
           validateExecutionCandidate(
