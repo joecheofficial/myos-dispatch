@@ -116,3 +116,12 @@ test("child PATH keeps the caller's order and appends the binary directory", () 
   assert.equal(appended[0], "/usr/bin");
   assert.ok(appended.includes("/Applications/Codex.app/Contents/Resources/codex-cli/bin"));
 });
+
+test("status-code digits inside a model name do not masquerade as auth or quota failures", () => {
+  const { recordFailure } = require("../src/runtime/oauth-registry");
+  const state = mergeDiscovery(null, [{ provider: "claude", model: "claude-x-20260401", visible: true, auth: "subscription", observedAt: now }]);
+  const failed = recordFailure(state, { provider: "claude", model: "claude-x-20260401",
+    stderr: "There's an issue with the selected model (claude-x-20260401). It may not exist or you may not have access to it." });
+  assert.equal(failed.lastFailure.kind, "unsupported_model");
+  assert.equal(recordFailure(state, { provider: "claude", model: "claude-x-20260401", stderr: "HTTP 401 Unauthorized" }).lastFailure.kind, "auth");
+});

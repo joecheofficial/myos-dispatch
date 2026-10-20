@@ -80,3 +80,16 @@ test("doctor CLI exposes unlock and rejects unknown flags", () => {
   const bad = spawnSync(process.execPath, [bin, "status", "--all"], { encoding: "utf8", env: { ...process.env, MYOS_OAUTH_REGISTRY: "/nonexistent/x.json" } });
   assert.equal(bad.status, 2);
 });
+
+test("a successful probe whose registry write fails is reported and is not ok", async (t) => {
+  const file = registry(t, [claude("claude-sonnet-5-5")]);
+  fs.chmodSync(path.dirname(file), 0o500);
+  let report;
+  try {
+    report = await unlockClaude(file, { policy: null, execute: async (request) => ({ model: request.model, text: "OK" }) });
+  } finally {
+    fs.chmodSync(path.dirname(file), 0o700);
+  }
+  assert.equal(report.results[0].status, "unlocked_unrecorded");
+  assert.equal(report.ok, false);
+});
