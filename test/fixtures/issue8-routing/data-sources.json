@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "dataSources": [
+    {
+      "id": "lumen-brain",
+      "label": "Lumen brand brain",
+      "mode": "content",
+      "base": "workspace",
+      "path": "projects/lumen/BRAIN.md",
+      "readOnly": true,
+      "maxChars": 3000,
+      "projectSlug": "lumen",
+      "matchTerms": ["lumen"]
+    }
+  ]
+}
