@@ -1,0 +1,26 @@
+{
+  "id": "agent/webfetch/fetch-page",
+  "layer": "agent",
+  "owner": "webfetch",
+  "title": "Fetch and read a web page",
+  "tags": ["web", "fetch", "research", "content"],
+  "phrases": [
+    "what does this site say",
+    "read this page for me",
+    "get the content from this URL",
+    "summarize the article at this link",
+    "fetch this page as markdown",
+    "extract the main information from this website"
+  ],
+  "actions": ["fetch", "read", "summarize"],
+  "safety": {
+    "destructive": false,
+    "notes": "Checks robots.txt and applies a per-domain delay unless the caller explicitly overrides robots policy."
+  },
+  "inputMode": "structured",
+  "requiredContext": [],
+  "outputMode": "text",
+  "fallbackPolicy": "deterministic_first",
+  "taskClass": "research",
+  "handler": "./fetch-page.js"
+}
