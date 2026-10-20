@@ -27,6 +27,32 @@ const {
   readPromptText,
 } = require("../bin/myos-dispatch-hook");
 
+// The Claude surface delegates command rewriting to `rtk hook claude`. Put a
+// deterministic stand-in first on PATH so these tests exercise the hook's own
+// safety filtering without depending on rtk being installed (or its version).
+function useFakeRtk(t) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "fake-rtk-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const script = path.join(directory, "fake-rtk.js");
+  fs.writeFileSync(script, `
+let input = "";
+process.stdin.on("data", (chunk) => { input += chunk; });
+process.stdin.on("end", () => {
+  if (process.argv[2] !== "hook" || process.argv[3] !== "claude") process.exit(2);
+  const command = JSON.parse(input).tool_input?.command || "";
+  if (!command || command.startsWith("rtk ")) return;
+  process.stdout.write(JSON.stringify({ hookSpecificOutput: {
+    hookEventName: "PreToolUse", permissionDecisionReason: "RTK auto-rewrite",
+    updatedInput: { command: \`rtk \${command}\` },
+  } }));
+});
+`);
+  const launcher = path.join(directory, "rtk");
+  fs.writeFileSync(launcher, `#!/bin/sh\nexec '${process.execPath.replace(/'/g, "'\\''")}' '${script}' "$@"\n`, { mode: 0o755 });
+  preserveEnv(t, ["PATH"]);
+  process.env.PATH = `${directory}${path.delimiter}${process.env.PATH || ""}`;
+}
+
 test("reads Claude/Codex prompt and tool payload shapes", () => {
   assert.equal(readHookEventName({ prompt: "fix dispatch" }), "UserPromptSubmit");
   assert.equal(readHookEventName({ tool_input: { command: "git status" } }), "PreToolUse");
@@ -165,7 +191,8 @@ test("UserPromptSubmit blocks whitespace-padded H ping", () => {
   assert.equal(output.hookSpecificOutput, undefined);
 });
 
-test("PreToolUse (Claude surface) routes Bash commands and preserves RTK rewrite", () => {
+test("PreToolUse (Claude surface) routes Bash commands and preserves RTK rewrite", (t) => {
+  useFakeRtk(t);
   const output = handleHookPayload({
     hook_event_name: "PreToolUse",
     cwd: process.cwd(),
@@ -195,7 +222,8 @@ test("PreToolUse (Codex surface) is silent for ordinary reads and never rewrites
   assert.equal(hook.permissionDecisionReason, undefined);
 });
 
-test("PreToolUse (Claude surface) rejects RTK grep rewrites when grep reads stdin or is in a pipe", () => {
+test("PreToolUse (Claude surface) rejects RTK grep rewrites when grep reads stdin or is in a pipe", (t) => {
+  useFakeRtk(t);
   function getRewrite(cmd) {
     const output = handleHookPayload(
       {

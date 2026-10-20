@@ -14,6 +14,7 @@ const { admissionFor, loadManifest } = require("../packages/local-search/admissi
 const { reconcile } = require("../packages/local-search/catalogue");
 const { readVerified, readVerifiedBytes, verifyMetadata } = require("../packages/local-search/scope");
 const { stage } = require("../packages/local-search/staging");
+const { NODE24, skipUnlessNode24Found } = require("./helpers/node24");
 
 function fixture() {
   const base = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "local-search-refresh-"));
@@ -377,10 +378,10 @@ test("regular-file to FIFO swaps are bounded denials for manifests and source re
   try { assert.equal(loadManifest(automatic).ok, false); } finally { fs.openSync = originalOpen; }
 });
 
-test("the heavy maintenance worker stops before indexing after a failed refresh", () => {
+test("the heavy maintenance worker stops before indexing after a failed refresh", { skip: skipUnlessNode24Found }, () => {
   const fx = fixture();
   fs.writeFileSync(path.join(fx.root, "large.md"), "clean technical text", { mode: 0o600 });
-  const node = "/Users/myos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node";
+  const node = NODE24;
   const configured = input(fx, {
     admissionPolicySha256: ADMISSION_REFRESH_POLICY_SHA256,
     admissionRefreshPolicy: "technical-markdown-v1",
