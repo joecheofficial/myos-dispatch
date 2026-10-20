@@ -95,17 +95,24 @@ function gitRepo(install) {
   return repo;
 }
 
-// A mocked TypeSafe client: the key is "configured", every question picks the
-// first candidate with high confidence, and each paid call is counted.
-function mockJevClient(install) {
+// A mocked TypeSafe client: the key is "configured" and each paid call is
+// counted. It answers like a correct classifier would: the option whose
+// description starts with `pick` (a recipe title), or "none" when no option does
+// or `pick` is 'none'. A wrong shortlist therefore yields a wrong or empty pick.
+function mockJevClient(install, pick = 'none') {
   const calls = path.join(install.tmp, 'jev-calls');
   const preload = path.join(install.tmp, 'jev-mock.cjs');
   fs.writeFileSync(preload, `require(${JSON.stringify(require.resolve('../src/runtime/jev-client'))}).createJevClient = () => ({
     isConfigured: () => true,
-    ask: async () => { require('fs').appendFileSync(${JSON.stringify(calls)}, 'call\\n');
-      return { ok: true, answers: { route: { type: 'choice', choice: 'r0', confidence: 0.99 } }, usage: { input_tokens: 1 }, model: 'fixture' }; },
+    ask: async (input, questions) => { require('fs').appendFileSync(${JSON.stringify(calls)}, 'call\\n');
+      const pick = ${JSON.stringify(pick)};
+      const criteria = questions.route.criteria;
+      const choice = pick === 'none' ? 'none'
+        : Object.keys(criteria).find(key => key !== 'none' && criteria[key].startsWith(pick + '.')) || 'none';
+      return { ok: true, answers: { route: { type: 'choice', choice, confidence: 0.99 } }, usage: { input_tokens: 1 }, model: 'fixture' }; },
   });`);
-  return { preload, calls };
+  const count = () => { try { return fs.readFileSync(calls, 'utf8').trim().split('\n').filter(Boolean).length; } catch { return 0; } };
+  return { preload, calls, count };
 }
 
 // Approve the shipped read-only Doctor diagnostic exactly as an operator would:
@@ -141,7 +148,7 @@ test('a. status wording without a URL or web intent never scopes to webfetch', t
 
 test('b. natural-language Doctor requests route to a Doctor recipe', t => {
   const install = freshInstall(t);
-  for (const prompt of ['run the doctor', 'check dispatch health with doctor', 'doctor my oauth setup']) {
+  for (const prompt of ['run the doctor', 'check dispatch health with doctor', 'run the doctor on my oauth setup']) {
     const out = runPrompt(install, prompt);
     assert.equal(out.lane, 'recipe_dispatcher', `${JSON.stringify(prompt)} lane=${out.lane} (${out.laneReason}) scope=${out.scope}`);
     assert.match(out.scope, /agents\/doctor\/recipes\/[\w-]+\.recipe\.json$/, `${JSON.stringify(prompt)} scope=${out.scope}`);
@@ -216,21 +223,35 @@ test('d. guard: a lookup question about the project still uses the data source',
 test('e. with a key and an approved read-only Doctor handler, Jev engages for a clearly executable request', t => {
   const install = freshInstall(t);
   const recipeId = approveDoctorDiagnostic(install);
-  const { preload, calls } = mockJevClient(install);
+  const { preload, count } = mockJevClient(install, 'Run a full read-only diagnostic of the installed product');
   const env = { TYPESAFE_API_KEY: 'fixture-key-not-real' };
   runPrompt(install, 'run the doctor', { preload, env });
   const record = jevRecords(install).at(-1);
-  assert.ok(['recipe_selected', 'deterministic_match'].includes(record?.reason),
-    `reason=${record?.reason}; classifier calls=${fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8').trim().split('\n').length : 0}`);
+  assert.equal(record?.reason, 'recipe_selected', `reason=${record?.reason}; classifier calls=${count()}`);
+  assert.equal(count(), 1);
   assert.equal(record.recipeId, recipeId);
   assert.equal(record.directExecution, true);
+});
+
+test('e. when the classifier answers none, Jev vetoes the recipe lane and nothing executes', t => {
+  const install = freshInstall(t);
+  approveDoctorDiagnostic(install);
+  const { preload, count } = mockJevClient(install, 'none');
+  const out = runPrompt(install, 'run the doctor', { preload, env: { TYPESAFE_API_KEY: 'fixture-key-not-real' } });
+  const record = jevRecords(install).at(-1);
+  assert.equal(count(), 1);
+  assert.equal(record?.reason, 'no_match');
+  assert.equal(record.recipeId, null);
+  assert.notEqual(record.directExecution, true);
+  assert.equal(out.lane, 'worker_skill');
+  assert.doesNotMatch(out.context, /Deterministic worker:/);
 });
 
 test('e. an approved organizer-indexed recipe hit by an exact phrase is directly executable', t => {
   const install = freshInstall(t);
   const recipeId = approveDoctorDiagnostic(install);
   // Mocked client: a partial fix that reaches the classifier must not call the real API.
-  const { preload } = mockJevClient(install);
+  const { preload } = mockJevClient(install, 'Run a full read-only diagnostic of the installed product');
   runPrompt(install, 'run doctor', { preload, env: { TYPESAFE_API_KEY: 'fixture-key-not-real' } });
   const record = jevRecords(install).at(-1);
   assert.equal(record?.reason, 'deterministic_match');
@@ -281,12 +302,70 @@ test('regression: a project capability still matches its own name, not its scrip
   }
 });
 
-test('regression: owner invocation does not capture personal or authoring mentions of the owner name', t => {
+// Every over-match the 8.56 review found, against the fixture index (which
+// carries live-format ids such as recipe:agent/stripe/create-payment-link).
+const NOT_AN_INVOCATION = [
+  'check my doctor appointment', 'ask a doctor about my knee', 'write the doctor a thank-you note',
+  'check the doctor appointment time', 'doctor who season 3 recap', 'call the doctor tomorrow',
+  'test results from the doctor came in', 'doctor appointment is at 3pm, put it on my calendar',
+  'doctor my oauth setup', 'book a doctor appointment for tuesday',
+  'check the stripe payment from Hans', 'verify the stripe payment from Hans', 'check whatsapp for Kirsty reply',
+  'spotify playlist for the party',
+];
+
+test('regression: owner invocation does not capture personal, noun-modifier or authoring mentions of an owner', t => {
   const install = freshInstall(t);
-  for (const prompt of ['check my doctor appointment', 'ask a doctor about my knee', 'write the doctor a thank-you note']) {
+  for (const prompt of NOT_AN_INVOCATION) {
     const out = runPrompt(install, prompt);
     assert.notEqual(out.lane, 'recipe_dispatcher', `${JSON.stringify(prompt)} lane=${out.lane} scope=${out.scope}`);
+    assert.doesNotMatch(out.scope, /\.recipe\.json$/, `${JSON.stringify(prompt)} scope=${out.scope}`);
   }
+});
+
+// Opt-in: point MYOS_TEST_LIVE_INDEX at a copy of a real organizer-built
+// capabilities-index.json (its recipe manifests beside it) to check the same
+// negatives against real data. Read-only; skipped when unset.
+test('regression: the over-match negatives also hold on a real organizer index', {
+  skip: !process.env.MYOS_TEST_LIVE_INDEX && 'set MYOS_TEST_LIVE_INDEX to a copy of a real capabilities-index.json',
+}, () => {
+  const { selectExecutionLane } = require('../src/capability-router');
+  const indexPath = process.env.MYOS_TEST_LIVE_INDEX;
+  for (const prompt of NOT_AN_INVOCATION) {
+    const route = selectExecutionLane(prompt, { indexPath, scanDir: path.dirname(indexPath) });
+    assert.notEqual(route.reason, 'owner_recipe_invocation', `${JSON.stringify(prompt)} -> ${route.candidates[0]?.capability?.id}`);
+    if (/^(?:check|verify)\b/.test(prompt)) {
+      assert.ok(!(route.lane === 'recipe_dispatcher' && /\/(?:create|send|delete|update)-/.test(route.candidates[0]?.capability?.id || '')),
+        `${JSON.stringify(prompt)} selected a mutating recipe ${route.candidates[0]?.capability?.id}`);
+    }
+  }
+});
+
+test('regression: owner invocation never selects a recipe that changes something', () => {
+  const { selectExecutionLane } = require('../src/capability-router');
+  const indexPath = path.join(FIXTURE, 'workspace/capabilities-index.json');
+  for (const prompt of ['run stripe', 'check the stripe', 'verify stripe', 'run the stripe on my account']) {
+    const route = selectExecutionLane(prompt, { indexPath });
+    assert.ok(!route.candidates.some(entry => /create-payment-link/.test(entry.capability?.id || '')) || route.lane !== 'recipe_dispatcher',
+      `${JSON.stringify(prompt)} selected a payment-link recipe: ${route.lane} ${route.reason}`);
+    assert.notEqual(route.reason, 'owner_recipe_invocation', JSON.stringify(prompt));
+  }
+});
+
+test('regression: owner invocation yields to a worker capability that clearly outscores the recipe', () => {
+  const { selectExecutionLane } = require('../src/capability-router');
+  const indexPath = path.join(FIXTURE, 'workspace/capabilities-index.json');
+  const lane = selectExecutionLane('run the doctor', { indexPath });
+  assert.equal(lane.reason, 'owner_recipe_invocation');
+  // Same prompt, but an index where a worker capability carries overwhelming evidence.
+  const index = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
+  index.capabilities.push({ id: 'capability:run-the-doctor-tv', type: 'skill', execution_lane: 'worker_skill', source_path: 'skills/tv',
+    description: 'run the doctor', aliases: ['run the doctor', 'the doctor tv series', 'doctor episodes'], use_when: ['run the doctor'], priority: 100 });
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'issue8-index-'));
+  try {
+    fs.writeFileSync(path.join(tmp, 'capabilities-index.json'), JSON.stringify(index));
+    const route = selectExecutionLane('run the doctor', { indexPath: path.join(tmp, 'capabilities-index.json') });
+    assert.notEqual(route.reason, 'owner_recipe_invocation', `${route.lane} ${route.reason}`);
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });
 
 test('regression: a configured fastpath still wins with its own scope', t => {
@@ -306,10 +385,12 @@ test('regression: project lookups stay read-only data lookups; authoring keeps t
     assert.match(out.context, /verified evidence/, `${JSON.stringify(prompt)} was not answered from the data source`);
     assert.equal(jevRecords(install).at(-1)?.baselineLane, 'data_lookup', JSON.stringify(prompt));
   }
-  const build = runPrompt(install, 'draft three launch emails for Lumen');
-  assert.notEqual(build.branch, 'data');
-  assert.doesNotMatch(build.context, /verified evidence/);
-  assert.match(build.dataSources, /lumen-brain/, 'the matched source should still be listed as context');
+  for (const prompt of ['draft three launch emails for Lumen', 'make a Lumen landing page', "help me write Lumen's homepage"]) {
+    const build = runPrompt(install, prompt);
+    assert.notEqual(build.branch, 'data', JSON.stringify(prompt));
+    assert.doesNotMatch(build.context, /verified evidence/, `${JSON.stringify(prompt)} was answered by a read-only lookup`);
+    assert.match(build.dataSources, /lumen-brain/, `${JSON.stringify(prompt)}: the matched source should still be listed as context`);
+  }
 });
 
 test('regression: recipe lanes never fan out, even with sidecars enabled in a repo', t => {
@@ -342,16 +423,22 @@ test('regression: baseline recipe resolution maps organizer slugs and manifest p
   assert.equal(resolveBaselineRecipe({ capabilityId: 'recipe:agent/doctor/status' }, recipes)?.id, 'agent/doctor/status');
   assert.equal(resolveBaselineRecipe({ capabilityId: 'recipe:agent-doctor-run-full-diagnostic' }, recipes)?.id, 'agent/doctor/run-full-diagnostic');
   assert.equal(resolveBaselineRecipe({ capabilityId: 'recipe:custom-name', searchScope: '/x/agents/doctor/recipes/status.recipe.json' }, recipes)?.id, 'agent/doctor/status');
+  // A slug match must be the manifest the route points at; colliding slugs never resolve by order.
+  const colliding = [...recipes, { id: 'agent/doctor-run/full-diagnostic', layer: 'agent', owner: 'doctor-run', filePath: '/x/agents/doctor-run/recipes/full-diagnostic.recipe.json' }];
+  assert.equal(resolveBaselineRecipe({ capabilityId: 'recipe:agent-doctor-run-full-diagnostic' }, colliding), null);
+  assert.equal(resolveBaselineRecipe({ capabilityId: 'recipe:agent-doctor-run-full-diagnostic',
+    searchScope: '/x/agents/doctor-run/recipes/full-diagnostic.recipe.json' }, colliding)?.id, 'agent/doctor-run/full-diagnostic');
+  assert.equal(resolveBaselineRecipe({ capabilityId: 'recipe:agent-doctor-run-full-diagnostic',
+    searchScope: '/x/agents/doctor/recipes/status.recipe.json' }, colliding), null);
   assert.equal(resolveBaselineRecipe({ capabilityId: 'recipe:agent-doctor-unknown' }, recipes), null);
   assert.equal(resolveBaselineRecipe({}, recipes), null);
 });
 
-test('regression: executable-intent check names each failing rule and accepts owner invocations', () => {
+test('regression: executable-intent check names each failing rule', () => {
   const { executableIntentCheck, executableIntent } = require('../src/decision/jev-policy');
   assert.equal(executableIntentCheck('check service health'), null);
   assert.equal(executableIntentCheck('run the doctor'), null);
   assert.equal(executableIntentCheck('doctor my oauth setup'), 'no_operational_verb');
-  assert.equal(executableIntentCheck('doctor my oauth setup', { invocationTerms: ['doctor'] }), null);
   assert.equal(executableIntentCheck('build me a landing page'), 'mutating_verb');
   assert.equal(executableIntentCheck("don't keep the old logs"), 'negated_or_removal_phrasing');
   assert.equal(executableIntentCheck('check health\nthen restart'), 'multi_step_or_too_long');

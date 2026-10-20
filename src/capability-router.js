@@ -46,10 +46,19 @@ const SCRIPT_NAME_ALIASES = new Set([
   "lint", "postinstall", "preflight", "prepare", "preinstall", "release", "restart", "run",
   "serve", "setup", "smoke", "start", "status", "stop", "test", "typecheck", "verify", "watch",
 ]);
-// An operator invoking an agent's recipe by the agent's name ("run the doctor",
-// "doctor my oauth setup") is deterministic work even when no recipe phrase matches.
-const INVOCATION_VERB_RE = /^(?:(?:please|can you|could you)\s+)?(?:run|check|use|ask|call|start|open|launch|diagnose|scan|verify|test)\b/;
-const NON_INVOCATION_DETERMINER_RE = /\b(?:my|a|an|your|our|his|her|their|some)\s+$/;
+// An operator invoking an agent by name ("run the doctor", "check dispatch
+// health with doctor") asks for one of that agent's recipes even when no recipe
+// phrase matches. The owner must be the direct object of a run/check verb, or
+// the tool named at the end ("... with doctor"); a noun modifier ("check the
+// doctor appointment time", "check the stripe payment from Hans") is not an
+// invocation. Communication verbs (call, ask) are deliberately excluded.
+const INVOCATION_VERBS = "run|use|launch|start|check|diagnose|scan|verify|test";
+const INVOCATION_LEAD = "^(?:(?:please|can you|could you)\\s+)?";
+const INVOCATION_TAIL = "(?:\\s*[.!?]?\\s*$|\\s+(?:now|again|please)\\s*[.!?]?\\s*$|\\s+(?:on|for|against|over)\\s+(?:my|our|the|this|these)\\b)";
+// Owner invocation never selects a recipe that changes something: the request
+// names the agent, not a write operation.
+const READ_REQUEST_RE = /^(?:(?:please|can you|could you)\s+)?(?:check|verify|test|scan|diagnose|show|list|find|look\s+up|lookup|review|inspect|what|which|who|when|where|is|are|did|does|has|have|how)\b/;
+const MUTATING_OPERATION_RE = /^(?:add|archive|book|cancel|charge|create|delete|deploy|disable|enable|export|fix|forward|import|install|invite|kill|merge|move|pay|post|publish|push|refund|remove|rename|repair|reply|reset|restart|schedule|send|set|stop|sync|transfer|uninstall|update|upload|write)\b/;
 
 function normalizeText(value) {
   return String(value || '').toLowerCase();
@@ -217,31 +226,92 @@ function shortlistCapabilities(text, lane = null, limit = 5, options = {}) {
   return scored;
 }
 
-// "run the doctor", "check dispatch health with doctor", "doctor my oauth setup":
-// the request starts with an invocation verb (or with the owner's name used as
-// one) and names the agent that owns a shortlisted recipe. "book a doctor
-// appointment" and "check my doctor appointment" are not invocations.
-function ownerRecipeInvocation(text, recipeCandidates = []) {
-  const haystack = normalizeText(text).trim();
-  if (!haystack || haystack.length > 160 || /[\n;]/.test(haystack)) return null;
-  for (const candidate of recipeCandidates) {
-    const owner = recipeOwner(candidate.capability);
-    if (!owner || owner.length < 3 || GENERIC_TOKENS.has(owner)) continue;
-    const ownerPattern = new RegExp(`\\b${escapeRegex(owner)}\\b`, 'i');
-    const at = haystack.search(ownerPattern);
-    if (at < 0) continue;
-    if (NON_INVOCATION_DETERMINER_RE.test(haystack.slice(0, at))) continue;
-    const ownerLed = at === 0 || /^(?:(?:please|can you|could you)\s+)$/.test(haystack.slice(0, at));
-    if (!ownerLed && !INVOCATION_VERB_RE.test(haystack)) continue;
-    return recipeCandidates.filter((entry) => recipeOwner(entry.capability) === owner);
+function ownerPattern(owner) {
+  return escapeRegex(owner).replace(/[-_]+/g, "[\\s_-]+");
+}
+
+const ownerInvocationCache = new Map();
+const ownerListCache = new WeakMap();
+
+function invokedOwner(haystack, owners) {
+  for (const owner of owners) {
+    if (owner.length < 3 || GENERIC_TOKENS.has(owner)) continue;
+    const name = ownerPattern(owner);
+    let patterns = ownerInvocationCache.get(owner);
+    if (!patterns) {
+      patterns = [
+        new RegExp(`${INVOCATION_LEAD}(?:${INVOCATION_VERBS})\\s+(?:the\\s+)?${name}${INVOCATION_TAIL}`),
+        new RegExp(`${INVOCATION_LEAD}(?:${INVOCATION_VERBS})\\s+\\S.*?\\s+(?:with|using|via)\\s+(?:the\\s+)?${name}\\s*[.!?]?\\s*$`),
+      ];
+      ownerInvocationCache.set(owner, patterns);
+    }
+    if (patterns.some((pattern) => pattern.test(haystack))) return owner;
   }
   return null;
+}
+
+function isMutatingRecipe(capability = {}) {
+  const operation = String(capability.id || "").replace(/^recipe:/, "").split("/").pop()
+    .replace(/[-_]+/g, " ").toLowerCase();
+  const description = normalizeText(capability.description || "").trim();
+  if (MUTATING_OPERATION_RE.test(operation) || MUTATING_OPERATION_RE.test(description)) return true;
+  try {
+    const manifestPath = path.resolve(capability.scan_dir || WORKSPACE_ROOT, String(capability.source_path || ""));
+    if (!manifestPath.endsWith(".recipe.json")) return false;
+    const manifest = readJsonCached(manifestPath);
+    if (manifest?.safety?.destructive === true) return true;
+    return (manifest?.actions || []).some((action) => MUTATING_OPERATION_RE.test(normalizeText(action)));
+  } catch {
+    return false;
+  }
+}
+
+// Returns the invoked owner's read-only recipes, best fit first, or null.
+function ownerRecipeInvocation(text, options = {}, workerCandidates = []) {
+  const haystack = normalizeText(text).trim();
+  if (!haystack || haystack.length > 160 || /[\n;]/.test(haystack)) return null;
+  if (!new RegExp(`${INVOCATION_LEAD}(?:${INVOCATION_VERBS})\\b`).test(haystack)) return null;
+  const index = loadCapabilityIndex(options);
+  const recipes = index.capabilities.filter((capability) => capability.type === "recipe"
+    && capability.execution_lane === "recipe_dispatcher");
+  let owners = ownerListCache.get(index.capabilities);
+  if (!owners) {
+    owners = [...new Set(recipes.map(recipeOwner).filter(Boolean))].sort((a, b) => b.length - a.length);
+    ownerListCache.set(index.capabilities, owners);
+  }
+  const owner = invokedOwner(haystack, owners);
+  if (!owner) return null;
+  const scanDir = options.scanDir || options.scan_dir || index.scan_dir || null;
+  const verbTokens = new Set(tokenize(haystack).filter((token) => token.length >= 3 && token !== owner));
+  const candidates = recipes
+    .filter((capability) => recipeOwner(capability) === owner)
+    .map((capability) => ({ ...capability, ...(scanDir ? { scan_dir: scanDir } : {}) }))
+    .filter((capability) => !isMutatingRecipe(capability))
+    .map((capability) => {
+      const match = scoreCapabilityMatch(capability, text);
+      const terms = new Set(tokenize(`${capability.id} ${(capability.aliases || []).join(" ")}`));
+      const fit = [...verbTokens].filter((token) => terms.has(token)).length;
+      return { capability, ...match, fit, ...(scanDir ? { scan_dir: scanDir } : {}) };
+    })
+    .sort((a, b) => b.fit - a.fit || b.score - a.score
+      || Number(b.capability.priority || 0) - Number(a.capability.priority || 0)
+      || String(a.capability.id).localeCompare(String(b.capability.id)));
+  if (!candidates.length) return null;
+  // A worker capability that clearly outscores the owner's best recipe keeps the request.
+  const bestRecipeScore = Math.max(...candidates.map((entry) => entry.score));
+  if (workerCandidates[0] && workerCandidates[0].score > bestRecipeScore + 15) return null;
+  return candidates.slice(0, 3);
 }
 
 function selectExecutionLane(text, options = {}) {
   const signals = inferExecutionSignals(text);
   const workflowCandidates = shortlistCapabilities(text, 'workflow', 3, options);
-  const recipeCandidates = shortlistCapabilities(text, 'recipe_dispatcher', 3, options);
+  // A read request (check, verify, show, ...) never routes to a recipe that
+  // changes something, whatever its score ("check the stripe payment from Hans"
+  // is not "create a payment link").
+  const readRequest = READ_REQUEST_RE.test(normalizeText(text).trim());
+  const recipeCandidates = shortlistCapabilities(text, 'recipe_dispatcher', 3, options)
+    .filter((entry) => !readRequest || !isMutatingRecipe(entry.capability));
   const workerCandidates = shortlistCapabilities(text, 'worker_skill', 3, options);
 
   if (
@@ -265,7 +335,7 @@ function selectExecutionLane(text, options = {}) {
     };
   }
 
-  const invocation = signals.mentionsAdaptiveWork ? null : ownerRecipeInvocation(text, recipeCandidates);
+  const invocation = signals.mentionsAdaptiveWork ? null : ownerRecipeInvocation(text, options, workerCandidates);
   if (invocation) {
     return {
       lane: 'recipe_dispatcher',
