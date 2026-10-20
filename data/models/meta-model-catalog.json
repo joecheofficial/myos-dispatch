@@ -1,0 +1,147 @@
+{
+  "version": "2026-10-20",
+  "provider": "meta",
+  "purpose": "Meta Model API (api.meta.ai, OpenAI-compatible chat completions). Prices from the dev.meta.ai Models page 2026-10-20. Key: env MODEL_API_KEY or Keychain myos-meta-model-api-key. Pay-as-you-go billing must be on the Meta account.",
+  "principles": {
+    "api_first_for_automation": true,
+    "never_route_private_data_to_contributor": true
+  },
+  "selection_dimensions": [
+    "cost",
+    "latency",
+    "reasoning_depth",
+    "agentic_tool_use",
+    "long_context_synthesis"
+  ],
+  "models": [
+    {
+      "id": "meta.muse-spark-1.3",
+      "family": "meta-muse",
+      "model": "muse-spark-1.3",
+      "tier": "smart",
+      "status": "active",
+      "context_window": 1000000,
+      "max_output_tokens": null,
+      "supports_text": true,
+      "supports_tools": true,
+      "supports_vision": true,
+      "supports_streaming": true,
+      "pricing_per_1m_tokens": {
+        "input_usd": 1.25,
+        "cached_input_usd": 0.15,
+        "output_usd": 4.25
+      },
+      "strengths": [
+        "long-horizon coding and agentic work",
+        "native tool calling",
+        "1M context"
+      ],
+      "best_for": [
+        "second-opinion model",
+        "long-context synthesis"
+      ],
+      "avoid_for": [
+        "cheap bulk tasks (DeepSeek is cheaper)"
+      ],
+      "notes": "Always reasons: reasoning_effort none is rejected; minimal is the floor."
+    },
+    {
+      "id": "meta.muse-spark-1.3-contributor",
+      "family": "meta-muse",
+      "model": "muse-spark-1.3-contributor",
+      "tier": "bulk",
+      "status": "active",
+      "context_window": 1000000,
+      "max_output_tokens": null,
+      "supports_text": true,
+      "supports_tools": true,
+      "supports_vision": true,
+      "supports_streaming": true,
+      "pricing_per_1m_tokens": {
+        "input_usd": 0.1,
+        "cached_input_usd": 0.002,
+        "output_usd": 0.2
+      },
+      "strengths": [
+        "same model as Spark 1.3 at ~95% less"
+      ],
+      "best_for": [
+        "public, non-sensitive bulk text: web research digests, public content tagging"
+      ],
+      "avoid_for": [
+        "ANY private data: clients, WhatsApp, email, finance, CRM, customer files"
+      ],
+      "notes": "Inputs and outputs are used to train Meta models. Rate-limited; select countries only.",
+      "data_policy": "trains_on_inputs"
+    },
+    {
+      "id": "meta.muse-wonder-1.0",
+      "family": "meta-muse",
+      "model": "muse-wonder-1.0",
+      "tier": "frontier",
+      "status": "active",
+      "context_window": 1000000,
+      "max_output_tokens": null,
+      "supports_text": true,
+      "supports_tools": true,
+      "supports_vision": true,
+      "supports_streaming": true,
+      "pricing_per_1m_tokens": {
+        "input_usd": 4.0,
+        "cached_input_usd": 0.2,
+        "output_usd": 20.0
+      },
+      "strengths": [
+        "frontier coding, long-running agents, computer use"
+      ],
+      "best_for": [
+        "hard agentic tasks when Claude/Codex are unavailable"
+      ],
+      "avoid_for": [
+        "routine automation (expensive output)"
+      ],
+      "notes": "Meta recommends the Responses API for multi-step continuity; Dispatch uses chat completions."
+    }
+  ],
+  "routing_profiles": [
+    {
+      "id": "default_automation",
+      "preferred": [
+        "meta.muse-spark-1.3"
+      ],
+      "fallback": [],
+      "use_for": [
+        "explicit provider=meta calls"
+      ]
+    },
+    {
+      "id": "meta_public_bulk",
+      "preferred": [
+        "meta.muse-spark-1.3-contributor"
+      ],
+      "fallback": [
+        "meta.muse-spark-1.3"
+      ],
+      "use_for": [
+        "public, non-sensitive bulk text only"
+      ]
+    },
+    {
+      "id": "meta_frontier",
+      "preferred": [
+        "meta.muse-wonder-1.0"
+      ],
+      "fallback": [
+        "meta.muse-spark-1.3"
+      ],
+      "use_for": [
+        "hard agentic work"
+      ]
+    }
+  ],
+  "non_text_models": {
+    "muse-voice-transcribe-1.0": "$0.18 per audio hour, speaker separation",
+    "muse-image-1.0": "image generation and editing",
+    "sam-3.1": "$2.50 per 1,000 images, $0.20 per 1,000 video frames (segmentation)"
+  }
+}

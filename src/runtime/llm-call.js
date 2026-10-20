@@ -112,7 +112,8 @@ function normalizeProvider(value) {
   }
   if (normalized === "codex" || normalized === "local-codex") return "openai";
   if (normalized === "gemini") return "google";
-  if (normalized === "openai" || normalized === "openrouter" || normalized === "google") {
+  if (normalized === "muse") return "meta";
+  if (normalized === "openai" || normalized === "openrouter" || normalized === "google" || normalized === "meta") {
     return normalized;
   }
 
@@ -536,6 +537,74 @@ async function callOpenRouter({
   }
 }
 
+// Meta Model API (Muse Spark / Muse Wonder): OpenAI-compatible chat completions at api.meta.ai.
+// Muse models always reason, so reasoning_effort "none" is rejected; "minimal" is the floor.
+async function callMeta({
+  apiKey,
+  model,
+  messages,
+  timeoutMs,
+  maxOutputTokens,
+  responseMode,
+  temperature,
+  reasoningEffort,
+}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch("https://api.meta.ai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        max_tokens: maxOutputTokens,
+        temperature,
+        reasoning_effort: reasoningEffort && reasoningEffort !== "none" ? reasoningEffort : "low",
+        response_format: responseMode === "json" ? { type: "json_object" } : undefined,
+      }),
+      signal: controller.signal,
+    });
+
+    const json = await response.json();
+    if (!response.ok) {
+      throw buildProviderError(
+        "meta",
+        response.status,
+        json?.error?.message || `Meta Model API request failed (${response.status})`,
+        {
+          code: json?.error?.code,
+          // billing_not_configured / invalid_api_key are account problems, never retryable.
+          retryable: [408, 409, 429, 500, 502, 503, 504].includes(response.status),
+        }
+      );
+    }
+
+    return {
+      text: extractTextContent(json?.choices?.[0]?.message?.content),
+      raw: json,
+      usage: {
+        inputTokens: json?.usage?.prompt_tokens || 0,
+        outputTokens: json?.usage?.completion_tokens || 0,
+      },
+    };
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw buildProviderError("meta", 408, `Meta Model API request timed out after ${timeoutMs}ms`, {
+        code: "ETIMEDOUT",
+        retryable: true,
+      });
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function callGoogle({
   apiKey,
   model,
@@ -710,6 +779,13 @@ function resolveProviderApiKey(provider) {
     return resolveSecretValue({
       envKeys: ["OPENROUTER_API_KEY"],
       workspaceEnvKeys: ["OPENROUTER_API_KEY"],
+    });
+  }
+  if (provider === "meta") {
+    return resolveSecretValue({
+      envKeys: ["MODEL_API_KEY", "META_MODEL_API_KEY"],
+      workspaceEnvKeys: ["MODEL_API_KEY", "META_MODEL_API_KEY"],
+      keychainServices: ["myos-meta-model-api-key"],
     });
   }
   if (provider === "google") {
@@ -1095,6 +1171,7 @@ function resolveAuthLabel({ provider, authMode, options = {} } = {}) {
   if (provider === "openai") return "OPENAI_API_KEY";
   if (provider === "google") return "GEMINI_API_KEY";
   if (provider === "openrouter") return "OPENROUTER_API_KEY";
+  if (provider === "meta") return "MODEL_API_KEY";
   if (provider) return `${provider}:${authMode || "api"}`;
   return "unknown";
 }
@@ -1312,6 +1389,19 @@ async function llmCallAsync(options = {}) {
       maxOutputTokens,
       responseMode,
       temperature,
+    });
+  } else if (provider === "meta") {
+    const apiKey = resolveProviderApiKey(provider);
+    if (!apiKey) throw new Error("Meta Model API key is not set (MODEL_API_KEY or Keychain myos-meta-model-api-key)");
+    result = await callMeta({
+      apiKey,
+      model,
+      messages,
+      timeoutMs,
+      maxOutputTokens,
+      responseMode,
+      temperature,
+      reasoningEffort: options.reasoningEffort,
     });
   } else if (provider === "google") {
     const apiKey = resolveProviderApiKey(provider);
