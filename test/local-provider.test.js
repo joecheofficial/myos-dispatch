@@ -28,6 +28,8 @@ function fixture(t) {
   const configPath = path.join(root, "local.json");
   fs.writeFileSync(configPath, JSON.stringify({ enabled: true, runtimeModule, snapshotPath, cacheRoot: path.join(root, "cache"), plistPath, model: "mlx-community/Qwen3.5-35B-A3B-4bit" }));
   process.env.MYOS_PUBLIC_LOCAL_PROVIDER_CONFIG = configPath;
+  // Never route on the machine's live OAuth registry (restored by t.after).
+  process.env.MYOS_OAUTH_RECOVERY = "0";
   process.env.MYOS_AUTH_MODE = "oauth";
   process.env.MYOS_LANE_STATE_PATH = path.join(root, "absent.json");
   process.env.MYOS_MODEL_CATALOG_LOCAL = path.join(root, "assignments.json");
