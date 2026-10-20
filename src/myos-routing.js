@@ -322,6 +322,13 @@ function mergeRouteOverrides(baseRoute, overrideRoute) {
   return merged;
 }
 
+// A saved catalog entry that is unassigned, or that merely records the
+// subscription-registry choice, must not switch off the registry default
+// route (issue #8: saving the catalog left every text class without OAuth).
+function blocksRegistryDefault(assignment) {
+  return Boolean(assignment) && assignment.unassigned !== true && assignment.source !== "oauth-registry";
+}
+
 function resolveRouteEntry({ taskClass, intent, complianceLane }) {
   const lane = normalizeComplianceLane(complianceLane);
 
@@ -362,7 +369,7 @@ function resolveRouteEntry({ taskClass, intent, complianceLane }) {
     routeKey: normalizedTaskClass,
     routingSource: normalizedIntent ? "taskClass_fallback" : "taskClass",
     allowsLocalProvider: !normalizedIntent && !localPreference &&
-      !readLocalAssignmentsFile()?.assignments?.[normalizedTaskClass] &&
+      !blocksRegistryDefault(readLocalAssignmentsFile()?.assignments?.[normalizedTaskClass]) &&
       !readLocalAssignmentsFile()?.overrides?.[normalizedTaskClass] &&
       !routeOverrides?.[normalizedTaskClass]?.[lane],
     route: (() => {
