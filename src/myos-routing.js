@@ -393,7 +393,8 @@ function isFableCandidate(candidate = {}) {
     profile === "anthropic_elite" ||
     model === "claude-fable-5" ||
     model === "anthropic.claude-fable-5" ||
-    model.startsWith("claude-fable-")
+    model.startsWith("claude-fable-") ||
+    model.startsWith("anthropic.claude-fable-")
   );
 }
 
