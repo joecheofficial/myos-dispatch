@@ -89,3 +89,13 @@ test("discovery under a hook's minimal PATH reports both subscription providers"
   assert.deepEqual(exact, ["claude-fable-5-1", "claude-haiku-5-5", "claude-opus-5-5", "claude-sonnet-5-5"]);
   assert.ok(result.models.filter((m) => m.provider === "claude").every((m) => m.auth === "subscription"));
 });
+
+test("spawned runs resolve a bare provider name outside a minimal PATH", { skip: process.platform === "win32" }, async (t) => {
+  const { runCommand } = require("../src/background/background-agent-runner");
+  const home = tempHome(t);
+  const fake = script(path.join(home, "Applications", "Codex.app", "Contents", "Resources", "codex-cli", "bin", "codex"), 'echo "fake codex $1"');
+  const result = await runCommand({ command: "codex", args: ["exec"], cwd: home, timeoutMs: 10000,
+    env: { HOME: home, PATH: "/usr/bin:/bin", MYOS_CODEX_BIN: fake } });
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /fake codex exec/);
+});
