@@ -7,7 +7,7 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
-const node24 = "/Users/myos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node";
+const { NODE24: node24, skipUnlessNode24Found } = require("./helpers/node24");
 
 function darwinFixture(t, names = ["safe.md"]) {
   const base = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "residency-unit-"));
@@ -67,8 +67,7 @@ function syntheticScript() {
   `;
 }
 
-test("native discovery batches residency stat processes by more than five times", { concurrency: false }, (t) => {
-  assert.equal(fs.existsSync(node24), true);
+test("native discovery batches residency stat processes by more than five times", { concurrency: false, skip: skipUnlessNode24Found }, (t) => {
   const child = childProcess.spawnSync(node24, ["-e", syntheticScript()], { encoding: "utf8", timeout: 10_000 });
   assert.ifError(child.error);
   assert.equal(child.status, 0, child.stderr);
@@ -224,7 +223,7 @@ test("scope retains owner, hardlink, and symlink denials with residency evidence
   assert.equal(verifyMetadata(root, symlink).reason, "symlinkDenied");
 });
 
-test("partial native results report byte exhaustion only when the byte limit is actually reached", { concurrency: false }, () => {
+test("partial native results report byte exhaustion only when the byte limit is actually reached", { skip: skipUnlessNode24Found, concurrency: false }, () => {
   const child = childProcess.spawnSync(node24, ["-e", `
     const fs = require("node:fs");
     const os = require("node:os");

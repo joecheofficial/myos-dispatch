@@ -10,7 +10,7 @@ const { PassThrough } = require("node:stream");
 const test = require("node:test");
 
 const packageJson = require("../package.json");
-const { EXPLICIT_NODE24, RUNNING_NODE24, skipUnlessNode24Available } = require("./helpers/node24");
+const { NODE24, ownerSafeNode24, skipUnlessNode24Found } = require("./helpers/node24");
 const entrypoint = path.resolve(__dirname, "../bin/myos-find.js");
 
 function temporaryDirectory(t) {
@@ -269,14 +269,14 @@ test("search forwards a native request through the fixed Node 24 boundary and pr
   assert.deepEqual(result.results, packet.results);
 });
 
-test("qmd-null keyword search returns three citations within the desktop response cap", { skip: skipUnlessNode24Available }, (t) => {
+test("qmd-null keyword search returns three citations within the desktop response cap", { skip: skipUnlessNode24Found }, (t) => {
   const { inspectFile } = require("../packages/local-search/desktop-find");
-  const node24 = EXPLICIT_NODE24 || (RUNNING_NODE24 ? process.execPath : null);
   // The bridge refuses a runtime with group- or world-writable ancestry (for
-  // example a Homebrew Cellar shared with the admin group). Fail loudly so a
-  // Node 24 run never silently loses this end-to-end case.
-  assert.equal(inspectFile(node24, "runtime"), true,
-    `${node24} is not an owner-safe Node 24 runtime; set MYOS_TEST_NODE24 to an owner-owned Node 24 binary`);
+  // example a Homebrew Cellar shared with the admin group, or a symlinked
+  // opt/ path). That refusal is intended, so this end-to-end case runs against
+  // a private owner-only clone when the installed Node 24 is not owner-safe.
+  const node24 = ownerSafeNode24(t, (candidate) => inspectFile(candidate, "runtime"));
+  if (!node24) return t.skip(`no owner-safe copy of ${NODE24} could be produced`);
   const directory = temporaryDirectory(t);
   const root = path.join(directory, "notes");
   const stateDirectory = path.join(directory, "state");
