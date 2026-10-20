@@ -53,11 +53,9 @@ async function unlockClaude(file, options = {}) {
   const results = [];
   for (const model of plan) {
     const probe = { prompt: PROBE_PROMPT, maxOutputTokens: 16, effort: "low", timeoutMs };
+    let result = null;
     try {
-      const result = await execute({ ...probe, model });
-      markInvoked(file, result.model);
-      results.push({ model, status: "unlocked", reportedModel: result.model });
-      continue;
+      result = await execute({ ...probe, model });
     } catch (error) {
       const failure = { provider: "claude", model, stderr: error.message, signal: error.signal, cleanupFailed: error.cleanupFailed };
       try { updateState(file, current => recordFailure(current, failure)); } catch { /* Keep the probe result. */ }
@@ -68,13 +66,28 @@ async function unlockClaude(file, options = {}) {
         results.push({ model, status: "failed", kind: classified });
         continue;
       }
+      let learned = null;
       try {
-        const learned = await execute({ ...probe, model: family, aliasProbe: true });
-        markInvoked(file, learned.model, { family, aliasOf: family, source: "alias-probe" });
-        results.push({ model, status: "learned", learnedModel: learned.model });
+        learned = await execute({ ...probe, model: family, aliasProbe: true });
       } catch (aliasError) {
         results.push({ model, status: "failed", kind: classified, aliasError: String(aliasError.message).slice(0, 200) });
       }
+      if (learned) {
+        try {
+          markInvoked(file, learned.model, { family, aliasOf: family, source: "alias-probe" });
+          results.push({ model, status: "learned", learnedModel: learned.model });
+        } catch (error) {
+          results.push({ model, status: "learned_unrecorded", learnedModel: learned.model, error: String(error.message).slice(0, 200) });
+        }
+      }
+      continue;
+    }
+    // A registry write failure after a successful call is not a model failure.
+    try {
+      markInvoked(file, result.model);
+      results.push({ model, status: "unlocked", reportedModel: result.model });
+    } catch (error) {
+      results.push({ model, status: "unlocked_unrecorded", reportedModel: result.model, error: String(error.message).slice(0, 200) });
     }
   }
   return { ok: results.every(row => row.status !== "failed"), plan, results };

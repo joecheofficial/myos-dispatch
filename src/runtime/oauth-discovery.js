@@ -117,4 +117,4 @@ async function discoverInventory(options = {}) {
     { provider: "local", auth: "local", discovered: Boolean(local), offlineReady, observedAt: now },
   ] };
 }
-module.exports = { discoverInventory, claudeCatalogIds, childPath };
+module.exports = { discoverInventory, claudeCatalogIds };

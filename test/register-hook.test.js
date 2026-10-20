@@ -608,4 +608,7 @@ test("(issue8) private agents/shared hooks are never treated as Dispatch-owned",
   assert.strictEqual(isOurHookEntry({ command: "node /Users/x/.myos/workspace/agents/shared/myos-dispatch-hook.js --surface=claude" }), false);
   assert.strictEqual(isOurHookEntry({ command: "node /opt/myos-dispatch/bin/myos-dispatch-hook --surface=claude" }), true);
   assert.strictEqual(isOurHookEntry({ command: "node /opt/myos-dispatch/bin/myos-dispatch-hook-legacy --surface=claude" }), false);
+  // A hook that only names the Dispatch hook as an argument is foreign.
+  assert.strictEqual(isOurHookEntry({ command: "node audit.js --target myos-dispatch-hook" }), false);
+  assert.strictEqual(isOurHookEntry({ command: "env MYOS_HOME_ROOT=/x node /opt/old/bin/myos-dispatch-hook" }), true);
 });

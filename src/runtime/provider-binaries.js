@@ -110,19 +110,15 @@ function resolveProviderBinary(name, options = {}) {
   return null;
 }
 
-// Command to spawn: the resolved absolute path, or the bare name so the spawn
-// error stays the familiar ENOENT when the CLI is genuinely missing.
-function providerCommand(name, options = {}) {
-  return resolveProviderBinary(name, options) || name;
-}
-
 // Hooks run with a minimal PATH; give metadata children the binary's own
 // directory plus the system directories that shell wrappers rely on.
 function childPath(binary, env) {
-  const parts = [binary && path.isAbsolute(binary) ? path.dirname(binary) : null,
-    ...String(env.PATH || "").split(path.delimiter),
+  // Keep the caller's PATH order (toolchains such as pyenv or nvm stay first);
+  // only append the binary's directory and system directories when missing.
+  const parts = [...String(env.PATH || "").split(path.delimiter),
+    binary && path.isAbsolute(binary) ? path.dirname(binary) : null,
     ...(process.platform === "win32" ? [] : ["/usr/bin", "/bin", "/usr/sbin", "/sbin"])].filter(Boolean);
   return [...new Set(parts)].join(path.delimiter);
 }
 
-module.exports = { resolveProviderBinary, providerCommand, candidatePaths, childPath };
+module.exports = { resolveProviderBinary, candidatePaths, childPath };

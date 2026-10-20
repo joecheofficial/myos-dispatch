@@ -389,7 +389,7 @@ test("CLI detection does not source shell startup files during report", () => {
   const marker = path.join(home, "profile-ran");
   fs.writeFileSync(path.join(home, ".profile"), "printf x > \"$HOME/profile-ran\"\n");
   const { spawnSync } = require("node:child_process");
-  const result = spawnSync(process.execPath, [path.resolve(__dirname, "../scripts/setup-model-catalog.js"), "--home", home, "--report"], { env: { HOME: home, PATH: "/usr/bin:/bin" }, encoding: "utf8" });
+  const result = spawnSync(process.execPath, [path.resolve(__dirname, "../scripts/setup-model-catalog.js"), "--home", home, "--report"], { env: { HOME: home, PATH: "/usr/bin:/bin", MYOS_PROVIDER_SEARCH: "path" }, encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(fs.existsSync(marker), false);
 });
@@ -432,7 +432,7 @@ test("(issue8) unassigned text classes explain the subscription path, not only A
   assert.match(installed, /claude: found, but not signed in with a subscription/);
 });
 
-test("(issue8) CLI detection finds app-bundle installs that PATH misses", (t) => {
+test("(issue8) CLI detection finds installs outside PATH (~/.local/bin)", (t) => {
   const home = fs.realpathSync(tempDir("catalog-bin-"));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   const bin = path.join(home, ".local", "bin");

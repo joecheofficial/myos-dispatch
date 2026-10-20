@@ -92,3 +92,27 @@ test("model IDs parse into family and version", () => {
   assert.deepEqual(parseModelId("claude", "claude-opus-5-5"), { family: "opus", version: [5, 5] });
   assert.equal(parseModelId("claude", "sonnet"), null);
 });
+
+test("the real Claude CLI wrong-model wording is classified as unsupported and quarantined", () => {
+  const { recordFailure } = require("../src/runtime/oauth-registry");
+  const state = mergeDiscovery(null, [{ provider: "claude", model: "claude-fable-5-1", visible: true, auth: "subscription", observedAt: now }]);
+  const stderr = "There's an issue with the selected model (claude-fable-5-1). It may not exist or you may not have access to it. Run --model to pick a different model.";
+  const failed = recordFailure(state, { provider: "claude", model: "claude-fable-5-1", stderr, now: 1000 });
+  assert.equal(failed.lastFailure.kind, "unsupported_model");
+  assert.equal(failed.lastFailure.retryAllowed, true);
+  assert.ok(Date.parse(failed.models[0].quarantineUntil) > 1000);
+});
+
+test("alias records are never selected, even when an override names them", () => {
+  const state = mergeDiscovery(null, [{ provider: "claude", model: "opus", visible: true, auth: "subscription", observedAt: now, alias: true }]);
+  assert.deepEqual(selectModels(state, { provider: "claude", taskClass: "planning", policy: { claude: { planning: { models: ["opus"] } } } }), []);
+});
+
+test("child PATH keeps the caller's order and appends the binary directory", () => {
+  const { childPath } = require("../src/runtime/provider-binaries");
+  const value = childPath("/opt/homebrew/bin/codex", { PATH: "/Users/x/.pyenv/shims:/opt/homebrew/bin" }).split(path.delimiter);
+  assert.deepEqual(value.slice(0, 2), ["/Users/x/.pyenv/shims", "/opt/homebrew/bin"]);
+  const appended = childPath("/Applications/Codex.app/Contents/Resources/codex-cli/bin/codex", { PATH: "/usr/bin" }).split(path.delimiter);
+  assert.equal(appended[0], "/usr/bin");
+  assert.ok(appended.includes("/Applications/Codex.app/Contents/Resources/codex-cli/bin"));
+});
