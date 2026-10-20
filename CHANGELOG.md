@@ -2,6 +2,15 @@
 
 All notable changes to MyOS Dispatch are documented here.
 
+## Unreleased (issue #8 customer install fixes)
+
+- Find the Codex and Claude CLIs without relying on PATH. Hooks run with a minimal PATH, and on macOS both CLIs often ship only inside ChatGPT.app/Codex.app or the Claude desktop app. Discovery, sign-in probes, the model report and execution now search overrides (`MYOS_CODEX_BIN`, `MYOS_CLAUDE_BIN`), PATH, common install directories and the app bundles. `MYOS_PROVIDER_SEARCH=path` restores PATH-only lookup.
+- Select OAuth models by ranked family (luna/terra/sol/astra; haiku/sonnet/opus/fable) over the live discovered list instead of a frozen ID table, so gpt-6.1-sol, gpt-6-sol and gpt-6-luna route as soon as they are discovered. Add an optional class policy file (`~/.myos-dispatch/oauth-class-policy.json` or `MYOS_OAUTH_CLASS_POLICY`). Fit effort to the levels a model reports.
+- Resolve Claude aliases to current exact IDs from the Anthropic catalog and route Claude on all five text classes. A never-invoked subscription model is offered as a first call; add `myos-oauth-doctor unlock` to make those first calls deliberately and learn the exact ID from the alias when a catalog ID is rejected. `status` now prints CLI paths and the per-class routes.
+- Update the Anthropic catalog to Claude Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5; previous generations stay for explicit pins as `legacy`.
+- The installer model report explains the Codex/Claude subscription path, assigns text classes from it when signed in, and says why a CLI was not detected.
+- Hook registration replaces older Dispatch hook entries (no `--surface` flag, flags before `--surface`, the `.js` entrypoint, an npm-bin shim) instead of appending a second one. Foreign hooks and private `agents/shared` hooks are preserved.
+
 ## v4.4.0-rc.3 - 2026-10-16
 
 - Preserve prompt authority in the lean desktop startup context.

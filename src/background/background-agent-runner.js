@@ -449,8 +449,20 @@ function runCommand({ command, args, cwd, input, timeoutMs, env }) {
       cleanupScope: "owned-process-group", ownedGroupStopped: null, treeQuiescence: "unverified" });
   }
   return new Promise((resolve) => {
-    const child = spawn(command, args, {
-      cwd, stdio: ["pipe", "pipe", "pipe"], env: env || process.env,
+    // A bare provider name is resolved outside PATH as well: hooks run with a
+    // minimal PATH and macOS app bundles ship these CLIs without a shim.
+    let spawnCommand = command;
+    let spawnEnv = env || process.env;
+    if (command === "codex" || command === "claude") {
+      const { resolveProviderBinary, childPath } = require("../runtime/provider-binaries");
+      const resolved = resolveProviderBinary(command, { env: spawnEnv });
+      if (resolved) {
+        spawnCommand = resolved;
+        spawnEnv = { ...spawnEnv, PATH: childPath(resolved, spawnEnv) };
+      }
+    }
+    const child = spawn(spawnCommand, args, {
+      cwd, stdio: ["pipe", "pipe", "pipe"], env: spawnEnv,
       detached: true,
     });
     let stdout = "";

@@ -4,11 +4,25 @@ const assert = require("node:assert/strict");
 const {selectModels} = require("../src/runtime/oauth-registry");
 const {executeClaudeText} = require("../src/runtime/oauth-claude");
 
-test("Claude selection admits only authenticated, previously invoked exact Sonnet for bounded classes", () => {
+test("Claude selection admits authenticated exact models; a never-invoked model is a first-call unlock (issue #8)", () => {
   const entry={provider:"claude",model:"claude-sonnet-5",visible:true,auth:"subscription",observedAt:new Date().toISOString(),invokedAt:new Date().toISOString()};
-  assert.equal(selectModels({models:[entry]},{provider:"claude",taskClass:"planning"})[0]?.model,"claude-sonnet-5");
-  assert.deepEqual(selectModels({models:[{...entry,invokedAt:null}]},{provider:"claude",taskClass:"planning"}),[]);
-  assert.deepEqual(selectModels({models:[entry]},{provider:"claude",taskClass:"audio_diarization"}),[]);
+  assert.equal(selectModels({models:[entry]},{provider:"claude",taskClass:"planning",policy:null})[0]?.model,"claude-sonnet-5");
+  const fresh=selectModels({models:[{...entry,invokedAt:null}]},{provider:"claude",taskClass:"planning",policy:null});
+  assert.equal(fresh[0]?.model,"claude-sonnet-5");
+  assert.equal(fresh[0]?.firstCall,true);
+  assert.deepEqual(selectModels({models:[{...entry,auth:"unavailable"}]},{provider:"claude",taskClass:"planning",policy:null}),[]);
+  assert.deepEqual(selectModels({models:[entry]},{provider:"claude",taskClass:"audio_diarization",policy:null}),[]);
+});
+
+test("Claude alias probe learns the exact ID from provider-reported usage (issue #8 doctor unlock)", async () => {
+  const result=await executeClaudeText({model:"opus",aliasProbe:true,prompt:"Reply OK",timeoutMs:10000,maxOutputTokens:16},{
+    env:{PATH:"/usr/bin:/bin",HOME:"/nonexistent"},command:"/fixture/claude",
+    runCommand:async request=>request.args[0]==="auth"
+      ?{code:0,stdout:JSON.stringify({loggedIn:true,authMethod:"claude.ai"})}
+      :{code:0,stdout:JSON.stringify({result:"OK",modelUsage:{"claude-opus-5-5":{},"claude-haiku-5-5":{}},usage:{}})},
+  });
+  assert.equal(result.model,"claude-opus-5-5");
+  await assert.rejects(executeClaudeText({model:"opus",prompt:"x"},{runCommand:async()=>({code:0,stdout:"{}"})}),/exact model ID/);
 });
 
 test("Claude transport uses subscription auth, exact identity and no tool or Desktop credentials", async () => {

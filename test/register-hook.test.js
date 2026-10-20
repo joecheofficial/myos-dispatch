@@ -568,3 +568,44 @@ test("foreign bytes survive when removing an owned group shifts a mixed group", 
     assert.strictEqual(countOurHooks(JSON.parse(read(settings))), 1);
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 });
+
+// Issue #8 item 9: an upgrade from an older hand-registered Dispatch hook
+// appended a second UserPromptSubmit entry, so Dispatch ran twice per prompt.
+test("(issue8) upgrade replaces legacy Dispatch hook forms instead of appending", () => {
+  const { settings } = sandbox();
+  const foreign = "/usr/local/bin/foreign-ups.sh";
+  const wrapper = "/usr/local/bin/my-wrapper-for-myos-dispatch-hook-logging.sh --surface=claude";
+  const legacy = [
+    "node /Users/someone/old-dispatch/bin/myos-dispatch-hook", // no --surface flag
+    "\"/usr/local/bin/node\" \"/Users/someone/myos-dispatch/bin/myos-dispatch-hook\" --context=lean --surface=claude", // flag before --surface
+    "node /Users/someone/myos-dispatch/bin/myos-dispatch-hook.js",
+    "myos-dispatch-hook", // npm bin on PATH
+  ];
+  fs.writeFileSync(settings, JSON.stringify({ hooks: {
+    UserPromptSubmit: [
+      { hooks: [{ type: "command", command: legacy[0] }] },
+      { hooks: [{ type: "command", command: foreign }, { type: "command", command: legacy[1] }] },
+      { hooks: [{ type: "command", command: legacy[2] }, { type: "command", command: legacy[3] }] },
+      { hooks: [{ type: "command", command: wrapper }] },
+    ],
+  } }, null, 2));
+  const r = add(settings);
+  assert.strictEqual(r.status, 0, r.stderr);
+  const parsed = JSON.parse(read(settings));
+  const cmds = parsed.hooks.UserPromptSubmit.flatMap((g) => g.hooks.map((h) => h.command));
+  for (const old of legacy) assert.ok(!cmds.includes(old), `legacy entry removed: ${old}`);
+  assert.ok(cmds.includes(foreign), "foreign hook preserved");
+  assert.ok(cmds.includes(wrapper), "foreign wrapper containing the marker substring preserved");
+  assert.strictEqual(cmds.filter((c) => c.includes(HOOK)).length, 1, "exactly one current Dispatch hook");
+  // Re-running is a no-op on the hook set.
+  assert.strictEqual(add(settings).status, 0);
+  const again = JSON.parse(read(settings)).hooks.UserPromptSubmit.flatMap((g) => g.hooks.map((h) => h.command));
+  assert.deepStrictEqual(again, cmds);
+});
+
+test("(issue8) private agents/shared hooks are never treated as Dispatch-owned", () => {
+  const { isOurHookEntry } = require("../scripts/register-hook.js");
+  assert.strictEqual(isOurHookEntry({ command: "node /Users/x/.myos/workspace/agents/shared/myos-dispatch-hook.js --surface=claude" }), false);
+  assert.strictEqual(isOurHookEntry({ command: "node /opt/myos-dispatch/bin/myos-dispatch-hook --surface=claude" }), true);
+  assert.strictEqual(isOurHookEntry({ command: "node /opt/myos-dispatch/bin/myos-dispatch-hook-legacy --surface=claude" }), false);
+});

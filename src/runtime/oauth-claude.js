@@ -14,7 +14,10 @@ function isClaudeTextRequest(options = {}) {
 
 async function executeClaudeText(options, dependencies = {}) {
   if (!isClaudeTextRequest(options)) throw new Error("Claude OAuth is text-only and does not support tools, grounding or media");
-  if (!/^claude-[a-z0-9.-]+$/.test(options.model || "")) throw new Error("Claude OAuth requires an exact model ID");
+  // An alias probe (doctor unlock only) may name a family alias; the exact ID is
+  // then learned from the provider-reported model usage.
+  const aliasProbe = options.aliasProbe === true && /^(fable|opus|sonnet|haiku)$/.test(options.model || "");
+  if (!aliasProbe && !/^claude-[a-z0-9.-]+$/.test(options.model || "")) throw new Error("Claude OAuth requires an exact model ID");
   const maxOutputTokens=options.maxOutputTokens ?? 4000;
   if (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens < 1 || maxOutputTokens > 32000) throw new Error("Invalid Claude output token budget");
   const {runCommand} = require("../background/background-agent-runner");
@@ -27,10 +30,15 @@ async function executeClaudeText(options, dependencies = {}) {
   env.CLAUDE_CODE_MAX_OUTPUT_TOKENS=String(maxOutputTokens);
   env.CLAUDE_CODE_MAX_TURNS="1";
   env.CLAUDE_CODE_MAX_RETRIES="0";
+  // Resolve the CLI outside PATH too: hooks run with a minimal PATH and the
+  // macOS desktop app ships Claude Code inside its bundle.
+  const {resolveProviderBinary,childPath} = require("./provider-binaries");
+  const binary = dependencies.command || resolveProviderBinary("claude", {env: dependencies.env || process.env});
+  env.PATH = childPath(binary, env);
   const deadline = Date.now() + (options.timeoutMs || 180000);
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "myos-claude-text-"));
   try {
-    const command = "claude";
+    const command = binary || "claude";
     const auth = await run({command,args:["auth","status","--json"],cwd,env,timeoutMs:Math.min(8000,deadline-Date.now())});
     let status;
     try {status=JSON.parse(auth.stdout);} catch {throw new Error("Claude subscription authentication status unavailable");}
@@ -52,9 +60,10 @@ async function executeClaudeText(options, dependencies = {}) {
       throw error;
     }
     const reported=Object.keys(payload.modelUsage || {});
-    if (!reported.includes(options.model)) throw new Error("Claude OAuth reported model identity mismatch");
+    const model=aliasProbe ? reported.find(id=>new RegExp(`^claude-${options.model}-[0-9]`).test(id)) : options.model;
+    if (!model || !reported.includes(model)) throw new Error("Claude OAuth reported model identity mismatch");
     const text=payload.result.trim();
-    return {text,model:options.model,provider:"anthropic",estimatedCostUsd:0,
+    return {text,model,provider:"anthropic",estimatedCostUsd:0,
       json:options.responseMode === "json" ? JSON.parse(text) : null,
       usage:{inputTokens:Number(payload.usage?.input_tokens || 0)+Number(payload.usage?.cache_read_input_tokens || 0)+Number(payload.usage?.cache_creation_input_tokens || 0),outputTokens:Number(payload.usage?.output_tokens || 0)},
       raw:{provider:"claude-oauth",providerReportedModels:reported},
