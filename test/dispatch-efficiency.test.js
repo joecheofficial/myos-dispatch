@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const { buildParallelizationPlan } = require("../src/parallelization-planner");
 const { scoreCapabilityMatch } = require("../src/capability-router");
 const { handleHookPayload } = require("../bin/myos-dispatch-hook");
+const { isolateHookHome } = require("./helpers/isolated-home");
 const signals = {
   env: { OPENAI_API_KEY: "fixture-only" },
   parallelizationStage: { capabilities: {}, state: {} },
