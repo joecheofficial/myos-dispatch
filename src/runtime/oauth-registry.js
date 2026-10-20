@@ -134,8 +134,8 @@ function recordFailure(state, { provider, model, stderr = "", now = Date.now(), 
   const text = String(stderr).slice(0, 16000);
   let kind = "unknown";
   if (cleanupFailed || signal) kind = "interrupted";
-  else if (/401|403|not authenticated|not logged in|login required|authentication failed/i.test(text)) kind = "auth";
-  else if (/429|quota|rate.?limit|usage limit|credits|billing/i.test(text)) kind = "quota";
+  else if (/\b(?:401|403)\b|not authenticated|not logged in|login required|authentication failed/i.test(text)) kind = "auth";
+  else if (/\b429\b|quota|rate.?limit|usage limit|credits|billing/i.test(text)) kind = "quota";
   else if (/(model.{0,160}(?:not supported|unsupported|not found|unavailable)|unsupported.{0,60}model|model_not_found|issue with the selected model|may not exist or you may not have access)/i.test(text)) kind = "unsupported_model";
   const retryAllowed = kind === "unsupported_model";
   return {

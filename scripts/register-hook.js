@@ -131,7 +131,8 @@ const NODE_BASENAME_RE = /^(node|nodejs)(\.exe)?$/i;
 // Split a hook command into shell-like words (simple quotes only).
 function commandWords(command) {
   return [...command.matchAll(/"((?:\\.|[^"\\])*)"|'([^']*)'|(\S+)/g)]
-    .map(match => (match[1] !== undefined ? match[1].replace(/\\(.)/g, "$1") : match[2] !== undefined ? match[2] : match[3]));
+    // Only \" and \\ are escapes, so Windows paths keep their backslashes.
+    .map(match => (match[1] !== undefined ? match[1].replace(/\\(["\\])/g, "$1") : match[2] !== undefined ? match[2] : match[3]));
 }
 
 // True when the command EXECUTES the Dispatch hook: the hook is the program,

@@ -611,4 +611,6 @@ test("(issue8) private agents/shared hooks are never treated as Dispatch-owned",
   // A hook that only names the Dispatch hook as an argument is foreign.
   assert.strictEqual(isOurHookEntry({ command: "node audit.js --target myos-dispatch-hook" }), false);
   assert.strictEqual(isOurHookEntry({ command: "env MYOS_HOME_ROOT=/x node /opt/old/bin/myos-dispatch-hook" }), true);
+  // Windows legacy registration without --surface.
+  assert.strictEqual(isOurHookEntry({ command: '"C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\joe\\myos-dispatch\\bin\\myos-dispatch-hook"' }), true);
 });

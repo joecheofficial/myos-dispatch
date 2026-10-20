@@ -90,7 +90,8 @@ async function unlockClaude(file, options = {}) {
       results.push({ model, status: "unlocked_unrecorded", reportedModel: result.model, error: String(error.message).slice(0, 200) });
     }
   }
-  return { ok: results.every(row => row.status !== "failed"), plan, results };
+  // An unrecorded success still needs a rerun to persist, so it is not ok.
+  return { ok: results.every(row => row.status === "unlocked" || row.status === "learned"), plan, results };
 }
 
 // Per-class route summary for doctor status output.
