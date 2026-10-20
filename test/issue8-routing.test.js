@@ -31,6 +31,8 @@ function freshInstall(t, { dataSources = false } = {}) {
   const workspace = path.join(root, 'workspace');
   fs.mkdirSync(root, { recursive: true });
   fs.cpSync(path.join(FIXTURE, 'workspace'), workspace, { recursive: true });
+  const sidecarStub = path.join(tmp, 'sidecar-stub.js');
+  fs.writeFileSync(sidecarStub, 'process.exit(0);\n');
   const env = {
     PATH: process.env.PATH,
     HOME: home,
@@ -44,6 +46,9 @@ function freshInstall(t, { dataSources = false } = {}) {
     MYOS_PARALLELIZATION_STATE_FILE: path.join(tmp, 'no-promotion-history.json'),
     // No key unless a test opts in: no network, Jev falls back to rules.
     TYPESAFE_API_KEY: '',
+    // Plan lanes but never spawn real Claude/Codex sidecars (subscription
+    // usage): any sidecar the hook launches runs this inert stub instead.
+    MYOS_SIDECAR_BIN: sidecarStub,
   };
   return { tmp, home, root, workspace, env };
 }
@@ -235,7 +240,9 @@ test('e. an approved organizer-indexed recipe hit by an exact phrase is directly
 }, t => {
   const install = freshInstall(t);
   const recipeId = approveDoctorDiagnostic(install);
-  runPrompt(install, 'run doctor', { env: { TYPESAFE_API_KEY: 'fixture-key-not-real' } });
+  // Mocked client: a partial fix that reaches the classifier must not call the real API.
+  const { preload } = mockJevClient(install);
+  runPrompt(install, 'run doctor', { preload, env: { TYPESAFE_API_KEY: 'fixture-key-not-real' } });
   const record = jevRecords(install).at(-1);
   assert.equal(record?.reason, 'deterministic_match');
   assert.equal(record.recipeId, recipeId, `recipeId=${record.recipeId}`);
