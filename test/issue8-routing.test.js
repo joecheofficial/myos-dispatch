@@ -383,6 +383,92 @@ test('regression: owner invocation yields to a worker capability that clearly ou
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });
 
+// Live-index shape (Joe's machine, 2026-10-22): the owner's own umbrella agent
+// capability ("agent:doctor", aliases doctor/diagnostics/health) outscored the
+// Doctor recipes by more than 15, so the worker-veto sent "check dispatch health
+// with doctor" to the general worker lane. The owner's own capability must not
+// veto its own read-only recipes; a different capability still can (see above).
+function withLiveShapedDoctor(install) {
+  const indexPath = path.join(install.workspace, 'capabilities-index.json');
+  const index = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
+  // The live generator does not fold manifest tags (doctor, health) into recipe
+  // aliases the way the organizer fixture does, so the recipes score lower.
+  index.capabilities = index.capabilities.filter((c) => !String(c.source_path || '').startsWith('agents/doctor'));
+  index.capabilities.push({
+    id: 'recipe:agent/doctor/run-full-diagnostic', type: 'recipe', execution_lane: 'recipe_dispatcher',
+    source_path: 'agents/doctor/recipes/run-full-diagnostic.recipe.json',
+    description: 'Run a full read-only diagnostic of the installed product',
+    aliases: ['Run a full read-only diagnostic of the installed product', 'agent/doctor/run-full-diagnostic', 'is everything working', 'why is my dashboard down', 'run a health check'],
+    use_when: ['is everything working', 'why is my dashboard down', 'run a health check', "what's broken", 'diagnose my install', 'run doctor'],
+    avoid_when: [], priority: 75,
+  }, {
+    id: 'agent:doctor', type: 'agent', execution_lane: 'worker_skill', source_path: 'agents/doctor',
+    description: 'Read-only diagnostic agent for MyOS itself: is Mission Control serving, is the dispatch hook registered, is the search index fresh',
+    aliases: ['Doctor', 'doctor', 'diagnostics', 'health'],
+    use_when: ['Read-only diagnostic agent for MyOS itself: is Mission Control serving, is the dispatch hook registered, is the search index fresh', 'Task matches tags: diagnostics, health'],
+    avoid_when: [], priority: 50, version: 1,
+  }, {
+    id: 'recipe:agent/doctor/check-dispatch-hook', type: 'recipe', execution_lane: 'recipe_dispatcher',
+    source_path: 'agents/doctor/recipes/check-dispatch-hook.recipe.json',
+    description: 'Check whether the dispatch hook is registered in settings',
+    aliases: ['Check whether the dispatch hook is registered in settings', 'agent/doctor/check-dispatch-hook', 'is the dispatch hook registered', 'check my hook configuration', 'is the hook wired up'],
+    use_when: ['is the dispatch hook registered', 'check my hook configuration', 'is the hook wired up', 'verify hook registration'],
+    avoid_when: [], priority: 75,
+  });
+  fs.writeFileSync(indexPath, JSON.stringify(index));
+  // The live project index has a personal project aliased "health", which
+  // claimed the request as Branch: project once the lane was fixed.
+  const projectsPath = path.join(install.workspace, 'projects/_index.json');
+  const projects = JSON.parse(fs.readFileSync(projectsPath, 'utf8'));
+  projects.projects.personal = { path: 'personal', name: 'Personal', aliases: ['health', 'workouts', 'personal'] };
+  fs.mkdirSync(path.join(install.workspace, 'projects/personal'), { recursive: true });
+  fs.writeFileSync(projectsPath, JSON.stringify(projects));
+  fs.writeFileSync(path.join(install.workspace, 'agents/doctor/recipes/check-dispatch-hook.recipe.json'), JSON.stringify({
+    id: 'agent/doctor/check-dispatch-hook', layer: 'agent', owner: 'doctor',
+    title: 'Check whether the dispatch hook is registered in settings',
+    tags: ['doctor', 'hook', 'settings', 'read-only'], phrases: ['is the dispatch hook registered'],
+    actions: ['search'], safety: { destructive: false, rule: 'Read-only. Only reads the configured settings file.' },
+    inputMode: 'structured', requiredContext: [], outputMode: 'text', fallbackPolicy: 'deterministic_first',
+    handler: './check-dispatch-hook.js',
+  }));
+  return indexPath;
+}
+
+test('regression: the owner\'s own umbrella capability does not veto its read-only recipes (live index shape)', t => {
+  const install = freshInstall(t);
+  withLiveShapedDoctor(install);
+  for (const prompt of ['check dispatch health with doctor', 'run the doctor']) {
+    const out = runPrompt(install, prompt);
+    assert.equal(out.lane, 'recipe_dispatcher', `${JSON.stringify(prompt)} lane=${out.lane} (${out.laneReason}) scope=${out.scope}`);
+    assert.match(out.scope, /agents\/doctor\/recipes\/[\w-]+\.recipe\.json$/, `${JSON.stringify(prompt)} scope=${out.scope}`);
+    assert.equal(out.branch, 'capability', `${JSON.stringify(prompt)} branch=${out.branch} scope=${out.scope}`);
+  }
+  // A project the request names explicitly still owns it.
+  const named = runPrompt(install, 'check my personal health with doctor');
+  assert.equal(named.branch, 'project', `branch=${named.branch} scope=${named.scope}`);
+  const hook = runPrompt(install, 'check dispatch health with doctor');
+  assert.match(hook.scope, /check-dispatch-hook\.recipe\.json$/, hook.scope);
+  // Guards on the same index: unrelated mentions and non-invocations stay off the recipe lane.
+  for (const prompt of ['write a blog post about my doctor appointment', 'book a doctor appointment for tuesday',
+    'check my doctor appointment', 'check the doctor appointment time']) {
+    const out = runPrompt(install, prompt);
+    assert.notEqual(out.lane, 'recipe_dispatcher', `${JSON.stringify(prompt)} over-matched a Doctor recipe`);
+  }
+});
+
+test('regression: a different worker capability still vetoes even when the owner umbrella is present', t => {
+  const install = freshInstall(t);
+  const indexPath = withLiveShapedDoctor(install);
+  const { selectExecutionLane } = require('../src/capability-router');
+  assert.equal(selectExecutionLane('run the doctor', { indexPath }).reason, 'owner_recipe_invocation');
+  const index = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
+  index.capabilities.push({ id: 'capability:run-the-doctor-tv', type: 'skill', execution_lane: 'worker_skill', source_path: 'skills/tv',
+    description: 'run the doctor', aliases: ['run the doctor', 'the doctor tv series', 'doctor episodes'], use_when: ['run the doctor'], priority: 100 });
+  fs.writeFileSync(indexPath, JSON.stringify(index));
+  const route = selectExecutionLane('run the doctor', { indexPath });
+  assert.notEqual(route.reason, 'owner_recipe_invocation', `${route.lane} ${route.reason}`);
+});
+
 test('regression: a configured fastpath still wins with its own scope', t => {
   const install = freshInstall(t);
   fs.writeFileSync(path.join(install.workspace, 'DISPATCH-FASTPATHS.json'), JSON.stringify({ version: 1, fastpaths: [{

@@ -255,6 +255,16 @@ function invokedOwner(haystack, owners) {
   return null;
 }
 
+// The owner a non-recipe capability is rooted at: "agents/<owner>" or
+// "projects/<owner>" exactly (not a nested path), or an "agent:<owner>" id.
+function capabilityRootOwner(capability = {}) {
+  const source = String(capability.source_path || "").replace(/\\/g, "/").replace(/\/+$/, "");
+  const match = source.match(/(?:^|\/)(?:agents|projects)\/([^/]+)$/);
+  if (match) return match[1].toLowerCase();
+  const id = String(capability.id || "").match(/^agent:([^/\s]+)$/);
+  return id ? id[1].toLowerCase() : null;
+}
+
 function readRecipeManifest(capability = {}) {
   try {
     const manifestPath = path.resolve(capability.scan_dir || WORKSPACE_ROOT, String(capability.source_path || ""));
@@ -323,8 +333,12 @@ function ownerRecipeInvocation(text, options = {}, workerCandidates = []) {
       || String(a.capability.id).localeCompare(String(b.capability.id)));
   if (!candidates.length) return null;
   // A worker capability that clearly outscores the owner's best recipe keeps the request.
+  // The invoked owner's own umbrella capability (agents/<owner>) does not count:
+  // it scores on the owner's name, which is exactly what the invocation matched,
+  // so it would always veto its own read-only recipes on a live index.
   const bestRecipeScore = Math.max(...candidates.map((entry) => entry.score));
-  if (workerCandidates[0] && workerCandidates[0].score > bestRecipeScore + 15) return null;
+  const rival = workerCandidates.find((entry) => capabilityRootOwner(entry.capability) !== String(owner).toLowerCase());
+  if (rival && rival.score > bestRecipeScore + 15) return null;
   return candidates.slice(0, 3);
 }
 

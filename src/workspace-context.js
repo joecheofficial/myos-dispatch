@@ -629,10 +629,20 @@ function selectDataSources(query, dataSourceOptions = {}) {
   return selectDataSourceIds(query, dataSourceOptions);
 }
 
+function isExplicitlyNamedProject(query, project) {
+  return [project.slug, project.name, project.path].filter(Boolean).some(value => !isGenericProjectTerm(value) &&
+    (hasBoundedPhrase(normalizeText(query), normalizeText(value)) || hasLooseBoundedPhrase(query, value)));
+}
+
 function chooseSourceOwner({ query, actionType, projectMatches, dataSources, route, intentType, dataSourceOptions = {} }) {
   const text = normalizeText(query);
   const primaryProject = projectMatches[0] || null;
-  const hasProject = Boolean(primaryProject);
+  // An explicit agent invocation ("check dispatch health with doctor") names its
+  // owner; a project that matched only on an alias ("health" -> personal) does
+  // not take it over. A project named by slug, name or path still owns it.
+  const invocationOutranksProject = route?.reason === "owner_recipe_invocation"
+    && primaryProject && !isExplicitlyNamedProject(query, primaryProject);
+  const hasProject = Boolean(primaryProject) && !invocationOutranksProject;
   const authoring = isAuthoringRequest(text);
   // Authoring requests keep their data sources as context but never become the data owner.
   const hasData = dataSources.length > 0 && !authoring;
