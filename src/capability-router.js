@@ -255,6 +255,16 @@ function invokedOwner(haystack, owners) {
   return null;
 }
 
+// The owner a non-recipe capability is rooted at: "agents/<owner>" or
+// "projects/<owner>" exactly (not a nested path), or an "agent:<owner>" id.
+function capabilityRootOwner(capability = {}) {
+  const source = String(capability.source_path || "").replace(/\\/g, "/").replace(/\/+$/, "");
+  const match = source.match(/(?:^|\/)(?:agents|projects)\/([^/]+)$/);
+  if (match) return match[1].toLowerCase();
+  const id = String(capability.id || "").match(/^agent:([^/\s]+)$/);
+  return id ? id[1].toLowerCase() : null;
+}
+
 function readRecipeManifest(capability = {}) {
   try {
     const manifestPath = path.resolve(capability.scan_dir || WORKSPACE_ROOT, String(capability.source_path || ""));
@@ -323,8 +333,20 @@ function ownerRecipeInvocation(text, options = {}, workerCandidates = []) {
       || String(a.capability.id).localeCompare(String(b.capability.id)));
   if (!candidates.length) return null;
   // A worker capability that clearly outscores the owner's best recipe keeps the request.
+  // The invoked owner's own umbrella capability (agents/<owner>) does not count:
+  // it scores on the owner's name, which is exactly what the invocation matched,
+  // so it would always veto its own read-only recipes on a live index.
+  // Only a recipe strong enough to keep the request downstream (it names the
+  // operation and clears the capability-owner evidence bar) may skip the
+  // umbrella; otherwise "use the doctor" would lose its scope entirely.
   const bestRecipeScore = Math.max(...candidates.map((entry) => entry.score));
-  if (workerCandidates[0] && workerCandidates[0].score > bestRecipeScore + 15) return null;
+  const best = candidates[0];
+  const recipeCanStand = best.fit >= 1 && best.score >= 18 && best.evidenceScore >= 10;
+  const normalizedOwner = String(owner).toLowerCase();
+  const rival = recipeCanStand
+    ? workerCandidates.find((entry) => capabilityRootOwner(entry.capability) !== normalizedOwner)
+    : workerCandidates[0];
+  if (rival && rival.score > bestRecipeScore + 15) return null;
   return candidates.slice(0, 3);
 }
 
@@ -360,7 +382,8 @@ function selectExecutionLane(text, options = {}) {
     };
   }
 
-  const invocation = signals.mentionsAdaptiveWork ? null : ownerRecipeInvocation(text, options, workerCandidates);
+  const invocation = signals.mentionsAdaptiveWork || options.skipOwnerInvocation
+    ? null : ownerRecipeInvocation(text, options, workerCandidates);
   if (invocation) {
     return {
       lane: 'recipe_dispatcher',
