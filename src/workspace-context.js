@@ -707,9 +707,7 @@ function collectDispatchSignals(query, options = {}) {
   const projects = recipeWins ? [] : loadProjectIndex();
   let projectMatches = recipeWins ? [] : matchProjects(query, projects);
   // Explicit owner evidence outranks a keyword shortcut into another project.
-  let explicitOwners = projectMatches.filter(project => [project.slug, project.name, project.path]
-    .filter(Boolean).some(value => !isGenericProjectTerm(value) &&
-      (hasBoundedPhrase(normalizeText(query), normalizeText(value)) || hasLooseBoundedPhrase(query, value))));
+  let explicitOwners = projectMatches.filter(project => isExplicitlyNamedProject(query, project));
   const namedOwners = explicitOwners.filter(project => hasMultipleWords(project.name) &&
     (hasBoundedPhrase(query, project.name) || hasLooseBoundedPhrase(query, project.name)));
   if (namedOwners.length === 1 && explicitOwners.every(project => project === namedOwners[0] ||
@@ -724,9 +722,15 @@ function collectDispatchSignals(query, options = {}) {
       return target && (target === ownerRoot || target.startsWith(ownerRoot + path.sep));
     });
   }
-  const route = recipeWins ? { lane: "recipe_dispatcher", reason: "recipe_exact_match", candidates: [] }
+  let route = recipeWins ? { lane: "recipe_dispatcher", reason: "recipe_exact_match", candidates: [] }
     : ambiguousOwnership ? { lane: "worker_skill", reason: "multiple_explicit_owners", candidates: [] }
     : selectExecutionLane(query, options);
+  // A project the request names explicitly owns it, so an agent invocation in
+  // the same request must not pair a recipe lane with that project's scope.
+  if (route.reason === "owner_recipe_invocation" && projectMatches[0]
+      && isExplicitlyNamedProject(query, projectMatches[0])) {
+    route = selectExecutionLane(query, { ...options, skipOwnerInvocation: true });
+  }
   const intentType = inferIntentType(query);
   const actionType = inferActionType(query, { userPrompt: true });
   const isFollowUp = isShortFollowUp(query);

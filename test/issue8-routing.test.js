@@ -414,6 +414,14 @@ function withLiveShapedDoctor(install) {
     aliases: ['Check whether the dispatch hook is registered in settings', 'agent/doctor/check-dispatch-hook', 'is the dispatch hook registered', 'check my hook configuration', 'is the hook wired up'],
     use_when: ['is the dispatch hook registered', 'check my hook configuration', 'is the hook wired up', 'verify hook registration'],
     avoid_when: [], priority: 75,
+  }, {
+    // A write recipe under the same owner must never be offered for a check.
+    id: 'recipe:agent/doctor/fix-dispatch-hook', type: 'recipe', execution_lane: 'recipe_dispatcher',
+    source_path: 'agents/doctor/recipes/fix-dispatch-hook.recipe.json',
+    description: 'Fix the dispatch hook registration in settings',
+    aliases: ['Fix the dispatch hook registration in settings', 'agent/doctor/fix-dispatch-hook', 'repair dispatch health', 'dispatch hook health'],
+    use_when: ['repair dispatch health', 'repair the dispatch hook'],
+    avoid_when: [], priority: 90,
   });
   fs.writeFileSync(indexPath, JSON.stringify(index));
   // The live project index has a personal project aliased "health", which
@@ -443,11 +451,20 @@ test('regression: the owner\'s own umbrella capability does not veto its read-on
     assert.match(out.scope, /agents\/doctor\/recipes\/[\w-]+\.recipe\.json$/, `${JSON.stringify(prompt)} scope=${out.scope}`);
     assert.equal(out.branch, 'capability', `${JSON.stringify(prompt)} branch=${out.branch} scope=${out.scope}`);
   }
-  // A project the request names explicitly still owns it.
+  // A project the request names explicitly still owns it, and the agent
+  // invocation does not pair a recipe lane with that project's scope.
   const named = runPrompt(install, 'check my personal health with doctor');
   assert.equal(named.branch, 'project', `branch=${named.branch} scope=${named.scope}`);
+  assert.notEqual(named.lane, 'recipe_dispatcher', `lane=${named.lane} (${named.laneReason}) scope=${named.scope}`);
   const hook = runPrompt(install, 'check dispatch health with doctor');
   assert.match(hook.scope, /check-dispatch-hook\.recipe\.json$/, hook.scope);
+  assert.doesNotMatch(hook.context, /fix-dispatch-hook/, 'a write recipe was offered for a check');
+  // Bare invocations whose recipes cannot stand on their own keep the umbrella scope.
+  for (const prompt of ['use the doctor', 'test the doctor']) {
+    const out = runPrompt(install, prompt);
+    assert.equal(out.branch, 'capability', `${JSON.stringify(prompt)} branch=${out.branch} lane=${out.lane} (${out.laneReason})`);
+    assert.match(out.scope, /agents\/doctor(?:\/recipes\/(?:run-full-diagnostic|check-[\w-]+)\.recipe\.json)?$/, `${JSON.stringify(prompt)} scope=${out.scope}`);
+  }
   // Guards on the same index: unrelated mentions and non-invocations stay off the recipe lane.
   for (const prompt of ['write a blog post about my doctor appointment', 'book a doctor appointment for tuesday',
     'check my doctor appointment', 'check the doctor appointment time']) {
