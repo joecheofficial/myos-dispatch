@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "mode": "human_session_backup",
+  "authMode": "oauth",
+  "automaticUnattendedFallback": false,
+  "apiFallback": false,
+  "maxCallsPerUtcDay": 5,
+  "maxPromptBytes": 16000,
+  "timeoutMs": 90000,
+  "accountEvidenceMaxAgeMs": 86400000,
+  "inventoryMaxAgeMs": 3600000,
+  "taskClasses": {
+    "cheap_routing": ["grok-4.7-low", "composer-2.5"],
+    "default_automation": ["composer-2.5", "grok-4.7-medium"],
+    "planning": ["grok-4.7-medium", "composer-2.5"],
+    "heavy_synthesis": ["grok-4.7-high"]
+  }
+}

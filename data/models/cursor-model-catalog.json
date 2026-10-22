@@ -1,0 +1,5078 @@
+{
+  "version": "2026-10-22",
+  "provider": "cursor",
+  "purpose": "Exact IDs exposed by the official CLI. Discovery does not prove inference, affordability or eligibility. Human-session backup only.",
+  "models": [
+    {
+      "id": "cursor.auto",
+      "model": "auto",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "dynamic_unknown",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.3-codex-low",
+      "model": "gpt-5.3-codex-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.3-codex-low-fast",
+      "model": "gpt-5.3-codex-low-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.3-codex",
+      "model": "gpt-5.3-codex",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.3-codex-fast",
+      "model": "gpt-5.3-codex-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.3-codex-high",
+      "model": "gpt-5.3-codex-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.3-codex-high-fast",
+      "model": "gpt-5.3-codex-high-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.3-codex-xhigh",
+      "model": "gpt-5.3-codex-xhigh",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.3-codex-xhigh-fast",
+      "model": "gpt-5.3-codex-xhigh-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.2",
+      "model": "gpt-5.2",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.composer-2.5",
+      "model": "composer-2.5",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": true,
+      "billing_pool": "cursor_models",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-5-thinking-high",
+      "model": "claude-opus-5-thinking-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-5-thinking-high-fast",
+      "model": "claude-opus-5-thinking-high-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-sol-high",
+      "model": "gpt-5.6-sol-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-sol-high-fast",
+      "model": "gpt-5.6-sol-high-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-sol-xhigh",
+      "model": "gpt-5.6-sol-xhigh",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-sol-xhigh-fast",
+      "model": "gpt-5.6-sol-xhigh-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-fable-5-thinking-high",
+      "model": "claude-fable-5-thinking-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-fable-5-thinking-xhigh",
+      "model": "claude-fable-5-thinking-xhigh",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.cursor-grok-4.5-high",
+      "model": "cursor-grok-4.5-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "cursor_models",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.cursor-grok-4.5-high-fast",
+      "model": "cursor-grok-4.5-high-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "cursor_models",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gemini-3.7-flash-high",
+      "model": "gemini-3.7-flash-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-sonnet-5-thinking-high",
+      "model": "claude-sonnet-5-thinking-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-sonnet-5-thinking-xhigh",
+      "model": "claude-sonnet-5-thinking-xhigh",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-luna-high",
+      "model": "gpt-5.6-luna-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.grok-4.7-low",
+      "model": "grok-4.7-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": true,
+      "billing_pool": "cursor_models",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.grok-4.7-low-fast",
+      "model": "grok-4.7-low-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "cursor_models",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.grok-4.7-medium",
+      "model": "grok-4.7-medium",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": true,
+      "billing_pool": "cursor_models",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.grok-4.7-medium-fast",
+      "model": "grok-4.7-medium-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "cursor_models",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.grok-4.7-high",
+      "model": "grok-4.7-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": true,
+      "billing_pool": "cursor_models",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.grok-4.7-high-fast",
+      "model": "grok-4.7-high-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "cursor_models",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.grok-4.7-xhigh",
+      "model": "grok-4.7-xhigh",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "cursor_models",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.grok-4.7-xhigh-fast",
+      "model": "grok-4.7-xhigh-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "cursor_models",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.cursor-grok-4.6-low",
+      "model": "cursor-grok-4.6-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "cursor_models",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.cursor-grok-4.6-low-fast",
+      "model": "cursor-grok-4.6-low-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "cursor_models",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.cursor-grok-4.6-medium",
+      "model": "cursor-grok-4.6-medium",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "cursor_models",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.cursor-grok-4.6-medium-fast",
+      "model": "cursor-grok-4.6-medium-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "cursor_models",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.cursor-grok-4.6-high",
+      "model": "cursor-grok-4.6-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "cursor_models",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.cursor-grok-4.6-high-fast",
+      "model": "cursor-grok-4.6-high-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "cursor_models",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.cursor-grok-4.6-xhigh",
+      "model": "cursor-grok-4.6-xhigh",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "cursor_models",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.cursor-grok-4.6-xhigh-fast",
+      "model": "cursor-grok-4.6-xhigh-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "cursor_models",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.composer-2.5-fast",
+      "model": "composer-2.5-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "cursor_models",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-5-5-low",
+      "model": "claude-opus-5-5-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-5-5-low-fast",
+      "model": "claude-opus-5-5-low-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-5-5-medium",
+      "model": "claude-opus-5-5-medium",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-5-5-medium-fast",
+      "model": "claude-opus-5-5-medium-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-5-5-high",
+      "model": "claude-opus-5-5-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-5-5-high-fast",
+      "model": "claude-opus-5-5-high-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-5-5-xhigh",
+      "model": "claude-opus-5-5-xhigh",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-5-5-xhigh-fast",
+      "model": "claude-opus-5-5-xhigh-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-5-5-max",
+      "model": "claude-opus-5-5-max",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-5-5-max-fast",
+      "model": "claude-opus-5-5-max-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-5-low",
+      "model": "claude-opus-5-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-5-low-fast",
+      "model": "claude-opus-5-low-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-5-medium",
+      "model": "claude-opus-5-medium",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-5-medium-fast",
+      "model": "claude-opus-5-medium-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-5-high",
+      "model": "claude-opus-5-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-5-high-fast",
+      "model": "claude-opus-5-high-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-5-thinking-low",
+      "model": "claude-opus-5-thinking-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-5-thinking-low-fast",
+      "model": "claude-opus-5-thinking-low-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-5-thinking-medium",
+      "model": "claude-opus-5-thinking-medium",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-5-thinking-medium-fast",
+      "model": "claude-opus-5-thinking-medium-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-5-thinking-xhigh",
+      "model": "claude-opus-5-thinking-xhigh",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-5-thinking-xhigh-fast",
+      "model": "claude-opus-5-thinking-xhigh-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-5-thinking-max",
+      "model": "claude-opus-5-thinking-max",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-5-thinking-max-fast",
+      "model": "claude-opus-5-thinking-max-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-8-low",
+      "model": "claude-opus-4-8-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-8-low-fast",
+      "model": "claude-opus-4-8-low-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-8-medium",
+      "model": "claude-opus-4-8-medium",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-8-medium-fast",
+      "model": "claude-opus-4-8-medium-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-8-high",
+      "model": "claude-opus-4-8-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-8-high-fast",
+      "model": "claude-opus-4-8-high-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-8-xhigh",
+      "model": "claude-opus-4-8-xhigh",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-8-xhigh-fast",
+      "model": "claude-opus-4-8-xhigh-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-8-max",
+      "model": "claude-opus-4-8-max",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-8-max-fast",
+      "model": "claude-opus-4-8-max-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-8-thinking-low",
+      "model": "claude-opus-4-8-thinking-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-8-thinking-low-fast",
+      "model": "claude-opus-4-8-thinking-low-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-8-thinking-medium",
+      "model": "claude-opus-4-8-thinking-medium",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-8-thinking-medium-fast",
+      "model": "claude-opus-4-8-thinking-medium-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-8-thinking-high",
+      "model": "claude-opus-4-8-thinking-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-8-thinking-high-fast",
+      "model": "claude-opus-4-8-thinking-high-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-8-thinking-xhigh",
+      "model": "claude-opus-4-8-thinking-xhigh",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-8-thinking-xhigh-fast",
+      "model": "claude-opus-4-8-thinking-xhigh-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-8-thinking-max",
+      "model": "claude-opus-4-8-thinking-max",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-8-thinking-max-fast",
+      "model": "claude-opus-4-8-thinking-max-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gemini-4-argon-low",
+      "model": "gemini-4-argon-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gemini-4-argon-medium",
+      "model": "gemini-4-argon-medium",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gemini-4-argon-high",
+      "model": "gemini-4-argon-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.muse-wonder-1.0-minimal",
+      "model": "muse-wonder-1.0-minimal",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.muse-wonder-1.0-low",
+      "model": "muse-wonder-1.0-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.muse-wonder-1.0-medium",
+      "model": "muse-wonder-1.0-medium",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.muse-wonder-1.0-high",
+      "model": "muse-wonder-1.0-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.muse-wonder-1.0-xhigh",
+      "model": "muse-wonder-1.0-xhigh",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.muse-wonder-1.0-max",
+      "model": "muse-wonder-1.0-max",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-sol-none",
+      "model": "gpt-5.6-sol-none",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-sol-none-fast",
+      "model": "gpt-5.6-sol-none-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-sol-low",
+      "model": "gpt-5.6-sol-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-sol-low-fast",
+      "model": "gpt-5.6-sol-low-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-sol-medium",
+      "model": "gpt-5.6-sol-medium",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-sol-medium-fast",
+      "model": "gpt-5.6-sol-medium-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-sol-max",
+      "model": "gpt-5.6-sol-max",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-sol-max-fast",
+      "model": "gpt-5.6-sol-max-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.5-none",
+      "model": "gpt-5.5-none",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.5-none-fast",
+      "model": "gpt-5.5-none-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.5-low",
+      "model": "gpt-5.5-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.5-low-fast",
+      "model": "gpt-5.5-low-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.5-medium",
+      "model": "gpt-5.5-medium",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.5-medium-fast",
+      "model": "gpt-5.5-medium-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.5-high",
+      "model": "gpt-5.5-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.5-high-fast",
+      "model": "gpt-5.5-high-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.5-extra-high",
+      "model": "gpt-5.5-extra-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.5-extra-high-fast",
+      "model": "gpt-5.5-extra-high-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-fable-5-1-low",
+      "model": "claude-fable-5-1-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-fable-5-1-medium",
+      "model": "claude-fable-5-1-medium",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-fable-5-1-high",
+      "model": "claude-fable-5-1-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-fable-5-1-xhigh",
+      "model": "claude-fable-5-1-xhigh",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-fable-5-1-max",
+      "model": "claude-fable-5-1-max",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-fable-5-1-thinking-low",
+      "model": "claude-fable-5-1-thinking-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-fable-5-1-thinking-medium",
+      "model": "claude-fable-5-1-thinking-medium",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-fable-5-1-thinking-high",
+      "model": "claude-fable-5-1-thinking-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-fable-5-1-thinking-xhigh",
+      "model": "claude-fable-5-1-thinking-xhigh",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-fable-5-1-thinking-max",
+      "model": "claude-fable-5-1-thinking-max",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-fable-5-low",
+      "model": "claude-fable-5-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-fable-5-medium",
+      "model": "claude-fable-5-medium",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-fable-5-high",
+      "model": "claude-fable-5-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-fable-5-xhigh",
+      "model": "claude-fable-5-xhigh",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-fable-5-max",
+      "model": "claude-fable-5-max",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-fable-5-thinking-low",
+      "model": "claude-fable-5-thinking-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-fable-5-thinking-medium",
+      "model": "claude-fable-5-thinking-medium",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-fable-5-thinking-max",
+      "model": "claude-fable-5-thinking-max",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.cursor-grok-4.5-low",
+      "model": "cursor-grok-4.5-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "cursor_models",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.cursor-grok-4.5-low-fast",
+      "model": "cursor-grok-4.5-low-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "cursor_models",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.cursor-grok-4.5-medium",
+      "model": "cursor-grok-4.5-medium",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "cursor_models",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.cursor-grok-4.5-medium-fast",
+      "model": "cursor-grok-4.5-medium-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "cursor_models",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gemini-3.8-flash-low",
+      "model": "gemini-3.8-flash-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gemini-3.8-flash-medium",
+      "model": "gemini-3.8-flash-medium",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gemini-3.8-flash-high",
+      "model": "gemini-3.8-flash-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gemini-3.7-flash-low",
+      "model": "gemini-3.7-flash-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gemini-3.7-flash-medium",
+      "model": "gemini-3.7-flash-medium",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.muse-spark-1.3-minimal",
+      "model": "muse-spark-1.3-minimal",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.muse-spark-1.3-low",
+      "model": "muse-spark-1.3-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.muse-spark-1.3-medium",
+      "model": "muse-spark-1.3-medium",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.muse-spark-1.3-high",
+      "model": "muse-spark-1.3-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.muse-spark-1.3-xhigh",
+      "model": "muse-spark-1.3-xhigh",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.muse-spark-1.3-max",
+      "model": "muse-spark-1.3-max",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-terra-none",
+      "model": "gpt-5.6-terra-none",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-terra-none-fast",
+      "model": "gpt-5.6-terra-none-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-terra-low",
+      "model": "gpt-5.6-terra-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-terra-low-fast",
+      "model": "gpt-5.6-terra-low-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-terra-medium",
+      "model": "gpt-5.6-terra-medium",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-terra-medium-fast",
+      "model": "gpt-5.6-terra-medium-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-terra-high",
+      "model": "gpt-5.6-terra-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-terra-high-fast",
+      "model": "gpt-5.6-terra-high-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-terra-xhigh",
+      "model": "gpt-5.6-terra-xhigh",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-terra-xhigh-fast",
+      "model": "gpt-5.6-terra-xhigh-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-terra-max",
+      "model": "gpt-5.6-terra-max",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-terra-max-fast",
+      "model": "gpt-5.6-terra-max-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-sonnet-5-5-low",
+      "model": "claude-sonnet-5-5-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-sonnet-5-5-medium",
+      "model": "claude-sonnet-5-5-medium",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-sonnet-5-5-high",
+      "model": "claude-sonnet-5-5-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-sonnet-5-5-xhigh",
+      "model": "claude-sonnet-5-5-xhigh",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-sonnet-5-5-max",
+      "model": "claude-sonnet-5-5-max",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-sonnet-5-low",
+      "model": "claude-sonnet-5-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-sonnet-5-medium",
+      "model": "claude-sonnet-5-medium",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-sonnet-5-high",
+      "model": "claude-sonnet-5-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-sonnet-5-xhigh",
+      "model": "claude-sonnet-5-xhigh",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-sonnet-5-max",
+      "model": "claude-sonnet-5-max",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-sonnet-5-thinking-low",
+      "model": "claude-sonnet-5-thinking-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-sonnet-5-thinking-medium",
+      "model": "claude-sonnet-5-thinking-medium",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-sonnet-5-thinking-max",
+      "model": "claude-sonnet-5-thinking-max",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-4.6-sonnet-medium",
+      "model": "claude-4.6-sonnet-medium",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-4.6-sonnet-medium-thinking",
+      "model": "claude-4.6-sonnet-medium-thinking",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-7-low",
+      "model": "claude-opus-4-7-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-7-low-fast",
+      "model": "claude-opus-4-7-low-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-7-medium",
+      "model": "claude-opus-4-7-medium",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-7-medium-fast",
+      "model": "claude-opus-4-7-medium-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-7-high",
+      "model": "claude-opus-4-7-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-7-high-fast",
+      "model": "claude-opus-4-7-high-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-7-xhigh",
+      "model": "claude-opus-4-7-xhigh",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-7-xhigh-fast",
+      "model": "claude-opus-4-7-xhigh-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-7-max",
+      "model": "claude-opus-4-7-max",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-7-max-fast",
+      "model": "claude-opus-4-7-max-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-7-thinking-low",
+      "model": "claude-opus-4-7-thinking-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-7-thinking-low-fast",
+      "model": "claude-opus-4-7-thinking-low-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-7-thinking-medium",
+      "model": "claude-opus-4-7-thinking-medium",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-7-thinking-medium-fast",
+      "model": "claude-opus-4-7-thinking-medium-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-7-thinking-high",
+      "model": "claude-opus-4-7-thinking-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-7-thinking-high-fast",
+      "model": "claude-opus-4-7-thinking-high-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-7-thinking-xhigh",
+      "model": "claude-opus-4-7-thinking-xhigh",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-7-thinking-xhigh-fast",
+      "model": "claude-opus-4-7-thinking-xhigh-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-7-thinking-max",
+      "model": "claude-opus-4-7-thinking-max",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-opus-4-7-thinking-max-fast",
+      "model": "claude-opus-4-7-thinking-max-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.4-low",
+      "model": "gpt-5.4-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.4-medium",
+      "model": "gpt-5.4-medium",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.4-medium-fast",
+      "model": "gpt-5.4-medium-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.4-high",
+      "model": "gpt-5.4-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.4-high-fast",
+      "model": "gpt-5.4-high-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.4-xhigh",
+      "model": "gpt-5.4-xhigh",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.4-xhigh-fast",
+      "model": "gpt-5.4-xhigh-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-4.6-opus-high",
+      "model": "claude-4.6-opus-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-4.6-opus-max",
+      "model": "claude-4.6-opus-max",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-4.6-opus-high-thinking",
+      "model": "claude-4.6-opus-high-thinking",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-4.6-opus-max-thinking",
+      "model": "claude-4.6-opus-max-thinking",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-4.5-opus-high",
+      "model": "claude-4.5-opus-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-4.5-opus-high-thinking",
+      "model": "claude-4.5-opus-high-thinking",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.2-low",
+      "model": "gpt-5.2-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.2-low-fast",
+      "model": "gpt-5.2-low-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.2-fast",
+      "model": "gpt-5.2-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.2-high",
+      "model": "gpt-5.2-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.2-high-fast",
+      "model": "gpt-5.2-high-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.2-xhigh",
+      "model": "gpt-5.2-xhigh",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.2-xhigh-fast",
+      "model": "gpt-5.2-xhigh-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-luna-none",
+      "model": "gpt-5.6-luna-none",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-luna-none-fast",
+      "model": "gpt-5.6-luna-none-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-luna-low",
+      "model": "gpt-5.6-luna-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-luna-low-fast",
+      "model": "gpt-5.6-luna-low-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-luna-medium",
+      "model": "gpt-5.6-luna-medium",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-luna-medium-fast",
+      "model": "gpt-5.6-luna-medium-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-luna-high-fast",
+      "model": "gpt-5.6-luna-high-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-luna-xhigh",
+      "model": "gpt-5.6-luna-xhigh",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-luna-xhigh-fast",
+      "model": "gpt-5.6-luna-xhigh-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-luna-max",
+      "model": "gpt-5.6-luna-max",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.6-luna-max-fast",
+      "model": "gpt-5.6-luna-max-fast",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gemini-3.6-flash-minimal",
+      "model": "gemini-3.6-flash-minimal",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gemini-3.6-flash-low",
+      "model": "gemini-3.6-flash-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gemini-3.6-flash-medium",
+      "model": "gemini-3.6-flash-medium",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gemini-3.6-flash-high",
+      "model": "gemini-3.6-flash-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gemini-3.1-pro",
+      "model": "gemini-3.1-pro",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.4-mini-none",
+      "model": "gpt-5.4-mini-none",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.4-mini-low",
+      "model": "gpt-5.4-mini-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.4-mini-medium",
+      "model": "gpt-5.4-mini-medium",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.4-mini-high",
+      "model": "gpt-5.4-mini-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.4-mini-xhigh",
+      "model": "gpt-5.4-mini-xhigh",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.4-nano-none",
+      "model": "gpt-5.4-nano-none",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.4-nano-low",
+      "model": "gpt-5.4-nano-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.4-nano-medium",
+      "model": "gpt-5.4-nano-medium",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.4-nano-high",
+      "model": "gpt-5.4-nano-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.4-nano-xhigh",
+      "model": "gpt-5.4-nano-xhigh",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-haiku-5-5-low",
+      "model": "claude-haiku-5-5-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-haiku-5-5-medium",
+      "model": "claude-haiku-5-5-medium",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-haiku-5-5-high",
+      "model": "claude-haiku-5-5-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-haiku-5-5-xhigh",
+      "model": "claude-haiku-5-5-xhigh",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-haiku-5-5-max",
+      "model": "claude-haiku-5-5-max",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-haiku-5-5-thinking-low",
+      "model": "claude-haiku-5-5-thinking-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-haiku-5-5-thinking-medium",
+      "model": "claude-haiku-5-5-thinking-medium",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-haiku-5-5-thinking-high",
+      "model": "claude-haiku-5-5-thinking-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-haiku-5-5-thinking-xhigh",
+      "model": "claude-haiku-5-5-thinking-xhigh",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-haiku-5-5-thinking-max",
+      "model": "claude-haiku-5-5-thinking-max",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-4.5-sonnet",
+      "model": "claude-4.5-sonnet",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-4.5-sonnet-thinking",
+      "model": "claude-4.5-sonnet-thinking",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.1-low",
+      "model": "gpt-5.1-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.1",
+      "model": "gpt-5.1",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5.1-high",
+      "model": "gpt-5.1-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gemini-3-flash",
+      "model": "gemini-3-flash",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gemini-3.5-flash",
+      "model": "gemini-3.5-flash",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-4-sonnet",
+      "model": "claude-4-sonnet",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.claude-4-sonnet-thinking",
+      "model": "claude-4-sonnet-thinking",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.gpt-5-mini",
+      "model": "gpt-5-mini",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.kimi-k3-low",
+      "model": "kimi-k3-low",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.kimi-k3-high",
+      "model": "kimi-k3-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.kimi-k3-max",
+      "model": "kimi-k3-max",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.kimi-k2.7-code",
+      "model": "kimi-k2.7-code",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.glm-5.2-high",
+      "model": "glm-5.2-high",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    },
+    {
+      "id": "cursor.glm-5.2-max",
+      "model": "glm-5.2-max",
+      "family": "cursor-cli",
+      "status": "discovered_not_validated",
+      "allowed_auth_modes": [
+        "oauth"
+      ],
+      "api_allowed": false,
+      "supports_text": true,
+      "supports_tools": false,
+      "supports_streaming": true,
+      "context_window": null,
+      "max_output_tokens": null,
+      "backup_eligible": false,
+      "billing_pool": "third_party",
+      "source": "official-cursor-cli models",
+      "observed_at": "2026-10-22T08:52:07.561Z"
+    }
+  ],
+  "routing_profiles": [
+    {
+      "id": "cheap_routing",
+      "preferred": [
+        "cursor.grok-4.7-low"
+      ],
+      "fallback": [
+        "cursor.composer-2.5"
+      ]
+    },
+    {
+      "id": "default_automation",
+      "preferred": [
+        "cursor.composer-2.5"
+      ],
+      "fallback": [
+        "cursor.grok-4.7-medium"
+      ]
+    },
+    {
+      "id": "planning",
+      "preferred": [
+        "cursor.grok-4.7-medium"
+      ],
+      "fallback": [
+        "cursor.composer-2.5"
+      ]
+    },
+    {
+      "id": "heavy_synthesis",
+      "preferred": [
+        "cursor.grok-4.7-high"
+      ],
+      "fallback": []
+    }
+  ]
+}
