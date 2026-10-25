@@ -67,7 +67,7 @@ async function readNativeCodexCapacity(options = {}) {
 }
 
 function snapshotFile(provider, directory) {
-  if(!["codex","claude"].includes(provider))throw new Error("Unsupported subscription provider");
+  if(!["codex","claude","antigravity"].includes(provider))throw new Error("Unsupported subscription provider");
   return path.join(directory || path.join(os.userInfo().homedir,".config/myos/dispatch/subscriptions"),`${provider}.json`);
 }
 function saveSnapshot(snapshot, directory) {

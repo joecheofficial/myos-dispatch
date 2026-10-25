@@ -1,6 +1,6 @@
-# Claude and Codex coauthoring
+# Subscription writer orchestration
 
-Claude can delegate one bounded implementation to Codex and receive a patch for independent review. This is an explicit human-interactive contract, not a general cross-provider sidecar permission.
+Claude can delegate bounded implementation work through Antigravity first for suitable tasks, then Codex Sol, with an explicit handback to the driving Claude session when subscriptions are unavailable. Each writer returns a patch for independent review. This is an explicit human-interactive contract, not a general cross-provider sidecar permission.
 
 ## Agree before writing
 
@@ -16,14 +16,14 @@ From the installed Dispatch directory (or use `myos-writer` when the package bin
 ```sh
 node bin/myos-writer.js --scope /absolute/path/to/repo \
   --paths src/example.js,test/example.test.js \
-  --provider codex --model gpt-6.1-sol --caller-provider claude \
+  --provider auto --model auto --caller-provider claude \
   --prompt "Implement the agreed change in the owned files. Run the agreed tests and report real results." \
   --json
 ```
 
-`--prompt-file /path/task.txt` replaces `--prompt`. Exactly one is required, with a maximum of 32768 bytes. Paths are literal repository-relative files or directories, comma separated; no globs, repository-wide scope, traversal, Git internals, or symlink ownership. Scope must be the repository root. Unknown and duplicate arguments fail. There is no `--apply`, arbitrary command, config, environment override, billing fallback, or model fallback option.
+`--prompt-file /path/task.txt` replaces `--prompt`. Exactly one is required, with a maximum of 32768 bytes. Paths are literal repository-relative files or directories, comma separated; no globs, repository-wide scope, traversal, Git internals, or symlink ownership. Scope must be the repository root. Unknown and duplicate arguments fail. There is no `--apply`, arbitrary command, config, environment override, billing fallback, or arbitrary fallback option.
 
-`--timeout-ms` accepts an integer from 1 to 1800000 milliseconds. The default is 900000 (15 minutes); use `--timeout-ms 1800000` for a 30-minute bound. This CLI declares `taskClass: "heavy_synthesis"` while preserving the exact requested model. The timeout bounds provider execution; process cleanup can take up to four additional seconds, followed by artifact collection.
+`--timeout-ms` accepts an integer from 1 to 1800000 milliseconds. The default is 900000 (15 minutes); use `--timeout-ms 1800000` for a 30-minute bound. Automatic routing defaults to `taskClass: "default_automation"`. Explicit provider pins retain the existing `heavy_synthesis` default; `--task-class` may select a supported class. Exact provider/model pins stay exact. The timeout bounds provider execution; process cleanup can take up to four additional seconds, followed by artifact collection.
 
 The CLI supplies this runner contract alongside the task's ownership paths:
 
@@ -38,7 +38,7 @@ The CLI supplies this runner contract alongside the task's ownership paths:
 
 For an embedding, pass the object as `options.delegation`, also declare `options.callerProvider`, and request `task.mode: "workspace_write"`. Use `runBackgroundTasks` with an orchestrator context so quarantine and backpressure apply. Every caller must now declare its provider, including ordinary same-provider read-only calls. Omitting the caller cannot bypass affinity. The declaration is a trusted orchestrator assertion, not authentication or proof of a human's identity.
 
-Embedding caller declarations accept the recognized names `codex`, `claude`, and `gemini`, executable paths, and the aliases `claude-code`, `claude_code`, `gemini-cli`, and `gemini_cli` (including `.exe`, `.cmd`, or `.bat` suffixes). Missing or unknown names fail closed. The dispatcher can take a caller from an explicit `callerProvider`, `workerCommand`, or worker `request.fallback.command`; `backgroundWorkerCommand` never establishes the root caller. The public delegation CLI still requires `--caller-provider claude` and `--provider codex`.
+Embedding caller declarations accept the recognized names `codex`, `claude`, and `gemini`, executable paths, and the aliases `claude-code`, `claude_code`, `gemini-cli`, and `gemini_cli` (including `.exe`, `.cmd`, or `.bat` suffixes). Missing or unknown names fail closed. The dispatcher can take a caller from an explicit `callerProvider`, `workerCommand`, or worker `request.fallback.command`; `backgroundWorkerCommand` never establishes the root caller. The public delegation CLI requires `--caller-provider claude`; `--provider auto --model auto` selects the bounded subscription plan. Explicit `codex` or `antigravity` provider/model pairs remain supported.
 
 Cross-provider research, general sidecars, bot/unattended contexts, protected surfaces, nested workers, and caller/worker mismatches are refused. Existing global/writable disable switches, OAuth environment scrubbing, quarantine, disk/load checks, and concurrency limits remain active. If your environment disables background agents, the command fails; it does not override that policy or install a scheduler.
 
@@ -91,3 +91,28 @@ worktrees and partial patches remain preserved for independent review, never aut
 The preflight is a point-in-time check: usage by an in-flight/concurrent call can cross the
 allowance after admission. This does not change the account's credit settings or disable its
 provider-side credit balance. See [subscription capacity](subscription-capacity.md).
+
+## Antigravity-first selection and spending protection
+
+Automatic `cheap_routing` uses Gemini 3.8 Flash Low for small bounded edits; `default_automation`
+uses Gemini 4 Argon Medium for normal bounded implementation. Heavy synthesis, planning, elite
+work and paths identifying auth/security/credentials/payments/migrations/deployment/infrastructure
+go directly to Codex 6.1 Sol. The parent must classify risk honestly and independently review quality;
+a passing fixture does not prove that Antigravity matches Sol on arbitrary projects.
+
+The policy is `config/subscription-writer-policy.json`. No classifier model or new parallel fanout
+is used. Native deterministic tools/recipes remain first. Local Qwen is not added to this writer chain.
+
+Every managed Antigravity task checks native zero-turn `/settings` and `/usage` metadata at the
+shared runner boundary. `useG1Credits` must be false and the selected model's quota pool/reset
+must be fresh and eligible. Unknown or enabled overages refuse Antigravity inference. No API keys
+are inherited by its child. Antigravity runs with native `--sandbox`, the isolated worktree as
+`--add-dir`, and the existing owned-process-group cleanup. This does not establish full filesystem
+or detached-process containment; ownership violations and unverified cleanup stop the chain.
+
+Safe Antigravity failures or a low-confidence report may try Sol in a separate fresh worktree.
+Partial and low-confidence patches remain retained, never automatically applied or used as the
+next attempt's base. Sol still obeys the model ceiling, Standard speed default and included-quota
+preflight. Its exhaustion returns the existing active-Claude-session continuation. `subscriptionRoute`
+records each attempt and its retained artifact location. Account credit settings are never changed
+to enable spending. Provider overages and API fallback are not eligible alternatives.

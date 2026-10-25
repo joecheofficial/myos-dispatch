@@ -73,6 +73,7 @@ const SAFE_SIDECAR_ENV_KEYS = new Set([
 
 function normalizeWorkerKind(command = "") {
   const base = path.basename(String(command || "codex").trim()).toLowerCase();
+  if (base === "agy" || base === "antigravity") return "antigravity";
   if (base === "claude" || base === "claude-code" || base === "claude_code") return "claude";
   if (base === "gemini" || base === "gemini-cli" || base === "gemini_cli") return "gemini";
   return "codex";
@@ -84,6 +85,7 @@ function normalizeCallerProvider(command) {
   if (!value || /[\\/]$/.test(value)) return null;
   const base = value.split(/[\\/]/).pop().toLowerCase().replace(/\.(?:exe|cmd|bat)$/, "");
   if (base === "codex") return "codex";
+  if (["agy", "antigravity"].includes(base)) return "antigravity";
   if (["claude", "claude-code", "claude_code"].includes(base)) return "claude";
   if (["gemini", "gemini-cli", "gemini_cli"].includes(base)) return "gemini";
   return null;
@@ -205,12 +207,12 @@ function resolveProviderCapabilities(kind, options = {}) {
   // the caller's human OAuth lane without needing an explicit enable flag.
   const callerKind = normalizeCallerProvider(options.callerProvider);
   const sameProviderAsCaller = callerKind != null && callerKind === kind;
-  if (kind === "codex") {
+  if (kind === "codex" || kind === "antigravity") {
     return {
       supportsReadOnly: true,
       supportsStructuredJson: true,
       supportsHumanOauth: true,
-      supportsWritablePatchWorktree: true,
+      supportsWritablePatchWorktree: kind === "codex" || !["0","false"].includes(String(env.MYOS_BACKGROUND_ANTIGRAVITY_WRITABLE || env.MYOS_BACKGROUND_GEMINI_WRITABLE).toLowerCase()),
     };
   }
   if (kind === "claude") {
@@ -241,7 +243,7 @@ function assertProviderAffinity(kind, options = {}, task = {}) {
       options.protectedSurface === true || task.protectedSurface === true ||
       ["bot", "unattended", "scheduler", "cron", "sidecar"].includes(String(env.MYOS_INITIATOR || "").toLowerCase()) ||
       ["allsorted", "goldenclaw"].includes(String(task.projectSlug || options.projectSlug || "").toLowerCase());
-    if (caller !== "claude" || kind !== "codex" ||
+    if (caller !== "claude" || !["codex","antigravity"].includes(kind) ||
         delegation.callerProvider !== caller || delegation.workerProvider !== kind ||
         delegation.purpose !== "code-write" || delegation.context !== "human-interactive" ||
         task.effectiveMode !== EXECUTION_MODES.WRITE || protectedContext ||
@@ -274,6 +276,7 @@ function assertOauthOnlyWorker(kind, options = {}) {
 
 function resolveBackgroundModel({ provider, profile, command }) {
   const kind = normalizeWorkerKind(command);
+  if (kind === "antigravity") return "gemini-4-argon-medium";
   if (kind === "claude") return process.env.MYOS_BACKGROUND_CLAUDE_MODEL || "haiku";
   if (kind === "gemini") return process.env.MYOS_BACKGROUND_GEMINI_MODEL || null;
 
@@ -400,6 +403,14 @@ function buildBackgroundWorkerInvocation(task = {}, options = {}) {
     ];
     if (model) args.push("--model", model);
     return { kind, command, args, cwd, input: "", model: model || null, readOnly };
+  }
+
+  if(kind === "antigravity") {
+    const args=["-p",prompt,"--output-format","json","--add-dir",cwd,
+      "--print-timeout",`${Math.max(1,Math.round(Number(task.timeoutMs || DEFAULT_TIMEOUT_MS)/1000))}s`,"--sandbox"];
+    if(!readOnly)args.push("--dangerously-skip-permissions");
+    if(model)args.push("--model",model);
+    return {kind,command,args,cwd,input:"",model,readOnly};
   }
 
   if (kind === "gemini") {
@@ -696,6 +707,14 @@ function parseStructuredFindings(summary = "") {
 function validateWriterResponse(result, kind) {
   if (!result || result.code !== 0 || result.signal) return { error: "provider_failed" };
   try {
+    if(kind === "antigravity") {
+      const envelope=JSON.parse(String(result.stdout || ""));
+      if(envelope.status!=="SUCCESS")return {error:"antigravity_response_failed"};
+      const text=extractBackgroundSummary(result.stdout,kind);
+      const report=parseStructuredFindings(text);
+      if(!report || !["low","medium","high"].includes(report.confidence))return {error:"malformed_writer_report"};
+      return {report,reportedModels:typeof envelope.model==="string" ? [envelope.model] : []};
+    }
     const events = String(result.stdout || "").trim().split(/\r?\n/).filter(Boolean).map(JSON.parse);
     if (kind !== "codex" || !events.some((event) => event?.type === "turn.completed") ||
         events.some((event) => !event || typeof event.type !== "string" || ["error", "turn.failed"].includes(event.type))) {
@@ -1070,6 +1089,11 @@ async function runBackgroundTask(task, options = {}) {
   try {
     for (let attempt = 0; attempt < 2; attempt++) {
     try {
+      if(invocation.kind==="antigravity") {
+        const agy=require("../runtime/antigravity-capacity");
+        const snapshot=await (options.readAntigravityCapacity || agy.refreshAntigravityCapacity)();
+        if(!agy.eligibleAntigravityCapacity(snapshot,invocation.model))throw new Error("Antigravity quota unavailable/exhausted or paid overages not verified off");
+      }
       result = await runCommandImpl({
         command: invocation.command,
         args: invocation.args,
@@ -1128,6 +1152,9 @@ async function runBackgroundTask(task, options = {}) {
   const summary = extractBackgroundSummary(result.stdout, invocation.kind);
   const structured = parseStructuredFindings(summary);
   let ok = result.code === 0 && !result.signal && !result.cleanupFailed && !writerResponse?.error;
+  if(invocation.kind==="antigravity") {
+    try {if(JSON.parse(result.stdout).status!=="SUCCESS")ok=false;} catch {ok=false;}
+  }
   if (oauthRecovery) {
     const providerError = String(result.stdout || "").split(/\r?\n/).some(line => {
       try {
