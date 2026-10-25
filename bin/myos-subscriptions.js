@@ -6,7 +6,8 @@ async function main(argv=process.argv.slice(2)) {
   const [command="status",...args]=argv;
   if(command==="status" && !args.length) {
     const codex=await refreshCodexCapacity();
-    console.log(JSON.stringify({timezone:"Asia/Singapore",codex,claude:readSnapshot("claude")},null,2));
+    const antigravity=await require("../src/runtime/antigravity-capacity").refreshAntigravityCapacity();
+    console.log(JSON.stringify({timezone:"Asia/Singapore",antigravity,codex,claude:readSnapshot("claude")},null,2));
   } else if(command==="record-claude-reset" && args.length===2 && args[0]==="--at") {
     console.log(JSON.stringify(recordClaudeReset(args[1]),null,2));
   } else throw new Error("Usage: myos-subscriptions status | record-claude-reset --at ISO_TIMESTAMP_WITH_TIMEZONE");

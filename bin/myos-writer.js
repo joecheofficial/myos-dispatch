@@ -11,7 +11,8 @@ const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
 const MAX_TIMEOUT_MS = 30 * 60 * 1000;
 
 const HELP = `Usage: myos-writer --scope /repo --paths src/a.js,test/a.test.js
-  --provider codex --model gpt-6.1-sol --caller-provider claude
+  --provider auto --model auto --caller-provider claude
+  [--task-class cheap_routing|default_automation|heavy_synthesis|planning|task_class_is_elite]
   (--prompt "bounded implementation task" | --prompt-file /path/task.txt)
   [--timeout-ms 900000] [--json]
 One human-interactive delegation. Returns a retained patch for independent review.
@@ -29,7 +30,7 @@ function validateTimeoutMs(value = DEFAULT_TIMEOUT_MS) {
 
 function parseArgs(argv) {
   const values = {};
-  const names = new Set(["scope", "paths", "provider", "model", "caller-provider", "prompt", "prompt-file", "timeout-ms"]);
+  const names = new Set(["scope", "paths", "provider", "model", "caller-provider", "prompt", "prompt-file", "timeout-ms", "task-class"]);
   for (let i = 0; i < argv.length; i += 1) {
     const key = argv[i].replace(/^--/, "");
     if (argv[i] !== `--${key}` || Object.hasOwn(values, key)) throw new Error(`Invalid or duplicate argument: ${argv[i]}`);
@@ -41,7 +42,10 @@ function parseArgs(argv) {
   for (const key of ["scope", "paths", "provider", "model", "caller-provider"]) {
     if (!values[key]) throw new Error(`--${key} is required`);
   }
-  if (values.provider !== "codex" || values["caller-provider"] !== "claude") throw new Error("Only explicit Claude to Codex delegation is supported");
+  if (!["codex","antigravity","auto"].includes(values.provider) || values["caller-provider"] !== "claude") throw new Error("Only explicit human Claude subscription writer delegation is supported");
+  if(values.provider==="auto" && values.model!=="auto")throw new Error("Automatic subscription routing requires --model auto; exact provider/model pins remain explicit");
+  const taskClass=values["task-class"] || (values.provider==="auto" ? "default_automation" : "heavy_synthesis");
+  if(!["cheap_routing","default_automation","heavy_synthesis","planning","task_class_is_elite"].includes(taskClass))throw new Error("Unsupported writer task class");
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/.test(values.model)) throw new Error("Invalid exact model identifier");
   if (Boolean(values.prompt) === Boolean(values["prompt-file"])) throw new Error("Provide exactly one of --prompt or --prompt-file");
   let prompt = values.prompt;
@@ -58,15 +62,19 @@ function parseArgs(argv) {
   if (!prompt.trim() || Buffer.byteLength(prompt) > MAX_PROMPT_BYTES || prompt.includes("\0")) throw new Error("Prompt must contain 1 to 32768 bytes of text");
   const ownershipPaths = values.paths.split(",").map((entry) => entry.trim());
   if (ownershipPaths.some((entry) => !entry || path.isAbsolute(entry))) throw new Error("--paths requires nonempty repository-relative ownership paths");
-  return { ...values, prompt, ownershipPaths, timeoutMs: validateTimeoutMs(values["timeout-ms"]) };
+  return { ...values, prompt, ownershipPaths, taskClass, timeoutMs: validateTimeoutMs(values["timeout-ms"]) };
 }
 
 async function runWriter(options, runtime = {}) {
+  if(options.provider==="auto") {
+    if(options.model!=="auto" || options["caller-provider"]!=="claude")return {status:"failed",reviewRequired:true,summary:"Automatic route requires explicit Claude caller and --model auto"};
+    return require("../src/policy/subscription-writer-policy").runSubscriptionWriter(options,runtime,runWriter);
+  }
   let result;
   let artifactRoot;
   try {
     const timeoutMs = validateTimeoutMs(options.timeoutMs);
-    if (options.provider !== "codex" || options["caller-provider"] !== "claude" ||
+    if (!["codex","antigravity"].includes(options.provider) || options["caller-provider"] !== "claude" ||
         !options.model || !options.prompt || Buffer.byteLength(options.prompt) > MAX_PROMPT_BYTES) {
       throw new Error("Explicit bounded Claude to Codex writer arguments are required");
     }
@@ -76,7 +84,7 @@ async function runWriter(options, runtime = {}) {
     const ownershipPaths = validateOwnershipPaths(repoRoot, options.ownershipPaths);
     const id = `writer-${crypto.randomUUID()}`;
     // Runtime injection is for embedding/tests; the CLI exposes no command or env overrides.
-    const task = { id, kind: "implement", role: "implement", taskClass: "heavy_synthesis", required: true,
+    const task = { id, kind: "implement", role: "implement", taskClass: options.taskClass || "heavy_synthesis", required: true,
       mode: "workspace_write", model: options.model, scope: repoRoot, timeoutMs,
       ownershipPaths, writeScope: ownershipPaths, prompt: options.prompt,
       executionEnvelope: { filesystemProfile: "isolated_git_worktree", networkPolicy: "disabled", goalMutationAllowed: false } };
@@ -85,7 +93,7 @@ async function runWriter(options, runtime = {}) {
     const runNative=runtime.runCommand || require("../src/background/background-agent-runner").runCommand;
     const guardedRun=async invocation=>{
       // Injected test transports do not read or write the real account's capacity.
-      if(runtime.readCapacity || !runtime.runCommand) {
+      if(options.provider==="codex" && (runtime.readCapacity || !runtime.runCommand)) {
         let snapshot;
         try {snapshot=await (runtime.readCapacity || capacity.refreshCodexCapacity)();} catch {snapshot={status:"unknown",windows:[]};}
         if(snapshot.status!=="available") {
@@ -95,17 +103,17 @@ async function runWriter(options, runtime = {}) {
       }
       try {
         const native=await runNative(invocation);
-        quotaFailure=capacity.nativeQuotaFailure(native);
+        quotaFailure=options.provider==="codex" && capacity.nativeQuotaFailure(native);
         return native;
       } catch(error) {
-        quotaFailure=capacity.nativeQuotaFailure({code:1,stderr:error.message,signal:error.signal,cleanupFailed:error.cleanupFailed});
+        quotaFailure=options.provider==="codex" && capacity.nativeQuotaFailure({code:1,stderr:error.message,signal:error.signal,cleanupFailed:error.cleanupFailed});
         throw error;
       }
     };
     const results = await runBackgroundTasks({ mode: "workspace_write", budget: { maxAgents: 1 }, backgroundTasks: [task] }, {
-      enabled: true, command: "codex", callerProvider: "claude",
-      delegation: { callerProvider: "claude", workerProvider: "codex", purpose: "code-write", context: "human-interactive" },
-      env: runtime.env || process.env, runCommand: guardedRun,
+      enabled: true, command: options.provider==="antigravity" ? "agy" : "codex", callerProvider: "claude",
+      delegation: { callerProvider: "claude", workerProvider: options.provider, purpose: "code-write", context: "human-interactive" },
+      env: runtime.env || process.env, runCommand: guardedRun, readAntigravityCapacity: runtime.readAntigravityCapacity,
       artifactRoot: runtime.artifactRoot, stateFile: runtime.stateFile,
     });
     result = results[0] || { status: "failed", summary: "Writer returned no result" };
@@ -117,7 +125,7 @@ async function runWriter(options, runtime = {}) {
     }
     result.reviewRequired = true;
     result.callerProvider = "claude";
-    result.workerProvider = "codex";
+    result.workerProvider = options.provider;
     result.purpose = "code-write";
     result.context = "human-interactive";
     result.requestedModel = options.model;
