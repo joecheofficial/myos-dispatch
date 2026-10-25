@@ -25,8 +25,27 @@ It does not change a user's manually selected model in an interactive Codex chat
 
 Speed is independent of model. `standard` pins `service_tier="default"`, `features.fast_mode=false`
 and `features.ultrafast_mode=false` in worker arguments so global config and resumed sessions
-cannot silently supply Fast. An explicit operator `--speed fast` opts workers into Fast;
-Ultrafast is never enabled by this policy. It does not change Claude or other providers' billing settings.
+cannot silently supply either faster mode. Only after Joe specifically asks, the operator may
+select `--speed fast` or `--speed ultrafast`. Ultrafast pins `service_tier="ultrafast"`,
+`features.ultrafast_mode=true` and `features.fast_mode=false`; Fast does the inverse.
+The selected speed never raises the model ceiling or permits API fallback. Worker model,
+prompt and environment arguments cannot change the saved speed preference.
+
+```sh
+# Run only after Joe explicitly asks for the named speed:
+node bin/myos-codex-policy.js set --speed fast
+node bin/myos-codex-policy.js set --speed ultrafast
+# Restore Standard when the authorized work is finished:
+node bin/myos-codex-policy.js set --speed standard
+```
+
+Adding support for an override is not authorization to turn it on. Keep the tracked default
+and current operator preference at Standard unless Joe explicitly requests a faster mode.
+Availability still depends on the account and model. Unsupported requests must fail visibly,
+without paid API fallback or an automatic switch to Astra. This does not change Claude or
+other providers' billing settings. Native settings reference:
+https://learn.chatgpt.com/docs/config-file/config-reference and
+https://learn.chatgpt.com/docs/agent-configuration/speed.
 
 Coverage: OAuth text calls, read-only and writable background sidecars including the Claude writer
 bridge, and routed new/resumed Codex workers. Existing authentication, executable approval,
