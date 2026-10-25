@@ -13,7 +13,7 @@ function parseIdentity(model) {
 
 function validatePolicy(value) {
   if (!value || Array.isArray(value) || value.version !== 1 || !parseIdentity(value.ceilingModel) ||
-      !["standard", "fast"].includes(value.speed) ||
+      !["standard", "fast", "ultrafast"].includes(value.speed) ||
       Object.keys(value).some(key => !["version", "ceilingModel", "speed"].includes(key))) {
     throw new Error("Invalid Codex execution policy; refusing worker launch");
   }
@@ -62,10 +62,11 @@ function settingsForPolicy(value, model, effort = "medium") {
     throw new Error("Unsupported Codex worker reasoning effort");
   }
   const fast = policy.speed === "fast";
+  const ultrafast = policy.speed === "ultrafast";
   return Object.freeze({model, effort, ceilingModel:policy.ceilingModel, speed:policy.speed,
     args:["-c", 'forced_login_method="chatgpt"', "-c", 'model_provider="openai"',
-      "-c", `service_tier="${fast ? "fast" : "default"}"`,
-      "-c", `features.fast_mode=${fast}`, "-c", "features.ultrafast_mode=false",
+      "-c", `service_tier="${ultrafast ? "ultrafast" : fast ? "fast" : "default"}"`,
+      "-c", `features.fast_mode=${fast}`, "-c", `features.ultrafast_mode=${ultrafast}`,
       "-c", `model_reasoning_effort="${effort}"`],
   });
 }

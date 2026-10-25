@@ -11,7 +11,7 @@ function main(argv=process.argv.slice(2)) {
     console.log(JSON.stringify({file:policyFile(),policy:readCodexExecutionPolicy()},null,2));
     return;
   }
-  if(command!=="set" || !args.length || args.length%2) throw new Error("Usage: myos-codex-policy show | set [--ceiling MODEL] [--speed standard|fast]");
+  if(command!=="set" || !args.length || args.length%2) throw new Error("Usage: myos-codex-policy show | set [--ceiling MODEL] [--speed standard|fast|ultrafast]");
   const policy={...readCodexExecutionPolicy()};
   const seen=new Set();
   for(let i=0;i<args.length;i+=2) {
