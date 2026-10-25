@@ -90,8 +90,10 @@ test("writer CLI preserves policy gates and failures without starting a provider
     const result = await require(cli).runWriter(writerOptions(repo), {
       artifactRoot: root, stateFile: path.join(root, "state.json"),
       env: { ...env, MYOS_BACKGROUND_BACKPRESSURE_ENABLED: "0", MYOS_BACKGROUND_MIN_FREE_DISK_GIB: "0" },
+      readCapacity: async () => ({status:"exhausted",windows:[]}),
       runCommand: async () => { invoked = true; return { code: 0, stdout: output() }; },
     });
+    assert.equal(result.continuation, undefined);
     assert.equal(invoked, false, JSON.stringify(env));
     assert.equal(result.status, "failed");
     assert.equal(result.reviewRequired, true);
@@ -116,6 +118,7 @@ test("writer manifest retains partial output after a provider exception", async 
   assert.equal(result.status, "failed");
   assert.equal(fs.existsSync(result.patchArtifact), true);
   assert.equal(JSON.parse(fs.readFileSync(result.manifestArtifact)).status, "failed");
+  assert.equal(result.continuation?.reason, "codex_quota_error");
   assert.equal(fs.existsSync(path.join(result.worktreePath, "new.bin")), true);
   assert.equal(git(["status", "--porcelain"], repo), "");
 });
@@ -285,3 +288,48 @@ test(`detached ${detachedKind} can outlive owned-group cleanup without changing 
   }
 });
 }
+
+test("Claude delegation returns exhausted included quota to its active caller without starting Codex",async()=>{
+ const repo=repoFixture(),root=fs.mkdtempSync(path.join(os.tmpdir(),"myos-claude-handback-"));let calls=0;
+ const result=await require(cli).runWriter(writerOptions(repo),{
+  artifactRoot:root,stateFile:path.join(root,"state.json"),
+  env:{MYOS_BACKGROUND_BACKPRESSURE_ENABLED:"0",MYOS_BACKGROUND_MIN_FREE_DISK_GIB:"0"},
+  readCapacity:async()=>({status:"exhausted",provider:"codex",windows:[{resetsAt:"2026-10-31T01:42:46+08:00",usedPercent:100}]}),
+  runCommand:async()=>{calls++;return {code:0,stdout:output()};},
+ });
+ assert.equal(calls,0);
+ assert.equal(result.status,"failed");
+ assert.equal(result.continuation?.provider,"claude");
+ assert.equal(result.continuation?.execution,"active-session");
+ assert.equal(result.continuation?.billingMode,"subscription");
+ assert.equal(result.continuation?.reason,"codex_included_allowance_exhausted");
+ assert.equal(git(["status","--porcelain"],repo),"");
+});
+
+test("unknown quota hands back, while a fresh available allowance delegates exactly once",async()=>{
+ for(const status of ["unknown","available"]) {
+  const repo=repoFixture(),root=fs.mkdtempSync(path.join(os.tmpdir(),"myos-capacity-admission-"));let calls=0;
+  const result=await require(cli).runWriter(writerOptions(repo),{
+   artifactRoot:root,stateFile:path.join(root,"state.json"),env:{MYOS_BACKGROUND_BACKPRESSURE_ENABLED:"0",MYOS_BACKGROUND_MIN_FREE_DISK_GIB:"0"},
+   readCapacity:async()=>({status,windows:[]}),runCommand:async({cwd})=>{calls++;fs.writeFileSync(path.join(cwd,"owned.txt"),"changed\n");return {code:0,stdout:output()};},
+  });
+  assert.equal(calls,status==="available" ? 1 : 0);
+  if(status==="unknown") assert.equal(result.continuation?.reason,"codex_capacity_unverified");
+  else {assert.equal(result.status,"needs-review");assert.equal(result.continuation,undefined);}
+ }
+});
+
+test("native quota stderr is honored despite partial output, but ownership and cleanup failures never grant handback",async()=>{
+ for(const failure of ["quota","ownership","cleanup"]) {
+  const repo=repoFixture(),root=fs.mkdtempSync(path.join(os.tmpdir(),"myos-native-quota-"));
+  const result=await require(cli).runWriter(writerOptions(repo),{
+   artifactRoot:root,stateFile:path.join(root,"state.json"),env:{MYOS_BACKGROUND_BACKPRESSURE_ENABLED:"0",MYOS_BACKGROUND_MIN_FREE_DISK_GIB:"0"},
+   runCommand:async({cwd})=>{
+    fs.writeFileSync(path.join(cwd,failure==="ownership" ? "unowned.txt" : "owned.txt"),"partial\n");
+    return {code:1,stdout:output(),stderr:"usage limit exceeded",cleanupFailed:failure==="cleanup"};
+   },
+  });
+  if(failure==="quota")assert.equal(result.continuation?.reason,"codex_quota_error");
+  else assert.equal(result.continuation,undefined,failure);
+ }
+});

@@ -80,14 +80,41 @@ async function runWriter(options, runtime = {}) {
       mode: "workspace_write", model: options.model, scope: repoRoot, timeoutMs,
       ownershipPaths, writeScope: ownershipPaths, prompt: options.prompt,
       executionEnvelope: { filesystemProfile: "isolated_git_worktree", networkPolicy: "disabled", goalMutationAllowed: false } };
+    let capacityHandoff=null, quotaFailure=false;
+    const capacity=require("../src/runtime/subscription-capacity");
+    const runNative=runtime.runCommand || require("../src/background/background-agent-runner").runCommand;
+    const guardedRun=async invocation=>{
+      // Injected test transports do not read or write the real account's capacity.
+      if(runtime.readCapacity || !runtime.runCommand) {
+        let snapshot;
+        try {snapshot=await (runtime.readCapacity || capacity.refreshCodexCapacity)();} catch {snapshot={status:"unknown",windows:[]};}
+        if(snapshot.status!=="available") {
+          capacityHandoff=capacity.claudeContinuation(snapshot.status==="exhausted" ? "codex_included_allowance_exhausted" : "codex_capacity_unverified",snapshot);
+          throw new Error(snapshot.status==="exhausted" ? "Codex included allowance exhausted; continue in the active Claude session" : "Codex capacity unavailable; continue in the active Claude session");
+        }
+      }
+      try {
+        const native=await runNative(invocation);
+        quotaFailure=capacity.nativeQuotaFailure(native);
+        return native;
+      } catch(error) {
+        quotaFailure=capacity.nativeQuotaFailure({code:1,stderr:error.message,signal:error.signal,cleanupFailed:error.cleanupFailed});
+        throw error;
+      }
+    };
     const results = await runBackgroundTasks({ mode: "workspace_write", budget: { maxAgents: 1 }, backgroundTasks: [task] }, {
       enabled: true, command: "codex", callerProvider: "claude",
       delegation: { callerProvider: "claude", workerProvider: "codex", purpose: "code-write", context: "human-interactive" },
-      env: runtime.env || process.env, runCommand: runtime.runCommand,
+      env: runtime.env || process.env, runCommand: guardedRun,
       artifactRoot: runtime.artifactRoot, stateFile: runtime.stateFile,
     });
     result = results[0] || { status: "failed", summary: "Writer returned no result" };
     if (result.status !== "needs-review") result.status = "failed";
+    const safetyIntact=!result.cleanupFailed && !result.ownershipViolations?.length &&
+      ["no_changes","patch_reverse_check_passed"].includes(result.verificationResult);
+    if(result.status==="failed" && safetyIntact && (capacityHandoff || quotaFailure)) {
+      result.continuation=capacityHandoff || capacity.claudeContinuation("codex_quota_error");
+    }
     result.reviewRequired = true;
     result.callerProvider = "claude";
     result.workerProvider = "codex";
