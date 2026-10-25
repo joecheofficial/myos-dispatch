@@ -1,4 +1,5 @@
 "use strict";
+const {modelWithinCeiling,readCodexExecutionPolicy}=require("./codex-execution-policy");
 // Capability preferences, not claims about API prices or measured account cost.
 const CLASS_POLICY=Object.freeze({
   cheap_routing:{families:["luna","terra","sol"],effort:"low"},
@@ -10,6 +11,7 @@ const CLASS_POLICY=Object.freeze({
 const EFFORTS=["low","medium","high","xhigh","max","ultra"];
 
 function selectCodexModel(state,{taskClass,model,effort,now=Date.now()}) {
+  const executionPolicy=readCodexExecutionPolicy();
   const policy=CLASS_POLICY[taskClass];
   if (!policy || !Array.isArray(state?.models)) throw new Error("unattended_codex requires a supported text task class and valid Codex inventory");
   if (effort!=null && !EFFORTS.includes(effort)) throw new Error("unattended_codex reasoning effort is unsupported");
@@ -22,7 +24,7 @@ function selectCodexModel(state,{taskClass,model,effort,now=Date.now()}) {
     seen.add(record.model);
     const observed=Date.parse(record.observedAt);
     const quarantine=record.quarantineUntil==null ? 0 : Date.parse(record.quarantineUntil);
-    return record.visible===true && record.auth==="subscription" && Number.isFinite(observed) &&
+    return modelWithinCeiling(record.model,executionPolicy) && record.visible===true && record.auth==="subscription" && Number.isFinite(observed) &&
       observed<=now && now-observed<=7*86400000 && Number.isFinite(quarantine) && quarantine<=now &&
       Array.isArray(record.efforts);
   });

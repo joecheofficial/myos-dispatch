@@ -362,14 +362,14 @@ test("background runner builds read-only Codex invocation and scrubs API-key env
   };
   const codex = buildBackgroundWorkerInvocation({
     ...task,
-    model: "gpt-5.5",
+    model: "gpt-6.1-sol",
   }, { command: "codex", callerProvider: "codex", provider: "openai", cwd: "/tmp" });
 
   assert.deepEqual(codex.args.slice(0, 4), ["exec", "-c", 'approval_policy="never"', "--json"]);
   assert.ok(codex.args.includes("--ephemeral"));
   assert.equal(codex.args.includes("--ignore-user-config"), false);
   assert.ok(codex.args.includes("read-only"));
-  assert.equal(codex.model, "gpt-5.5");
+  assert.equal(codex.model, "gpt-6.1-sol");
 
   const prompt = buildReadOnlyPrompt(task);
   assert.match(prompt, /OAuth\/auth lane work is human-driven/);

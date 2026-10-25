@@ -16,7 +16,7 @@ From the installed Dispatch directory (or use `myos-writer` when the package bin
 ```sh
 node bin/myos-writer.js --scope /absolute/path/to/repo \
   --paths src/example.js,test/example.test.js \
-  --provider codex --model gpt-6-astra --caller-provider claude \
+  --provider codex --model gpt-6.1-sol --caller-provider claude \
   --prompt "Implement the agreed change in the owned files. Run the agreed tests and report real results." \
   --json
 ```
@@ -69,3 +69,5 @@ Codex loads host configuration and hooks and uses its existing ChatGPT OAuth con
 4. Record the verifier identity, exact SHA256, base SHA, approved paths, commands, and observed outcomes. A writer's statement that it reviewed itself is not this record.
 5. The parent orchestrator alone may integrate after confirming the target HEAD still equals `baseSha`, the target and ownership paths are clean, all changed paths are owned, the recorded hash still matches, and no conflicting writer is active. Run `git apply --check` before applying the reviewed patch. If HEAD or content changed, prepare and independently review a new patch against the new base.
 6. Verify the integrated behavior before committing or publishing under the project's normal process. Retire retained work only after the parent confirms integration or explicit preservation. This CLI implements none of these application or cleanup steps.
+
+Codex delegation obeys the pinned model ceiling and speed in [execution policy](codex-execution-policy.md). An agent-selected `--model` does not authorize raising the ceiling.

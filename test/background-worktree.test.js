@@ -190,13 +190,13 @@ test("runner exceptions are converted to failed results and retain worktrees for
 test("explicit interactive Claude to Codex delegation preserves the exact model", () => {
   const { buildBackgroundWorkerInvocation } = require("../src/background/background-agent-runner");
   const invocation = buildBackgroundWorkerInvocation({
-    mode: "workspace_write", effectiveMode: "workspace_write", model: "gpt-6-astra",
+    mode: "workspace_write", effectiveMode: "workspace_write", model: "gpt-6.1-sol",
     ownershipPaths: ["src/example.js"],
   }, {
     command: "codex", callerProvider: "claude", env: {},
     delegation: { callerProvider: "claude", workerProvider: "codex", purpose: "code-write", context: "human-interactive" },
   });
-  assert.equal(invocation.model, "gpt-6-astra");
+  assert.equal(invocation.model, "gpt-6.1-sol");
   assert.equal(invocation.args.includes("--ignore-user-config"), false);
 });
 
@@ -310,7 +310,7 @@ test("unreviewed orphan folders are never deleted based on age", () => {
 
 test("explicit delegation cannot widen default provider, context, or ownership gates", () => {
   const { buildBackgroundWorkerInvocation, resolveProviderCapabilities } = require("../src/background/background-agent-runner");
-  const task = { effectiveMode: "workspace_write", model: "gpt-6-astra", ownershipPaths: ["owned.txt"] };
+  const task = { effectiveMode: "workspace_write", model: "gpt-6.1-sol", ownershipPaths: ["owned.txt"] };
   const options = { command: "codex", callerProvider: "claude", env: {}, delegation: { callerProvider: "claude", workerProvider: "codex", purpose: "code-write", context: "human-interactive" } };
   for (const override of [
     { delegation: undefined }, { callerProvider: undefined }, { callerProvider: "codex" },
@@ -382,7 +382,7 @@ test("writer handback appears in the parent digest without claiming review compl
 
 test("human Codex invocation pins OAuth and sandbox policy while loading host hooks", () => {
   const { buildBackgroundWorkerInvocation } = require("../src/background/background-agent-runner");
-  const invocation = buildBackgroundWorkerInvocation({ effectiveMode: "workspace_write", ownershipPaths: ["owned.txt"], model: "gpt-6-astra" }, { command: "codex", callerProvider: "codex", env: {} });
+  const invocation = buildBackgroundWorkerInvocation({ effectiveMode: "workspace_write", ownershipPaths: ["owned.txt"], model: "gpt-6.1-sol" }, { command: "codex", callerProvider: "codex", env: {} });
   assert.ok(invocation.args.includes('forced_login_method="chatgpt"'));
   assert.ok(invocation.args.includes('model_provider="openai"'));
   assert.ok(invocation.args.includes("sandbox_workspace_write.network_access=false"));

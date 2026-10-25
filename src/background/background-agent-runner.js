@@ -1,4 +1,5 @@
 "use strict";
+const {codexExecutionSettings}=require("../policy/codex-execution-policy");
 
 const fs = require("node:fs");
 const os = require("node:os");
@@ -287,7 +288,7 @@ function resolveBackgroundModel({ provider, profile, command }) {
   }
 
   if (kind === "codex") {
-    const legacyProfileDefaults = { "gpt-5-mini": "gpt-5.6-terra", "gpt-5.4-mini": "gpt-5.6-terra", "gpt-5.4": "gpt-6-astra" };
+    const legacyProfileDefaults = { "gpt-5.4-nano": "gpt-6-luna", "gpt-5-mini": "gpt-5.6-terra", "gpt-5.4-mini": "gpt-5.6-terra", "gpt-5.4": "gpt-6.1-sol", "gpt-5.5": "gpt-6.1-sol" };
     return legacyProfileDefaults[resolvedModel] || resolveCodexOauthModel(resolvedModel || process.env.MYOS_BACKGROUND_CODEX_MODEL || CODEX_OAUTH_CHEAP_MODEL);
   }
 
@@ -416,6 +417,11 @@ function buildBackgroundWorkerInvocation(task = {}, options = {}) {
     return { kind, command, args, cwd, input: "", model: model || null, readOnly };
   }
 
+  const selected = selectModels(readState(registryPath(options.env || process.env)), {
+    provider:kind,taskClass:task.taskClass || task.modelProfile || "cheap_routing",
+  }).find(candidate => candidate.model === model);
+  const execution = codexExecutionSettings(model, selected?.effort || "medium");
+
   const args = isUnattendedContext(options.env || process.env)
     ? ["-a", "never", "exec"]
     : ["exec", "-c", 'approval_policy="never"'];
@@ -429,15 +435,13 @@ function buildBackgroundWorkerInvocation(task = {}, options = {}) {
   args.push("-c", "sandbox_workspace_write.network_access=false", "-c", "sandbox_workspace_write.writable_roots=[]");
   if (!isUnattendedContext(options.env || process.env)) {
     args.push("-c", 'forced_login_method="chatgpt"', "-c", 'model_provider="openai"');
-    const selected = selectModels(readState(registryPath(options.env || process.env)), {
-      provider: kind, taskClass: task.taskClass || task.modelProfile || "cheap_routing",
-    }).find(candidate => candidate.model === model);
-    if (selected && !task.model) args.push("-c", `model_reasoning_effort="${selected.effort}"`);
   }
+  args.push(...execution.args);
   if (cwd) args.push("-C", cwd);
   if (model) args.push("-m", model);
   args.push("-");
-  return { kind, command, args, cwd, input: prompt, model: model || null, readOnly };
+  return { kind, command, args, cwd, input: prompt, model: model || null, readOnly,
+    executionPolicy:{ceilingModel:execution.ceilingModel,speed:execution.speed} };
 }
 
 function runCommand({ command, args, cwd, input, timeoutMs, env, maxOutputBytes, signal, beforeSpawn, deadlineAt }) {

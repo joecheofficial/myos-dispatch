@@ -193,7 +193,7 @@ test("OAuth class selection uses available exact models and excludes quarantined
   assert.deepEqual(selectModels(state, { provider: "codex", taskClass: "cheap_routing" }).map(x => x.model), ["gpt-5.6-luna", "gpt-5.6-terra"]);
   state.models[0].quarantineUntil = new Date(Date.now() + 60000).toISOString();
   assert.deepEqual(selectModels(state, { provider: "codex", taskClass: "cheap_routing" }).map(x => x.model), ["gpt-5.6-terra"]);
-  assert.deepEqual(selectModels(state, { provider: "codex", taskClass: "heavy_synthesis" }).map(x => x.model), ["gpt-5.6-sol", "gpt-6-astra"]);
+  assert.deepEqual(selectModels(state, { provider: "codex", taskClass: "heavy_synthesis" }).map(x => x.model), ["gpt-5.6-sol"]);
 });
 
 test("discovery registers unfamiliar models without claiming invocation or quality", () => {

@@ -420,7 +420,7 @@ test("dispatcher derives affinity only from an explicitly declared root caller o
       text: "make a note", fallback,
       dispatchPlan: { parallelizationPlan: {
         mode: "read_only", budget: { maxAgents: 1 },
-        backgroundTasks: [{ id: "caller-check", required: true, prompt: "Inspect fixture", model: "gpt-6-astra" }],
+        backgroundTasks: [{ id: "caller-check", required: true, prompt: "Inspect fixture", model: "gpt-6.1-sol" }],
       } },
     }, {
       ...options, parallelizationStateFile: path.join(stateDir, "state.json"),

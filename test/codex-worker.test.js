@@ -184,7 +184,7 @@ test("resolveCodexWorkerModelSelection defaults straightforward work to gpt-5.6-
   }
 });
 
-test("resolveCodexWorkerModelSelection escalates exploratory work to gpt-6-astra", () => {
+test("resolveCodexWorkerModelSelection selects Sol for exploratory work", () => {
   const originalDefault = process.env.MYOS_MODEL_PROFILE_DEFAULT;
   const originalSmart = process.env.MYOS_MODEL_PROFILE_SMART;
   const originalWrite = process.env.MYOS_MODEL_PROFILE_WRITE;
@@ -204,7 +204,7 @@ test("resolveCodexWorkerModelSelection escalates exploratory work to gpt-6-astra
       },
     });
 
-    assert.equal(selection.model, "gpt-6-astra");
+    assert.equal(selection.model, "gpt-6.1-sol");
     assert.equal(selection.profileId, "openai_heavy_reasoning");
     assert.equal(selection.source, "routing_profile");
   } finally {
