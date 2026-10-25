@@ -47,3 +47,9 @@ test("custom class policy and provider-default fallbacks cannot escape the ceili
   const selected=selectModels(state,{provider:"codex",taskClass:"planning",policy:{codex:{planning:{models:["gpt-6-astra"],families:["astra"]}}}});
   assert.deepEqual(selected,[]);
 });
+
+test("every managed Codex launch forces ChatGPT subscription authentication",()=>{
+ const execution=settingsForPolicy(standard,"gpt-6.1-sol");
+ assert.ok(execution.args.includes('forced_login_method="chatgpt"'));
+ assert.ok(execution.args.includes('model_provider="openai"'));
+});

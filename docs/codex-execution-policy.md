@@ -38,3 +38,9 @@ Existing workers already running retain their launch settings; no job is restart
 
 Verification: `node --test test/codex-execution-policy.test.js test/codex-execution-boundaries.test.js`
 and the full `npm test` suite. A live Standard Sol invocation is separate evidence from unit checks.
+
+## Subscription-only Codex execution
+
+Every managed Codex launch pins `forced_login_method="chatgpt"` and `model_provider="openai"` alongside the model/speed ceiling. An unavailable subscription fails visibly. Dispatch does not authorize switching a Claude-to-Codex delegation into paid API inference.
+
+The private Codex loopback proxy also refuses paid chat fallback on quota, authentication, timeout, malformed-output and policy failures. Unsupported tools/functions return an error. Separate explicitly requested API workflows, including embeddings, remain separate from Codex delegation.

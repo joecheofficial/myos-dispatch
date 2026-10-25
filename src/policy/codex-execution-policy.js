@@ -63,7 +63,8 @@ function settingsForPolicy(value, model, effort = "medium") {
   }
   const fast = policy.speed === "fast";
   return Object.freeze({model, effort, ceilingModel:policy.ceilingModel, speed:policy.speed,
-    args:["-c", `service_tier="${fast ? "fast" : "default"}"`,
+    args:["-c", 'forced_login_method="chatgpt"', "-c", 'model_provider="openai"',
+      "-c", `service_tier="${fast ? "fast" : "default"}"`,
       "-c", `features.fast_mode=${fast}`, "-c", "features.ultrafast_mode=false",
       "-c", `model_reasoning_effort="${effort}"`],
   });
