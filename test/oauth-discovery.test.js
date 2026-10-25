@@ -22,21 +22,21 @@ test("Codex classes select the newest discovered IDs by family, not a frozen ID 
   const state = mergeDiscovery(null, codexLive);
   assert.deepEqual(pick(state, "codex", "cheap_routing"), ["gpt-6-luna", "gpt-5.6-luna", "gpt-5.6-terra"]);
   assert.deepEqual(pick(state, "codex", "default_automation"), ["gpt-5.6-terra", "gpt-6.1-sol", "gpt-6-sol"]);
-  assert.deepEqual(pick(state, "codex", "heavy_synthesis"), ["gpt-6.1-sol", "gpt-6-sol", "gpt-6-astra"]);
-  assert.deepEqual(pick(state, "codex", "task_class_is_elite"), ["gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol"]);
-  assert.deepEqual(pick(state, "codex", "planning"), ["gpt-6.1-sol", "gpt-6-sol", "gpt-6-astra"]);
+  assert.deepEqual(pick(state, "codex", "heavy_synthesis"), ["gpt-6.1-sol", "gpt-6-sol"]);
+  assert.deepEqual(pick(state, "codex", "task_class_is_elite"), ["gpt-6.1-sol", "gpt-6-sol"]);
+  assert.deepEqual(pick(state, "codex", "planning"), ["gpt-6.1-sol", "gpt-6-sol"]);
   // Hidden or non-family models are never assigned.
   for (const taskClass of ["cheap_routing", "heavy_synthesis"]) {
     assert.ok(!pick(state, "codex", taskClass).includes("gpt-reserve"));
   }
 });
 
-test("an unrecognised Codex naming scheme falls back to the provider's default model", () => {
+test("an unrecognised Codex naming scheme cannot bypass the pinned ceiling", () => {
   const state = mergeDiscovery(null, [
     { provider: "codex", model: "gpt-7-nova", visible: true, auth: "subscription", observedAt: now, isDefault: true },
     { provider: "codex", model: "gpt-7-mini", visible: true, auth: "subscription", observedAt: now },
   ]);
-  assert.deepEqual(pick(state, "codex", "cheap_routing"), ["gpt-7-nova"]);
+  assert.deepEqual(pick(state, "codex", "cheap_routing"), []);
 });
 
 test("effort is fitted to what the discovered model supports", () => {

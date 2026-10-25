@@ -37,7 +37,7 @@ function repoFixture() {
   return repo;
 }
 function writerOptions(repo) {
-  return require(cli).parseArgs(["--scope", repo, "--paths", "owned.txt,new.bin", "--provider", "codex", "--model", "gpt-6-astra", "--caller-provider", "claude", "--prompt", "Edit owned file", "--json"]);
+  return require(cli).parseArgs(["--scope", repo, "--paths", "owned.txt,new.bin", "--provider", "codex", "--model", "gpt-6.1-sol", "--caller-provider", "claude", "--prompt", "Edit owned file", "--json"]);
 }
 function output() {
   return [
@@ -54,7 +54,7 @@ test("one-shot writer returns a reviewable manifest and exact model without touc
     artifactRoot: artifacts, stateFile: path.join(artifacts, "state.json"),
     env: { PATH: process.env.PATH, HOME: process.env.HOME, MYOS_BACKGROUND_BACKPRESSURE_ENABLED: "0", MYOS_BACKGROUND_MIN_FREE_DISK_GIB: "0" },
     runCommand: async ({ cwd, invocation, env }) => {
-      assert.equal(invocation.model, "gpt-6-astra");
+      assert.equal(invocation.model, "gpt-6.1-sol");
       assert.equal(env.MYOS_BACKGROUND_AGENTS_ENABLED, "0");
       fs.writeFileSync(path.join(cwd, "owned.txt"), "changed\n");
       fs.writeFileSync(path.join(cwd, "new.bin"), Buffer.from([0, 255, 1]));
@@ -63,8 +63,8 @@ test("one-shot writer returns a reviewable manifest and exact model without touc
   });
   assert.equal(result.status, "needs-review", JSON.stringify(result));
   assert.equal(result.reviewRequired, true);
-  assert.equal(result.requestedModel, "gpt-6-astra");
-  assert.equal(result.resolvedModel, "gpt-6-astra");
+  assert.equal(result.requestedModel, "gpt-6.1-sol");
+  assert.equal(result.resolvedModel, "gpt-6.1-sol");
   assert.equal(result.providerReportedModel, null);
   assert.equal(result.ownedGroupStopped, null, "injected runners without cleanup evidence remain unknown");
   assert.equal(result.treeQuiescence, "unverified");
@@ -125,7 +125,7 @@ test("bounded prompt files and explicit model/provider mismatches fail closed", 
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "myos-writer-model-test-"));
   const file = path.join(root, "prompt.txt");
   fs.writeFileSync(file, "A bounded task");
-  const args = ["--scope", repo, "--paths", "owned.txt", "--provider", "codex", "--model", "gpt-6-astra", "--caller-provider", "claude", "--prompt-file", file];
+  const args = ["--scope", repo, "--paths", "owned.txt", "--provider", "codex", "--model", "gpt-6.1-sol", "--caller-provider", "claude", "--prompt-file", file];
   assert.equal(require(cli).parseArgs(args).prompt, "A bounded task");
   fs.writeFileSync(file, "x".repeat(32769));
   assert.throws(() => require(cli).parseArgs(args), /32768/);
@@ -138,14 +138,14 @@ test("bounded prompt files and explicit model/provider mismatches fail closed", 
     },
   });
   assert.equal(result.status, "failed");
-  assert.equal(result.resolvedModel, "gpt-6-astra");
+  assert.equal(result.resolvedModel, "gpt-6.1-sol");
   assert.equal(result.providerReportedModel, "substituted-model");
   assert.equal(fs.existsSync(result.patchArtifact), true);
 });
 
 test("writer timeout is bounded, defaults to fifteen minutes, and declares its task class", async () => {
   const repo = repoFixture();
-  const base = ["--scope", repo, "--paths", "owned.txt", "--provider", "codex", "--model", "gpt-6-astra", "--caller-provider", "claude", "--prompt", "Edit owned file"];
+  const base = ["--scope", repo, "--paths", "owned.txt", "--provider", "codex", "--model", "gpt-6.1-sol", "--caller-provider", "claude", "--prompt", "Edit owned file"];
   const { parseArgs, runWriter } = require(cli);
   assert.equal(parseArgs(base).timeoutMs, 900000);
   for (const value of ["0", "-1", "1800001", "1.5", "NaN", "Infinity", "1e3", "1000ms"]) {
@@ -168,7 +168,7 @@ test("writer timeout is bounded, defaults to fifteen minutes, and declares its t
       },
     });
     assert.equal(result.status, "needs-review", JSON.stringify(result));
-    assert.deepEqual(observed, { taskClass: "heavy_synthesis", model: "gpt-6-astra", timeoutMs });
+    assert.deepEqual(observed, { taskClass: "heavy_synthesis", model: "gpt-6.1-sol", timeoutMs });
   }
   const badRuntimeOptions = await runWriter({ ...parseArgs(base), timeoutMs: 1800001 });
   assert.equal(badRuntimeOptions.status, "failed");

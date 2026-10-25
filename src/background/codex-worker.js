@@ -1,4 +1,5 @@
 const fs = require("node:fs");
+const {codexExecutionSettings}=require("../policy/codex-execution-policy");
 const os = require("node:os");
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
@@ -475,7 +476,7 @@ function resolveCodexWorkerModelSelection(options = {}) {
     return {
       // API catalog defaults are not OAuth model identities. Migrate only
       // these legacy profile defaults; explicit options above remain exact.
-      model: ({ "gpt-5-mini": "gpt-5.6-terra", "gpt-5.4-mini": "gpt-5.6-terra", "gpt-5.4": "gpt-6-astra" })[resolved.model.model] || resolved.model.model,
+      model: ({ "gpt-5-mini": "gpt-5.6-terra", "gpt-5.4-mini": "gpt-5.6-terra", "gpt-5.4": "gpt-6.1-sol", "gpt-5.5": "gpt-6.1-sol" })[resolved.model.model] || resolved.model.model,
       profileId,
       source: "routing_profile",
     };
@@ -575,6 +576,8 @@ function runCommand({ command, args, cwd, input, timeoutMs }) {
 }
 
 async function runCodexWorker(options = {}) {
+  const workerModelSelection = resolveCodexWorkerModelSelection(options);
+  const execution = codexExecutionSettings(workerModelSelection.model, options.effort || "medium");
   const chatId = String(options.chatId || "unknown");
   const baseOutboxDir = path.resolve(options.outboxDir || resolveWorkspacePath("agents", "worker", "data", "outbox"));
   const runOutboxDir = resolveRunOutboxDir(baseOutboxDir, chatId);
@@ -607,7 +610,6 @@ async function runCodexWorker(options = {}) {
     dispatchPlan: options.dispatchPlan || null,
     retryHint: options.retryHint || "",
   });
-  const workerModelSelection = resolveCodexWorkerModelSelection(options);
 
   const args = ["exec"];
   const isResume = Boolean(effectiveSessionId);
@@ -615,6 +617,7 @@ async function runCodexWorker(options = {}) {
     args.push("resume");
   }
   args.push("--json", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox");
+  args.push(...execution.args);
   if (!isResume && (options.cwd || DEFAULT_WORKER_CWD)) {
     args.push("-C", options.cwd || DEFAULT_WORKER_CWD);
   }
@@ -713,6 +716,7 @@ async function runCodexWorker(options = {}) {
       model: workerModelSelection.model,
       modelProfile: workerModelSelection.profileId,
       modelSource: workerModelSelection.source,
+      executionPolicy:{ceilingModel:execution.ceilingModel,speed:execution.speed},
       code,
       signal,
       stdout,

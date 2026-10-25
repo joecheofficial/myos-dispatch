@@ -11,7 +11,7 @@ const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
 const MAX_TIMEOUT_MS = 30 * 60 * 1000;
 
 const HELP = `Usage: myos-writer --scope /repo --paths src/a.js,test/a.test.js
-  --provider codex --model gpt-6-astra --caller-provider claude
+  --provider codex --model gpt-6.1-sol --caller-provider claude
   (--prompt "bounded implementation task" | --prompt-file /path/task.txt)
   [--timeout-ms 900000] [--json]
 One human-interactive delegation. Returns a retained patch for independent review.

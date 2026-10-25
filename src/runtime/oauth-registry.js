@@ -1,4 +1,5 @@
 "use strict";
+const { modelWithinCeiling, readCodexExecutionPolicy } = require("../policy/codex-execution-policy");
 
 function mergeDiscovery(previous, evidence) {
   const models = new Map((previous?.models || []).map(entry => [`${entry.provider}:${entry.model}`, entry]));
@@ -97,11 +98,13 @@ function fitEffort(effort, supported) {
 }
 
 function selectModels(state, { provider, taskClass, now = Date.now(), policy } = {}) {
+  const executionPolicy = provider === "codex" ? readCodexExecutionPolicy() : null;
   const override = policy === undefined ? loadPolicyOverride() : policy;
   const classPolicy = resolveClassPolicy(provider, taskClass, override);
   if (!classPolicy) return [];
   // Alias records are inventory; execution needs an exact ID.
-  const pool = (state?.models || []).filter(record => record?.alias !== true && eligible(record, provider, now));
+  const pool = (state?.models || []).filter(record => record?.alias !== true && eligible(record, provider, now) &&
+    (provider !== "codex" || modelWithinCeiling(record.model, executionPolicy)));
   const picked = [];
   const take = record => {
     if (!picked.includes(record)) picked.push(record);

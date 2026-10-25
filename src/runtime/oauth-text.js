@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 const {createHash}=require("node:crypto");
+const {codexExecutionSettings}=require("../policy/codex-execution-policy");
 
 function validateUnattendedResult(result) {
   const reject = () => { throw new Error("Native Codex returned an incomplete or unverified text turn"); };
@@ -31,6 +32,7 @@ function validateUnattendedResult(result) {
 }
 
 async function executeCodexText(options, dependencies = {}) {
+  const execution = codexExecutionSettings(options.model, options.effort || "low");
   const image=options.image===undefined ? null : require("./bounded-vision").snapshotPng(options.image);
   if(image && options.unattended!==true) throw new Error("Native images require isolated unattended execution");
   if (options.unattended === true && options.timeoutMs != null &&
@@ -51,7 +53,6 @@ async function executeCodexText(options, dependencies = {}) {
       "workspace_dependencies", "unbounded_connection_retries"].flatMap(feature => ["-c", `features.${feature}=false`]),
   ] : [];
   if (options.unattended === true) env.MYOS_INITIATOR = "unattended";
-  const effort = ["low", "medium", "high", "xhigh", "max", "ultra"].includes(options.effort) ? options.effort : "low";
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "myos-oauth-text-"));
   const imagePath=image?path.join(cwd,"input.png"):null;
   let imageStat;
@@ -83,7 +84,7 @@ async function executeCodexText(options, dependencies = {}) {
       command: options.command || "codex", cwd, env,
       args: ["exec", ...nativeIsolation, "--json", "--ephemeral", "--skip-git-repo-check", "-s", "read-only",
         "-c", 'approval_policy="never"', "-c", 'forced_login_method="chatgpt"', "-c", 'model_provider="openai"',
-        "-c", `model_reasoning_effort="${effort}"`, "-m", options.model,
+        ...execution.args, "-m", execution.model,
         ...(imagePath?["--image",imagePath]:[]), "-"],
       input: options.prompt, timeoutMs,
       ...(options.signal ? {signal:options.signal} : {}),
@@ -103,7 +104,8 @@ async function executeCodexText(options, dependencies = {}) {
     }
     const threadId=options.unattended === true ? validateUnattendedResult(result) : null;
     return { text: parsed.summary, ...(threadId ? {providerResponseId:threadId} : {}),
-      raw: { provider: "codex-oauth", model: options.model, providerReportedModel: null }, usage: parsed.usage };
+      raw: { provider: "codex-oauth", model: execution.model, providerReportedModel: null,
+        executionPolicy:{ceilingModel:execution.ceilingModel,speed:execution.speed} }, usage: parsed.usage };
   } finally {
     // Only the exact input inode created by this invocation may be removed.
     if(imageStat) {

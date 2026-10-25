@@ -13,14 +13,15 @@ test("Codex task classes select model and effort across the eligible inventory",
     ["default_automation","gpt-5.6-terra","medium"],
     ["heavy_synthesis","gpt-6.1-sol","high"],
     ["planning","gpt-6.1-sol","medium"],
-    ["task_class_is_elite","gpt-6-astra","high"],
+    ["task_class_is_elite","gpt-6.1-sol","high"],
   ]) assert.deepEqual(selectCodexModel({models},{taskClass,now}),{model,effort});
 });
 
-test("every eligible Codex identity can be explicitly selected without a global model pin",()=>{
-  for(const {model} of models) assert.equal(selectCodexModel({models},{taskClass:"default_automation",model,now}).model,model);
+test("explicit Codex identities remain subject to the pinned ceiling",()=>{
+  for(const {model} of models.filter(record=>record.model!=="gpt-6-astra")) assert.equal(selectCodexModel({models},{taskClass:"default_automation",model,now}).model,model);
+  assert.throws(()=>selectCodexModel({models},{taskClass:"planning",model:"gpt-6-astra",now}),/no fresh eligible/);
   const future=record("future-codex-family");
-  assert.equal(selectCodexModel({models:[future]},{taskClass:"planning",model:future.model,now}).model,future.model);
+  assert.throws(()=>selectCodexModel({models:[future]},{taskClass:"planning",model:future.model,now}),/no fresh eligible/);
   assert.throws(()=>selectCodexModel({models:[future]},{taskClass:"planning",now}),/no fresh eligible/);
 });
 

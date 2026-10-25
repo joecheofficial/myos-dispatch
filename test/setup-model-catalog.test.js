@@ -406,7 +406,7 @@ test("(issue8) subscription sign-in assigns text classes from the OAuth registry
   const catalog = setup.buildModelCatalog({ homeRoot: "/tmp/myos", probes: fakeProbes({ cli: ["codex", "claude"], login: "oauth" }), oauthState });
   assert.equal(catalog.assignments.cheap_routing.model, "gpt-6-luna");
   assert.equal(catalog.assignments.heavy_synthesis.model, "gpt-6.1-sol");
-  assert.equal(catalog.assignments.task_class_is_elite.model, "gpt-6-astra");
+  assert.equal(catalog.assignments.task_class_is_elite.model, "gpt-6.1-sol");
   assert.equal(catalog.assignments.planning.source, "oauth-registry");
   assert.equal(catalog.assignments.planning.authMode, "oauth");
   const report = setup.renderReport(catalog);

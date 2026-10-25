@@ -16,6 +16,7 @@
     "myos-search": "bin/myos-search.js",
     "myos-search-dispatch": "bin/myos-search-dispatch.js",
     "myos-writer": "bin/myos-writer.js",
+    "myos-codex-policy": "bin/myos-codex-policy.js",
     "myos-oauth-doctor": "bin/myos-oauth-doctor.js",
     "myos-atelier-audience": "bin/myos-atelier-audience.js",
     "myos-atelier-sync": "bin/myos-atelier-sync.js",
