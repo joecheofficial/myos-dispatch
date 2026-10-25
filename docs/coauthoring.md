@@ -71,3 +71,23 @@ Codex loads host configuration and hooks and uses its existing ChatGPT OAuth con
 6. Verify the integrated behavior before committing or publishing under the project's normal process. Retire retained work only after the parent confirms integration or explicit preservation. This CLI implements none of these application or cleanup steps.
 
 Codex delegation obeys the pinned model ceiling and speed in [execution policy](codex-execution-policy.md). An agent-selected `--model` does not authorize raising the ceiling.
+
+## Quota handback to the driving Claude session
+
+Before every real native call from this Claude-to-Codex bridge, the writer reads Codex's
+included allowance through the native app server. At exhaustion, even if purchased credits
+remain, no Codex inference starts. Unknown capacity also returns control rather than spending
+blindly. Existing ownership, auth, nested-worker, cleanup and review gates run first.
+
+A failed delegation can include `continuation.provider="claude"`,
+`continuation.execution="active-session"` and `continuation.billingMode="subscription"`.
+This is an instruction to the existing driving Claude session to continue the bounded task
+itself, including source authoring. It is not a new Claude subprocess, an API retry or proof
+that Claude already executed the work. The Codex child remains `status:"failed"`, exit code 1;
+the parent must consume the continuation and act. Safety/policy failures do not grant this exception.
+
+A quota error returned after a native call begins also receives this continuation. Failed
+worktrees and partial patches remain preserved for independent review, never auto-applied.
+The preflight is a point-in-time check: usage by an in-flight/concurrent call can cross the
+allowance after admission. This does not change the account's credit settings or disable its
+provider-side credit balance. See [subscription capacity](subscription-capacity.md).
