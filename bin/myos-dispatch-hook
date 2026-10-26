@@ -1701,6 +1701,11 @@ async function main() {
   }
   const payload = parseJsonInput(readStdin());
   const surface = readSurface();
+  const instant = require("../src/integrations/codex-instant-trigger").runCodexInstantTrigger(payload, surface);
+  if (instant) {
+    await finishOutput(`${JSON.stringify(instant)}\n`);
+    return;
+  }
   let prepared = {};
   try { prepared = await prepareJev(payload, surface); } catch {}
   const output = handleHookPayload(payload, surface, { contextMode: readContextMode(), rewrite: readRewriteEnabled(), ...prepared });
