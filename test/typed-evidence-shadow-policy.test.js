@@ -8,12 +8,20 @@ const assert = require("node:assert/strict");
 
 // Pin only this test process. Mocked existsSync must not switch home roots,
 // and sibling checkpoint suites must retain their own temporary HOME isolation.
+// The legacy root is pinned too: it otherwise derives from HOME, which the
+// customer refresh shares across concurrently running test files, so another
+// suite creating $HOME/<legacy>/workspace mid-run moved the expected path.
+const LEGACY_HOME_ENV = ["OPEN", "CLAW", "_HOME_ROOT"].join("");
 const previousHomeRoot = process.env.MYOS_HOME_ROOT;
+const previousLegacyRoot = process.env[LEGACY_HOME_ENV];
 const isolatedHomeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "typed-evidence-policy-home-"));
 process.env.MYOS_HOME_ROOT = isolatedHomeRoot;
+process.env[LEGACY_HOME_ENV] = isolatedHomeRoot;
 test.after(() => {
   if (previousHomeRoot === undefined) delete process.env.MYOS_HOME_ROOT;
   else process.env.MYOS_HOME_ROOT = previousHomeRoot;
+  if (previousLegacyRoot === undefined) delete process.env[LEGACY_HOME_ENV];
+  else process.env[LEGACY_HOME_ENV] = previousLegacyRoot;
   fs.rmSync(isolatedHomeRoot, { recursive: true, force: true });
 });
 

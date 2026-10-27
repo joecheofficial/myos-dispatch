@@ -1,5 +1,9 @@
 "use strict";
 
+// These suites exercise Intent Horizon behavior once an install has opted in.
+// It is off by default for customer and public installs (see intent-horizon.js).
+process.env.MYOS_INTENT_HORIZON_ENABLED = "1";
+
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");

@@ -87,7 +87,7 @@ test("actionable interactive work carries the aggressive Intent Horizon contract
       blockedBy: [],
       taskClass: "coding_implementation",
     },
-    { env: { MYOS_INITIATOR: "human" } },
+    { env: { MYOS_INITIATOR: "human", MYOS_INTENT_HORIZON_ENABLED: "1" } },
   );
 
   assert.equal(envelope.features.intentHorizon.enabled, true);
@@ -100,7 +100,7 @@ test("direct envelope construction fails closed without a declared task class", 
   const envelope = buildExecutionEnvelope("Implement and verify the fix", {
     goalScale: 3,
     actionType: "write",
-  });
+  }, { env: { MYOS_INTENT_HORIZON_ENABLED: "1" } });
 
   assert.equal(envelope.features.intentHorizon.enabled, false);
   assert.equal(envelope.features.intentHorizon.stopReason, "missing_task_class");

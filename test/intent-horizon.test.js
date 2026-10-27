@@ -1,5 +1,9 @@
 "use strict";
 
+// These suites exercise Intent Horizon behavior once an install has opted in.
+// It is off by default for customer and public installs (see intent-horizon.js).
+process.env.MYOS_INTENT_HORIZON_ENABLED = "1";
+
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
@@ -303,4 +307,65 @@ test("health classification stays silent for valid completion and records bounde
     severity: "warning",
     itemIds: ["repair-1"],
   });
+});
+
+// Customer report (4.4.0-rc.3): Intent Horizon was on by default and told the
+// model to make unrequested upgrades after every write task. Customer and
+// public installs are now off unless the operator opts in.
+test("Intent Horizon is off by default and opts in only through env or config", () => {
+  const fs = require("node:fs");
+  const os = require("node:os");
+  const path = require("node:path");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "intent-horizon-optin-"));
+  try {
+    const input = { goalScale: 4, actionType: "write", trustClass: "interactive", taskClass: "coding_implementation" };
+    const missing = path.join(dir, "missing.json");
+    const fresh = buildIntentHorizonPolicy(input, { env: { HOME: dir } });
+    assert.equal(fresh.enabled, false);
+    assert.equal(fresh.stopReason, "not_opted_in");
+    assert.equal(fresh.sweep.required, false);
+    assert.equal(buildIntentHorizonPolicy(input, { env: { MYOS_ORCHESTRATION_FEATURES_CONFIG: missing } }).enabled, false);
+
+    const config = path.join(dir, "features.json");
+    fs.writeFileSync(config, JSON.stringify({ intentHorizon: { enabled: true } }));
+    const viaConfig = buildIntentHorizonPolicy(input, { env: { MYOS_ORCHESTRATION_FEATURES_CONFIG: config } });
+    assert.equal(viaConfig.enabled, true);
+    assert.equal(viaConfig.optIn, "config");
+
+    // Default config location under HOME.
+    fs.mkdirSync(path.join(dir, ".myos-dispatch", "config"), { recursive: true });
+    fs.copyFileSync(config, path.join(dir, ".myos-dispatch", "config", "orchestration-features.json"));
+    assert.equal(buildIntentHorizonPolicy(input, { env: { HOME: dir } }).enabled, true);
+
+    // The environment wins in both directions.
+    assert.equal(buildIntentHorizonPolicy(input, { env: { HOME: dir, MYOS_INTENT_HORIZON_ENABLED: "0" } }).enabled, false);
+    assert.equal(buildIntentHorizonPolicy(input, { env: { MYOS_ORCHESTRATION_FEATURES_CONFIG: missing, MYOS_INTENT_HORIZON_ENABLED: "1" } }).enabled, true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a fresh install hook run emits no Intent Horizon contract for a write task unless opted in", () => {
+  const fs = require("node:fs");
+  const os = require("node:os");
+  const path = require("node:path");
+  const { spawnSync } = require("node:child_process");
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "intent-horizon-hook-"));
+  try {
+    const env = { PATH: process.env.PATH, HOME: home, MYOS_HOME_ROOT: path.join(home, ".myos"),
+      MYOS_DISPATCH_HOOK_LOG_DIR: path.join(home, "logs"), MYOS_DISPATCHER_EVENTS_FILE: path.join(home, "events.jsonl"),
+      MYOS_DISPATCH_HEALTH_STATE_FILE: path.join(home, "health.json"), MYOS_PARALLELIZATION_STATE_FILE: path.join(home, "p.json"),
+      TYPESAFE_API_KEY: "", MYOS_SIDECAR_BIN: path.join(home, "no-sidecar") };
+    const run = (extra = {}) => spawnSync(process.execPath, [path.resolve(__dirname, "../bin/myos-dispatch-hook"), "--surface=claude", "--context-mode=full"], {
+      input: JSON.stringify({ hook_event_name: "UserPromptSubmit", prompt: "Implement the report pipeline, verify the behavior, and update its documentation", cwd: home }),
+      env: { ...env, ...extra }, cwd: home, encoding: "utf8" });
+    const off = run();
+    assert.equal(off.status, 0, off.stderr);
+    assert.doesNotMatch(off.stdout, /Intent Horizon/);
+    const on = run({ MYOS_INTENT_HORIZON_ENABLED: "1" });
+    assert.equal(on.status, 0, on.stderr);
+    assert.match(on.stdout, /Intent Horizon contract/);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
