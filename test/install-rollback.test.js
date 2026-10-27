@@ -17,6 +17,10 @@ const INSTALL_SH = path.join(REPO_ROOT, "bin", "install.sh");
 // folder. Run the full transactions from a permanent checkout; from a temporary
 // one, assert the refusal instead.
 const { isEphemeralPath } = require("../scripts/register-hook.js");
+// A hang guard, not a performance bound: no test here asserts install speed.
+// One install takes a few seconds idle and more than 30 s on a saturated
+// laptop (the customer refresh gate), where a kill reads as a failed install.
+const INSTALL_TIMEOUT_MS = 180_000;
 const EPHEMERAL_CHECKOUT = isEphemeralPath(INSTALL_SH);
 const needsDurableCheckout = EPHEMERAL_CHECKOUT
   ? { skip: `checkout is in a temporary directory (${REPO_ROOT}); the installer refuses to register its hook there` }
@@ -31,7 +35,7 @@ test("a checkout in a temporary directory is refused before any settings are wri
     fs.writeFileSync(settings, original);
     const result = require("node:child_process").spawnSync("bash", [INSTALL_SH, "--yes"], {
       env: { HOME: home, PATH: process.env.PATH, MYOS_HOME_ROOT: path.join(home, "data"), MYOS_BACKGROUND_AGENTS_ENABLED: "0", MYOS_AUTO_FANOUT: "0", MYOS_BACKGROUND_BACKPRESSURE_ENABLED: "0" },
-      encoding: "utf8", timeout: 30000,
+      encoding: "utf8", timeout: INSTALL_TIMEOUT_MS,
     });
     assert.notEqual(result.status, 0);
     assert.match(result.stdout + result.stderr, /refusing to register a hook inside a temporary directory/);
@@ -61,7 +65,7 @@ test("failure after optional registration restores exact settings and shell rc b
     fs.writeFileSync(injected, installer.replace(marker, 'cp "$SETTINGS" "$HOME/after-optional.json"\nfail "Injected post-optional validation failure"\n' + marker));
     const result = require("node:child_process").spawnSync("bash", [injected, "--yes", "--with-shell-title", "--with-rabbit-hole"], {
       env: { HOME: home, PATH: process.env.PATH, SHELL: "/bin/zsh", MYOS_DISPATCH_DIR: REPO_ROOT, MYOS_HOME_ROOT: path.join(home, "data"), MYOS_BACKGROUND_AGENTS_ENABLED: "0", MYOS_AUTO_FANOUT: "0", MYOS_BACKGROUND_BACKPRESSURE_ENABLED: "0" },
-      encoding: "utf8", timeout: 30000,
+      encoding: "utf8", timeout: INSTALL_TIMEOUT_MS,
     });
     assert.notEqual(result.status, 0);
     assert.match(result.stdout + result.stderr, /Injected post-optional validation failure/);
@@ -104,7 +108,7 @@ for (const scenario of ["optional-two-failure", "foreign-settings", "foreign-she
       fs.writeFileSync(injected, installer);
       const result = require("node:child_process").spawnSync("bash", [injected, "--yes", "--runtime", "both", "--with-shell-title", "--with-rabbit-hole"], {
         env: { HOME: home, CODEX_HOME: path.dirname(codex), PATH: process.env.PATH, SHELL: "/bin/zsh", MYOS_DISPATCH_DIR: REPO_ROOT, MYOS_HOME_ROOT: path.join(home, "data"), MYOS_BACKGROUND_AGENTS_ENABLED: "0", MYOS_AUTO_FANOUT: "0", MYOS_BACKGROUND_BACKPRESSURE_ENABLED: "0" },
-        encoding: "utf8", timeout: 30000,
+        encoding: "utf8", timeout: INSTALL_TIMEOUT_MS,
       });
       assert.notEqual(result.status, 0);
       assert.match(result.stdout + result.stderr, scenario === "nonzero-smoke" ? /Smoke test failed/ : /Injected transaction failure/);
@@ -223,7 +227,7 @@ test("bash runtime both installs twice stably, preserves config, and rolls back 
   }
   const { spawnSync } = require("node:child_process");
   const env = { HOME: home, CODEX_HOME: path.dirname(codexSettings), PATH: process.env.PATH, MYOS_HOME_ROOT: path.join(home, "data"), MYOS_BACKGROUND_AGENTS_ENABLED: "0", MYOS_AUTO_FANOUT: "0", MYOS_BACKGROUND_BACKPRESSURE_ENABLED: "0" };
-  const run = (extra = [], extraEnv = {}) => spawnSync("bash", [INSTALL_SH, "--yes", "--runtime", "both", ...extra], { env: { ...env, ...extraEnv }, encoding: "utf8", timeout: 30000 });
+  const run = (extra = [], extraEnv = {}) => spawnSync("bash", [INSTALL_SH, "--yes", "--runtime", "both", ...extra], { env: { ...env, ...extraEnv }, encoding: "utf8", timeout: INSTALL_TIMEOUT_MS });
   const first = run(["--with-pretool"]);
   assert.equal(first.status, 0, first.stderr + first.stdout);
   const bytes = [settings, codexSettings].map(p => fs.readFileSync(p, "utf8"));

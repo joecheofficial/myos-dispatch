@@ -9,6 +9,16 @@ const BATCH_ARGV_BYTES = 32 * 1024;
 const CLOUD_PLACEHOLDER_FLAG = 0x40000000;
 const BATCH_FORMAT = "%d:%i:%z:%l:%u:%p:%f";
 const residencyStorage = new AsyncLocalStorage();
+const DEFAULT_PROBE_TIMEOUT_MS = 1000;
+
+// Each /usr/bin/stat probe is bounded. A probe that does not answer in time
+// counts as not resident (fail closed). MYOS_LOCAL_SEARCH_PROBE_TIMEOUT_MS can
+// only change how long to wait; the test runner raises it to a hang guard so a
+// saturated machine does not drop files from fixtures.
+function probeTimeoutMs() {
+  const value = Number(process.env.MYOS_LOCAL_SEARCH_PROBE_TIMEOUT_MS);
+  return Number.isSafeInteger(value) && value > 0 ? value : DEFAULT_PROBE_TIMEOUT_MS;
+}
 
 function statIdentity(stat) {
   if (stat.mtimeNs === undefined || stat.ctimeNs === undefined) return null;
@@ -78,7 +88,7 @@ function primeResidency(paths, deadline, signal) {
     try {
       const before = batch.map((filePath) => statIdentity(fs.lstatSync(filePath, { bigint: true })));
       const raw = childProcess.execFileSync("/usr/bin/stat", ["-f", BATCH_FORMAT, ...batch], {
-        encoding: "utf8", timeout: Math.max(1, Math.min(1000, deadline - Date.now())), maxBuffer: 64 * 1024,
+        encoding: "utf8", timeout: Math.max(1, Math.min(probeTimeoutMs(), deadline - Date.now())), maxBuffer: 64 * 1024,
       });
       if (signal?.aborted || Date.now() >= deadline) return;
       const rows = outputRows(raw, batch.length);
@@ -104,7 +114,7 @@ function freshResidentOnMac(filePath, identity) {
   try {
     const before = identity || statIdentity(fs.lstatSync(filePath, { bigint: true }));
     const raw = childProcess.execFileSync("/usr/bin/stat", ["-f", "%f", filePath], {
-      encoding: "utf8", timeout: 1000, maxBuffer: 1024,
+      encoding: "utf8", timeout: probeTimeoutMs(), maxBuffer: 1024,
     });
     const rows = outputRows(raw, 1);
     const flags = rows ? parseFlags(rows[0]) : null;

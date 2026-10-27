@@ -583,8 +583,13 @@ test("owner-only config and CLI smoke produce structured JSON", async (t) => {
 });
 
 test("macOS sandbox blocks loopback listen in direct and nested processes", { skip: process.platform !== "darwin" || !fs.existsSync("/usr/bin/sandbox-exec") }, (t) => {
-  const nested = "const{spawnSync}=require('node:child_process');const n=spawnSync(process.execPath,['-e',\"require('node:net').createServer().listen(0)\"],{timeout:800});const s=require('node:net').createServer();s.on('error',()=>process.exit(n.status===0?2:0));s.listen(0,()=>process.exit(3));";
-  const result = spawnSync("/usr/bin/sandbox-exec", ["-p", "(version 1)(allow default)(deny network*)", process.execPath, "-e", nested], { timeout: 2000 });
+  // Each process reports its own outcome and exits by itself: 0 when listen is
+  // refused, 3 when it listens. A nested run killed by its timeout (as on a
+  // saturated machine) therefore counts as a failure, never as blocked, and the
+  // timeouts are hang guards only.
+  const probe = "const s=require('node:net').createServer();s.on('error',()=>process.exit(0));s.listen(0,()=>process.exit(3));";
+  const nested = `const{spawnSync}=require('node:child_process');const n=spawnSync(process.execPath,['-e',${JSON.stringify(probe)}],{timeout:30000});const s=require('node:net').createServer();s.on('error',()=>process.exit(n.status===0?0:2));s.listen(0,()=>process.exit(3));`;
+  const result = spawnSync("/usr/bin/sandbox-exec", ["-p", "(version 1)(allow default)(deny network*)", process.execPath, "-e", nested], { timeout: 60_000 });
   if (result.status === 71) return t.skip("sandbox-exec is present but unavailable in this execution environment");
   assert.equal(result.status, 0);
 });

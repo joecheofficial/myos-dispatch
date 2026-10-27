@@ -25,10 +25,16 @@ function fixture(t, rootCount = 1) {
   };
 }
 
+// Every slice runs on a frozen clock, so only the explicit entry, directory,
+// handle and deletion budgets bound it. With the real clock, the 100 ms slice
+// cap can lapse before the first entry on a saturated machine; that slice then
+// does nothing and the scenario a test builds across slices never happens.
+const SLICE_TIME = Object.freeze({ now: () => 0, deadline: 1_000 });
+
 async function finish(config, cursor, options = {}) {
   let result;
   for (let count = 0; count < 100; count += 1) {
-    result = await refreshMetadata(config, { cursor, deadline: Date.now() + 1_000, ...options });
+    result = await refreshMetadata(config, { cursor, ...SLICE_TIME, ...options });
     if (result.complete || !["ok", "partial"].includes(result.status)) return result;
   }
   throw new Error("metadata sweep did not finish");
@@ -45,7 +51,7 @@ test("slice budgets bound entries, queued directories, handles, root files, and 
   const cursor = createMetadataCursor(config);
   const result = await refreshMetadata(config, {
     cursor, maxEntries: 2, maxQueuedDirectories: 4, maxDirectoryHandles: 2, maxRootFiles: 1,
-    maxDeletionChecks: 1, maxDeletions: 1, deadline: Date.now() + 1_000,
+    maxDeletionChecks: 1, maxDeletions: 1, ...SLICE_TIME,
   });
   assert.deepEqual(result.budgets, {
     entries: 2, queuedDirectories: 4, directoryHandles: 2, rootFiles: 1, deletionChecks: 1, deletions: 1,
@@ -53,7 +59,7 @@ test("slice budgets bound entries, queued directories, handles, root files, and 
   assert.equal(result.budgetQualifier, "cooperativeBudgetNotHardDeadline");
   assert.equal(result.processedByRoot["docs-0"] > 0, true);
   assert.equal(result.processedByRoot["docs-1"] > 0, true);
-  for (let count = 0; count < 4; count += 1) await refreshMetadata(config, { cursor, deadline: Date.now() + 1_000 });
+  for (let count = 0; count < 4; count += 1) await refreshMetadata(config, { cursor, ...SLICE_TIME });
   assert.equal(loadCatalogue(config).records.filter((record) => record.rootId === "docs-0").length <= 1, true);
   closeMetadataCursor(cursor);
 });
@@ -73,10 +79,10 @@ test("queued directory replacement cannot escape and an incomplete sweep cannot 
   fs.rmSync(child, { recursive: true });
   fs.mkdirSync(child);
   const cursor = createMetadataCursor(config);
-  await refreshMetadata(config, { cursor, maxEntries: 1, deadline: Date.now() + 1_000 });
+  await refreshMetadata(config, { cursor, maxEntries: 1, ...SLICE_TIME });
   fs.rmSync(child, { recursive: true });
   fs.symlinkSync(outside, child);
-  await refreshMetadata(config, { cursor, deadline: Date.now() + 1_000 });
+  await refreshMetadata(config, { cursor, ...SLICE_TIME });
   const records = loadCatalogue(config).records;
   assert.equal(records.some((record) => record.path === path.join(outside, "escaped.md")), false);
   assert.deepEqual(records.find((record) => record.relative === original.relative), original);
@@ -103,7 +109,7 @@ test("confined ENOENT deletion is bounded while permission-style failures preser
   };
   const deniedCursor = createMetadataCursor(config);
   try {
-    for (let count = 0; count < 3; count += 1) await refreshMetadata(config, { cursor: deniedCursor, deadline: Date.now() + 1_000 });
+    for (let count = 0; count < 3; count += 1) await refreshMetadata(config, { cursor: deniedCursor, ...SLICE_TIME });
   }
   finally { fs.lstatSync = lstat; }
   assert.equal(loadCatalogue(config).records.some((record) => record.path === files[0]), true);
@@ -117,9 +123,9 @@ test("directory mutation across slices forbids unseen deletion", async (t) => {
   fs.writeFileSync(second, "second");
   await finish(config, createMetadataCursor(config));
   const cursor = createMetadataCursor(config);
-  await refreshMetadata(config, { cursor, maxEntries: 1, deadline: Date.now() + 1_000 });
+  await refreshMetadata(config, { cursor, maxEntries: 1, ...SLICE_TIME });
   fs.unlinkSync(second);
-  await refreshMetadata(config, { cursor, deadline: Date.now() + 1_000 });
+  await refreshMetadata(config, { cursor, ...SLICE_TIME });
   assert.equal(loadCatalogue(config).records.some((record) => record.relative === "second.md"), true);
 });
 
@@ -203,14 +209,14 @@ test("lock contention, abort, and storage rejection do not publish false success
   const cursor = createMetadataCursor(config);
   const lock = require("../packages/local-search/maintenance").acquire(config);
   try {
-    const busy = await refreshMetadata(config, { cursor, deadline: Date.now() + 1_000 });
+    const busy = await refreshMetadata(config, { cursor, ...SLICE_TIME });
     assert.equal(busy.status, "busy");
     assert.equal(cursor.metadataRefreshedAt, null);
   } finally { lock.release(); }
 
   const abort = new AbortController();
   const aborted = await refreshMetadata(config, {
-    cursor, signal: abort.signal, deadline: Date.now() + 1_000,
+    cursor, signal: abort.signal, ...SLICE_TIME,
     beforePublish() { abort.abort(); },
   });
   assert.equal(aborted.status, "aborted");
@@ -218,7 +224,7 @@ test("lock contention, abort, and storage rejection do not publish false success
   assert.equal(fs.existsSync(path.join(config.stateDirectory, "catalogue.json")), false);
 
   config.budgets.quotaBytes = 1;
-  const rejected = await refreshMetadata(config, { cursor, deadline: Date.now() + 1_000 });
+  const rejected = await refreshMetadata(config, { cursor, ...SLICE_TIME });
   assert.equal(rejected.status, "storageRejected");
   assert.equal(cursor.metadataRefreshedAt, null);
   assert.equal(fs.existsSync(path.join(config.stateDirectory, "catalogue.json")), false);
@@ -250,7 +256,7 @@ test("closing a cursor closes retained directory handles", async (t) => {
   const config = fixture(t);
   fs.writeFileSync(path.join(config.roots[0].path, "note.md"), "alpha");
   const cursor = createMetadataCursor(config);
-  await refreshMetadata(config, { cursor, maxEntries: 1, deadline: Date.now() + 1_000 });
+  await refreshMetadata(config, { cursor, maxEntries: 1, ...SLICE_TIME });
   closeMetadataCursor(cursor);
   assert.equal(cursor.closed, true);
   assert.equal(cursor.roots.every((state) => state.directory === null), true);
@@ -265,7 +271,7 @@ test("an aborted unpublished slice replays consumed cursor work", async (t) => {
   const cursor = createMetadataCursor(config);
   const abort = new AbortController();
   const interrupted = await refreshMetadata(config, {
-    cursor, signal: abort.signal, deadline: Date.now() + 1_000,
+    cursor, signal: abort.signal, ...SLICE_TIME,
     beforePublish() { abort.abort(); },
   });
   assert.equal(interrupted.status, "aborted");
@@ -279,7 +285,7 @@ test("an aborted unpublished slice replays consumed cursor work", async (t) => {
   let signalReads = 0;
   const midscanCursor = createMetadataCursor(config);
   const midscan = await refreshMetadata(config, {
-    cursor: midscanCursor, deadline: Date.now() + 1_000,
+    cursor: midscanCursor, ...SLICE_TIME,
     signal: { get aborted() { signalReads += 1; return signalReads > 2; } },
   });
   assert.equal(midscan.status, "aborted");
@@ -287,7 +293,7 @@ test("an aborted unpublished slice replays consumed cursor work", async (t) => {
 
   const hookCursor = createMetadataCursor(config);
   const hookFailure = await refreshMetadata(config, {
-    cursor: hookCursor, deadline: Date.now() + 1_000,
+    cursor: hookCursor, ...SLICE_TIME,
     beforePublish() { throw new Error("pre-publish failure"); },
   });
   assert.equal(hookFailure.status, "failed");
@@ -295,7 +301,7 @@ test("an aborted unpublished slice replays consumed cursor work", async (t) => {
 
   const storageCursor = createMetadataCursor(config);
   config.budgets.quotaBytes = 1;
-  assert.equal((await refreshMetadata(config, { cursor: storageCursor, deadline: Date.now() + 1_000 })).status, "storageRejected");
+  assert.equal((await refreshMetadata(config, { cursor: storageCursor, ...SLICE_TIME })).status, "storageRejected");
   config.budgets.quotaBytes = Number.MAX_SAFE_INTEGER;
   assert.equal((await finish(config, storageCursor)).complete, true);
 
@@ -306,7 +312,7 @@ test("an aborted unpublished slice replays consumed cursor work", async (t) => {
     return rename(source, target);
   };
   try {
-    assert.equal((await refreshMetadata(config, { cursor: publishCursor, deadline: Date.now() + 1_000 })).status, "failed");
+    assert.equal((await refreshMetadata(config, { cursor: publishCursor, ...SLICE_TIME })).status, "failed");
   } finally { fs.renameSync = rename; }
   assert.equal((await finish(config, publishCursor)).complete, true);
   assert.equal(loadCatalogue(config).records.length, 2);
@@ -320,7 +326,7 @@ test("completed roots remain complete until the entire fair generation publishes
   let result;
   for (let slice = 0; slice < 40; slice += 1) {
     result = await refreshMetadata(config, {
-      cursor, maxEntries: 1, maxRootFiles: 1, maxDeletionChecks: 1, deadline: Date.now() + 1_000,
+      cursor, maxEntries: 1, maxRootFiles: 1, maxDeletionChecks: 1, ...SLICE_TIME,
     });
     if (result.complete) break;
   }
@@ -348,7 +354,7 @@ test("each slice revokes removed roots and resets changed root policy", async (t
 
   const removalCursor = createMetadataCursor(config);
   config.roots = [];
-  const removed = await refreshMetadata(config, { cursor: removalCursor, deadline: Date.now() + 1_000 });
+  const removed = await refreshMetadata(config, { cursor: removalCursor, ...SLICE_TIME });
   assert.equal(removed.status, "ok");
   assert.equal(removed.complete, true);
   assert.equal(loadCatalogue(config).records.length, 0);
@@ -371,7 +377,7 @@ test("an already-aborted policy change remains pending until replacement publica
   abort.abort();
   assert.equal((await refreshMetadata(config, { cursor, signal: abort.signal })).status, "aborted");
   for (let slice = 0; slice < 3; slice += 1) {
-    await refreshMetadata(config, { cursor, maxEntries: 1, deadline: Date.now() + 1_000 });
+    await refreshMetadata(config, { cursor, maxEntries: 1, ...SLICE_TIME });
   }
 
   const records = loadCatalogue(config).records;
@@ -400,11 +406,11 @@ test("policy invalidations survive every unpublished failure branch", { concurre
         finally { lock.release(); }
       } else if (failure === "storageRejected") {
         config.budgets.quotaBytes = 1;
-        assert.equal((await refreshMetadata(config, { cursor, deadline: Date.now() + 1_000 })).status, "storageRejected");
+        assert.equal((await refreshMetadata(config, { cursor, ...SLICE_TIME })).status, "storageRejected");
         config.budgets.quotaBytes = Number.MAX_SAFE_INTEGER;
       } else if (failure === "beforePublish") {
         assert.equal((await refreshMetadata(config, {
-          cursor, deadline: Date.now() + 1_000,
+          cursor, ...SLICE_TIME,
           beforePublish() { throw new Error("pre-publish failure"); },
         })).status, "failed");
       } else {
@@ -413,7 +419,7 @@ test("policy invalidations survive every unpublished failure branch", { concurre
           if (target === path.join(config.stateDirectory, "catalogue.json")) throw Object.assign(new Error("publish failed"), { code: "EIO" });
           return rename(source, target);
         };
-        try { assert.equal((await refreshMetadata(config, { cursor, deadline: Date.now() + 1_000 })).status, "failed"); }
+        try { assert.equal((await refreshMetadata(config, { cursor, ...SLICE_TIME })).status, "failed"); }
         finally { fs.renameSync = rename; }
       }
 
@@ -436,8 +442,8 @@ test("deletion candidates stay stable across catalogue reorder and growth", asyn
   for (const name of removed) fs.unlinkSync(path.join(config.roots[0].path, name));
 
   const cursor = createMetadataCursor(config);
-  await refreshMetadata(config, { cursor, maxEntries: 1, maxDeletionChecks: 1, maxDeletions: 1, deadline: Date.now() + 1_000 });
-  await refreshMetadata(config, { cursor, maxEntries: 1, maxDeletionChecks: 1, maxDeletions: 1, deadline: Date.now() + 1_000 });
+  await refreshMetadata(config, { cursor, maxEntries: 1, maxDeletionChecks: 1, maxDeletions: 1, ...SLICE_TIME });
+  await refreshMetadata(config, { cursor, maxEntries: 1, maxDeletionChecks: 1, maxDeletions: 1, ...SLICE_TIME });
   const concurrent = loadCatalogue(config);
   concurrent.records.unshift({
     ...concurrent.records.find((record) => record.rootId === "docs-1"),
@@ -447,7 +453,7 @@ test("deletion candidates stay stable across catalogue reorder and growth", asyn
 
   let result;
   for (let slice = 0; slice < 30; slice += 1) {
-    result = await refreshMetadata(config, { cursor, maxEntries: 1, maxDeletionChecks: 1, maxDeletions: 1, deadline: Date.now() + 1_000 });
+    result = await refreshMetadata(config, { cursor, maxEntries: 1, maxDeletionChecks: 1, maxDeletions: 1, ...SLICE_TIME });
     if (result.complete) break;
   }
   assert.equal(result.complete, true);

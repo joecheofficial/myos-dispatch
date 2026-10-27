@@ -530,41 +530,61 @@ test("Windows writable execution fails before allocation or invocation without s
 
 test("runner bounds unverifiable cleanup and reports failure instead of success", { skip: process.platform === "win32" }, async (t) => {
   const { runCommand } = require("../src/background/background-agent-runner");
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "myos-unquiescent-test-"));
   const kill = process.kill.bind(process);
   const script = 'require("node:fs").writeFileSync("group.pid", String(process.pid)); process.on("SIGTERM",()=>{}); setInterval(()=>{},1000);';
-  const signals = [];
+  // The mock swallows signals to the owned group only once the child has
+  // written group.pid. A child that had not yet written it when the runner's
+  // timeout fired is really signalled, so that run says nothing about
+  // unverifiable cleanup: it is discarded and retried with a longer timeout.
+  let dir;
+  let signals;
   t.mock.method(process, "kill", (pid, signal) => {
-    const ownedPid = fs.existsSync(path.join(dir, "group.pid")) ? Number(fs.readFileSync(path.join(dir, "group.pid"), "utf8")) : null;
+    const ownedPid = dir && fs.existsSync(path.join(dir, "group.pid")) ? Number(fs.readFileSync(path.join(dir, "group.pid"), "utf8")) : null;
     if (pid === -ownedPid && signal !== 0) { signals.push(signal); return true; }
     return kill(pid, signal);
   });
+  const reapGroup = async (folder) => {
+    if (!fs.existsSync(path.join(folder, "group.pid"))) return;
+    const pgid = Number(fs.readFileSync(path.join(folder, "group.pid"), "utf8"));
+    // macOS can answer EPERM for a group that is still being torn down.
+    try { kill(-pgid, "SIGKILL"); } catch (error) { if (!["ESRCH", "EPERM"].includes(error.code)) throw error; }
+    // Let Node reap this owned test process before deleting its fixture.
+    for (let i = 0; i < 3000; i += 1) {
+      try { kill(-pgid, 0); }
+      catch (error) { if (error.code === "ESRCH") break; if (error.code !== "EPERM") throw error; }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.throws(() => kill(-pgid, 0), { code: "ESRCH" });
+  };
   try {
-    const start = Date.now();
-    const result = await runCommand({ command: process.execPath, args: ["-e", script], cwd: dir,
-      env: { PATH: process.env.PATH }, timeoutMs: 300 });
+    let result;
+    let elapsed;
+    let timeoutMs;
+    for (const attemptTimeoutMs of TIMEOUT_LADDER_MS) {
+      if (dir) { await reapGroup(dir); fs.rmSync(dir, { recursive: true, force: true }); }
+      dir = fs.mkdtempSync(path.join(os.tmpdir(), "myos-unquiescent-test-"));
+      signals = [];
+      timeoutMs = attemptTimeoutMs;
+      const start = Date.now();
+      result = await runCommand({ command: process.execPath, args: ["-e", script], cwd: dir,
+        env: { PATH: process.env.PATH }, timeoutMs });
+      elapsed = Date.now() - start;
+      if (signals[0] === "SIGTERM") break;
+    }
+    assert.equal(signals[0], "SIGTERM", `child never wrote group.pid before ${TIMEOUT_LADDER_MS.at(-1)}ms; machine too loaded to test`);
     assert.equal(result.cleanupFailed, true);
     assert.equal(result.cleanupScope, "owned-process-group");
     assert.equal(result.ownedGroupStopped, process.platform === "win32" ? null : false);
     assert.equal(result.treeQuiescence, "unverified");
     assert.equal(result.code, null);
     assert.match(result.stderr, /quiescence could not be verified/);
-    assert.ok(Date.now() - start < 7000, "cleanup must have a bounded wait");
+    // The runner gives up 2 s after TERM plus 2 s after KILL. Measured from the
+    // timeout rather than from startup, this is the original 7 s bound.
+    assert.ok(elapsed - timeoutMs < 7_000, `cleanup must have a bounded wait (${elapsed}ms)`);
     assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
   } finally {
     t.mock.restoreAll();
-    if (fs.existsSync(path.join(dir, "group.pid"))) {
-      const pgid = Number(fs.readFileSync(path.join(dir, "group.pid"), "utf8"));
-      try { kill(-pgid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; }
-      // Let Node reap this owned test process before deleting its fixture.
-      for (let i = 0; i < 100; i += 1) {
-        try { kill(-pgid, 0); }
-        catch (error) { if (error.code === "ESRCH") break; throw error; }
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
-      assert.throws(() => kill(-pgid, 0), { code: "ESRCH" });
-    }
-    fs.rmSync(dir, { recursive: true, force: true });
+    if (dir) { await reapGroup(dir); fs.rmSync(dir, { recursive: true, force: true }); }
   }
 });
 
