@@ -2,7 +2,16 @@
 
 All notable changes to MyOS Dispatch are documented here.
 
-## Unreleased (issue #8 customer install fixes)
+## v4.4.0-rc.4 - 2026-10-27
+
+All Sorted customer line: v4.4.0-rc.3-allsorted-8.56 plus the owner-invocation umbrella fix (8.61) and the fixes below. It does not include later main-branch provider and writer routing work.
+
+- Customer refresh no longer rolls back on the owner-invocation test: recipe manifests resolve beside an explicit capability index (then the workspace), so a clean qualification home routes "run the doctor" to the Doctor's read-only recipes.
+- A fast path needs a meaningful match (score 12, i.e. one 12+ character term or two terms, or any multi-word phrase; `MYOS_FASTPATH_MIN_SCORE` or the fastpaths file's `policy.min_match_score` override it). Stop-after-match is never emitted without a scope, and the hook prints the taken fast path's intent, target, cli and stop rule.
+- Intent Horizon is off by default. Opt in with `MYOS_INTENT_HORIZON_ENABLED=1` or `~/.myos-dispatch/config/orchestration-features.json` `{"intentHorizon":{"enabled":true}}`.
+- `npm test` runs `scripts/run-tests.js`: full suite, bounded concurrency, one serial retry of timeout-class failures only. Runner timeout tests and the replay-corpus test no longer depend on machine speed or a shared HOME.
+
+### Included from the issue #8 customer install fixes
 
 - Owner invocation ("check dispatch health with doctor") is no longer vetoed by the invoked owner's own umbrella capability (`agent:doctor`), which scores on the owner name the invocation matched; a different capability that clearly outscores the recipe still keeps the request. An explicit agent invocation also outranks a project that matched only on an alias ("health" -> personal); a project named by slug, name or path still owns the request.
 - Find the Codex and Claude CLIs without relying on PATH. Hooks run with a minimal PATH, and on macOS both CLIs often ship only inside ChatGPT.app/Codex.app or the Claude desktop app. Discovery, sign-in probes, the model report and execution now search overrides (`MYOS_CODEX_BIN`, `MYOS_CLAUDE_BIN`), PATH, common install directories and the app bundles. `MYOS_PROVIDER_SEARCH=path` restores PATH-only lookup.
