@@ -361,7 +361,10 @@ test("UserPromptSubmit and PreToolUse route logs carry the Intent Fidelity contr
   }
 });
 
-test("formatDispatchContext injected context text is byte-identical whether fastpaths are present or omitted", () => {
+// Customer report (4.4.0-rc.3): the hook took the fast path but never told the
+// model which fast path, so "stop after match" had nothing to stop on. A taken
+// fast path now prints its intent, target, cli and stop rule.
+test("formatDispatchContext prints the taken fast path's guidance", () => {
   const basePlan = {
     branch: "fastpath",
     intentType: "directive",
@@ -392,7 +395,10 @@ test("formatDispatchContext injected context text is byte-identical whether fast
     plan: planWithFastpaths,
   });
 
-  assert.equal(ctxWith, ctxWithout);
+  assert.doesNotMatch(ctxWithout, /Fast path/);
+  assert.match(ctxWith, /^Fast path: matched route \(score 0\)$/m);
+  assert.match(ctxWith, /^Fast path target: capability cap-1$/m);
+  assert.equal(ctxWith.replace(/^Fast path.*\n/gm, ""), ctxWithout);
 });
 
 test("appendRouteLog records fastpaths on UserPromptSubmit and PreToolUse callsites", () => {

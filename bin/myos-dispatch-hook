@@ -16,7 +16,9 @@ const { buildPromptPack, buildToolPack } = require("../src/decision/jev-packs");
 
 const WORKSPACE_ROOT = path.resolve(__dirname, "..");
 const {
+  fastpathGuidance,
   finalizeDispatchPlan,
+  hasMatchScope,
   isAuthoringRequest,
   resolveDispatchPlan,
   resolveToolSafetyPlan,
@@ -275,7 +277,9 @@ function compactRoute(plan) {
     requiresPlan: Boolean(plan?.requiresPlan),
     requiresApproval: Boolean(plan?.requiresApproval),
     blockedBy: Array.isArray(plan?.blockedBy) ? plan.blockedBy : [],
-    stopAfterMatch: Boolean(plan?.stopAfterMatch),
+    // Later decision layers (Jev, session ownership) can rewrite the plan, so
+    // the invariant is enforced again at the point of emission.
+    stopAfterMatch: Boolean(plan?.stopAfterMatch) && hasMatchScope(plan || {}),
     allowBroadSearch: Boolean(plan?.allowBroadSearch),
     projectSlug: plan?.projectSlug || null,
     searchScope: plan?.searchScope || "",
@@ -283,6 +287,7 @@ function compactRoute(plan) {
     // records a lane, and no faithful bridge from log to observer is possible.
     capabilityId: plan?.capabilityId || null,
     ...(fastpaths ? { fastpaths } : {}),
+    fastpath: plan?.branch === "fastpath" && plan.fastpathMatches?.[0] ? fastpathGuidance(plan.fastpathMatches[0]) : null,
     dataSources: Array.isArray(plan?.dataSources) ? plan.dataSources : [],
     route: {
       lane: plan?.route?.lane || "",
@@ -313,6 +318,17 @@ function compactRoute(plan) {
       activeStage: plan?.shadowDispatch?.activeStage || "",
     },
   };
+}
+
+function formatFastpathGuidance(fastpath) {
+  if (!fastpath) return [];
+  return [
+    `Fast path: ${fastpath.intent} (score ${fastpath.score})`,
+    `Fast path target: ${fastpath.targetType}${fastpath.targetId ? ` ${fastpath.targetId}` : ""}`,
+    fastpath.path && fastpath.path !== fastpath.targetId ? `Fast path location: ${fastpath.path}` : "",
+    fastpath.cli ? `Fast path cli: ${fastpath.cli}` : "",
+    fastpath.stopRule ? `Fast path stop rule: ${fastpath.stopRule}` : "",
+  ].filter(Boolean);
 }
 
 function formatList(values) {
@@ -402,6 +418,7 @@ function formatDispatchContext({ surface, hookEventName, targetKind, text, plan,
     `Project: ${route.projectSlug || "none"}`,
     route.searchScope ? `Search scope: ${route.searchScope}` : "",
     route.dataSources.length ? `Data sources: ${formatList(route.dataSources)}` : "",
+    ...formatFastpathGuidance(route.fastpath),
     plan.stepContract ? `Read-only step: run node ${JSON.stringify(path.join(__dirname, 'myos-step.js'))} with JSON stdin ${JSON.stringify(plan.stepContract)}. Reuse verified evidence; do not repeat this lookup with a model.` : "",
     plan.stepHandoff ? `Read-only lookup handoff: ${plan.stepHandoff}. No verified answer was produced; use the normal scoped worker fallback.` : "",
     `Stop after match: ${route.stopAfterMatch ? "yes" : "no"}`,
@@ -510,6 +527,7 @@ function formatCompactDispatchContext({ surface, plan, autoDispatchedTasks = [] 
       (route.blockedBy.length ? ` blocked=${formatList(route.blockedBy)}` : "") +
       (parallel.blockedReasons.length ? ` fanout_blocked=${formatList(parallel.blockedReasons)}` : ""),
     "Route through MyOS Dispatch evaluation order before broad search; respect protected-surface/auth/destructive/send gates.",
+    ...formatFastpathGuidance(route.fastpath),
     parallel.intentFidelity?.enabled
       ? `[Intent Fidelity contract] ${parallel.intentFidelity.version} precedence=${parallel.intentFidelity.precedence[0]} default=${parallel.intentFidelity.defaultDecision} correction=${parallel.intentFidelity.correctionDetected ? "yes" : "no"}`
       : "",
@@ -556,6 +574,12 @@ function formatLeanDispatchContext(args) {
     ...(route.projectSlug ? { project: route.projectSlug } : {}),
     ...(route.searchScope ? { scope: route.searchScope } : {}),
     ...(route.dataSources.length ? { sources: route.dataSources } : {}),
+    ...(route.fastpath ? { fastpath: {
+      intent: route.fastpath.intent,
+      target: [route.fastpath.targetType, route.fastpath.targetId].filter(Boolean).join(" "),
+      ...(route.fastpath.cli ? { cli: route.fastpath.cli } : {}),
+      ...(route.fastpath.stopRule ? { stopRule: route.fastpath.stopRule } : {}),
+    } } : {}),
     stopAfterMatch: route.stopAfterMatch, broadSearch: route.allowBroadSearch,
     plan: route.requiresPlan, approval: route.requiresApproval,
     ...(route.blockedBy.length ? { blocked: route.blockedBy } : {}),

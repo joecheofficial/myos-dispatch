@@ -305,12 +305,48 @@ function skipRetiredFastpaths() {
   return String(process.env.MYOS_FASTPATH_SKIP_RETIRED ?? "").trim() !== "0";
 }
 
-function matchFastpaths(query, maxMatches = 3, filePath = FASTPATHS_FILE) {
+// A fast path stops the lookup, so one short word is not enough evidence to
+// take it. Every matched term scores at least 10, so a bare "> 0" let a single
+// generic word ("report", "brief") claim the whole request on customer
+// installs. A match is meaningful when it reaches the minimum score (default
+// 12: one 12+ character term, or two terms) or matches a multi-word phrase.
+// Override per install with MYOS_FASTPATH_MIN_SCORE or the fastpaths file's
+// policy.min_match_score (e.g. 10 for a curated file of distinctive names).
+const DEFAULT_FASTPATH_MIN_SCORE = 12;
+
+function positiveNumber(value) {
+  if (value == null || String(value).trim() === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function matchesMultiWordTerm(query, fastpath = {}) {
+  return (fastpath.match_terms || []).some((term) => {
+    const needle = normalizeText(term).trim();
+    return /\s/.test(needle) && hasFastpathTerm(query, needle);
+  });
+}
+
+function fastpathMinScore(filePath = FASTPATHS_FILE, env = process.env) {
+  const fromEnv = positiveNumber(env.MYOS_FASTPATH_MIN_SCORE);
+  if (fromEnv != null) return fromEnv;
+  try {
+    const fromPolicy = positiveNumber(readJsonCached(filePath)?.policy?.min_match_score);
+    if (fromPolicy != null) return fromPolicy;
+  } catch {
+    // Missing or unreadable file: built-in default.
+  }
+  return DEFAULT_FASTPATH_MIN_SCORE;
+}
+
+function matchFastpaths(query, maxMatches = 3, filePath = FASTPATHS_FILE, options = {}) {
   const skipRetired = skipRetiredFastpaths();
+  const minScore = positiveNumber(options.minScore) ?? fastpathMinScore(filePath, options.env || process.env);
   return loadFastpaths(filePath)
     .filter((fastpath) => !(skipRetired && fastpath && fastpath.status === "retired"))
     .map((fastpath) => ({ fastpath, score: scoreFastpath(query, fastpath) }))
-    .filter((entry) => entry.score > 0)
+    .filter((entry) => entry.score > 0
+      && (entry.score >= minScore || matchesMultiWordTerm(query, entry.fastpath)))
     .sort((a, b) => b.score - a.score)
     .slice(0, maxMatches);
 }
@@ -373,6 +409,35 @@ function firstFastpathPath(fastpath = {}) {
     || fastpath.data_path
     || fastpath.route_hint
     || "";
+}
+
+function fastpathSearchScope(fastpath = {}) {
+  return toWorkspacePath(fastpath.project_path)
+    || toWorkspacePath(fastpath.reference_path)
+    || toWorkspacePath(fastpath.recipe_path)
+    || toWorkspacePath(fastpath.handler_path)
+    || toWorkspacePath(fastpath.data_path)
+    || toWorkspacePath(fastpath.skill_path)
+    || "";
+}
+
+// The guidance a taken fast path hands the model: where to go, how, and when
+// to stop. Bounded so a long stop rule cannot crowd out the route block.
+function fastpathGuidance(match) {
+  const fastpath = match?.fastpath || match || {};
+  const clip = (value, max) => {
+    const text = String(value || "").replace(/\s+/g, " ").trim();
+    return text.length > max ? `${text.slice(0, max - 3)}...` : text;
+  };
+  return {
+    intent: clip(fastpath.intent || "matched route", 160),
+    score: Number(match?.score || 0),
+    targetType: inferFastpathTargetType(fastpath),
+    targetId: clip(inferFastpathTargetId(fastpath), 240),
+    path: clip(firstFastpathPath(fastpath), 240),
+    cli: clip(fastpath.cli || fastpath.tool_hint || "", 400),
+    stopRule: clip(fastpath.stop_rule || "", 600),
+  };
 }
 
 function inferFastpathTargetType(fastpath = {}) {
@@ -892,6 +957,11 @@ function buildTypedEvidenceDispatchPlan(signals) {
   return finalizeDispatchPlan(signals.query, plan, signals);
 }
 
+function hasMatchScope(plan = {}) {
+  return Boolean(String(plan.searchScope || "").trim())
+    || (Array.isArray(plan.dataSources) && plan.dataSources.length > 0);
+}
+
 function finalizeDispatchPlan(query, plan, signals) {
   const parallelizationPlan = buildParallelizationPlan(query, plan, signals);
   const planWithParallelization = {
@@ -903,6 +973,8 @@ function finalizeDispatchPlan(query, plan, signals) {
     ...planWithParallelization,
     ...inferGoalScale(query, planWithParallelization),
   };
+  // Invariant: never stop after a match that has no scope to stop in.
+  if (finalPlan.stopAfterMatch && !hasMatchScope(finalPlan)) finalPlan.stopAfterMatch = false;
 
   const env = signals?.env || process.env;
   const envOverride = String(env?.MYOS_PARALLELIZATION_AGGRESSION || "").trim().toLowerCase();
@@ -1066,20 +1138,19 @@ function resolveDispatchPlan(query, options = {}) {
 
   const primaryFastpath = fastpathMatches[0]?.fastpath || null;
   if (primaryFastpath) {
+    const fastpathScope = fastpathSearchScope(primaryFastpath);
     return attachShadowDispatch(query, finalizePlan({
       branch: "fastpath",
       intentType,
       actionType,
-      stopAfterMatch: true,
+      // Stop after match only with somewhere to stop: a scopeless stop told
+      // the model to quit looking without saying where the answer lives.
+      stopAfterMatch: Boolean(fastpathScope),
       allowBroadSearch: false,
       projectSlug: null,
       projectRecipeFirst: intentType === "directive",
       serviceAgents: [],
-      searchScope:
-        toWorkspacePath(primaryFastpath.project_path)
-        || toWorkspacePath(primaryFastpath.reference_path)
-        || toWorkspacePath(primaryFastpath.recipe_path)
-        || toWorkspacePath(primaryFastpath.handler_path),
+      searchScope: fastpathScope,
       fastpathMatches,
       projectMatches,
       route,
@@ -1565,6 +1636,10 @@ module.exports = {
   listProjectRecipes,
   loadFastpaths,
   matchFastpaths,
+  fastpathMinScore,
+  fastpathGuidance,
+  hasMatchScope,
+  DEFAULT_FASTPATH_MIN_SCORE,
   scoreProject,
   matchRecipes,
   matchProjects,
