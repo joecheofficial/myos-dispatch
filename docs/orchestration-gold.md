@@ -32,7 +32,9 @@ The contract does not weaken authority boundaries. For authentication, destructi
 
 ## 7. Intent Horizon
 
-Actionable interactive work at Goal Scale 3 or 4 receives the same provider-neutral Intent Horizon contract in Claude Code and Codex. The orchestrator must finish and verify the requested outcome, repair related failures it can safely fix, then run exactly one exploratory upgrade sweep across the routed project and its direct call-graph neighborhood.
+Intent Horizon is off by default. It asks the model to implement upgrades nobody requested, which is an operator preference rather than a safe default for customer and public installs. Opt in with `MYOS_INTENT_HORIZON_ENABLED=1`, or durably with `~/.myos-dispatch/config/orchestration-features.json` containing `{ "intentHorizon": { "enabled": true } }` (path override: `MYOS_ORCHESTRATION_FEATURES_CONFIG`). The environment variable wins in both directions; `0` forces it off.
+
+Once opted in, actionable interactive work at Goal Scale 3 or 4 receives the same provider-neutral Intent Horizon contract in Claude Code and Codex. The orchestrator must finish and verify the requested outcome, repair related failures it can safely fix, then run exactly one exploratory upgrade sweep across the routed project and its direct call-graph neighborhood.
 
 The sweep is intentionally aggressive and finite. Scale 3 can score four candidates and implement the best two. Scale 4 can score eight and implement the best four. Candidates must remain inside causal depth two, match the assigned ownership path, be reversible, and have binary verification. New authority, live production mutation, external sends, destructive actions, protected surfaces, and unaudited dependencies fail closed. An upgrade may create a required repair, but it cannot start another upgrade sweep.
 
@@ -48,7 +50,7 @@ The integration is compatibility-first and guarded by independent environment sw
 - `MYOS_CODEX_PLUGIN_ROUTING_ENABLED=0`
 - `MYOS_WRITABLE_SIDECARS_ENABLED=0`
 - `MYOS_INTENT_FIDELITY_ENABLED=0`
-- `MYOS_INTENT_HORIZON_ENABLED=0`
+- `MYOS_INTENT_HORIZON_ENABLED=0` (Intent Horizon is already off unless opted in)
 
 Scheduled mutation and external sends remain disabled until a separate audited canary proves sandboxing, repository targeting, idempotency, and delivery safety. `compile-schedule-spec.js` validates and compiles the contract but does not register or launch an operating-system or Codex schedule.
 

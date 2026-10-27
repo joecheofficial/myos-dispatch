@@ -333,7 +333,8 @@ Copy `.env.example` to your own local `.env`. Common toggles:
 | `MYOS_DATA_SOURCES_CONFIG` | Absolute path replacing the repo-local data-sources JSON. Set to `none` to skip local config. The example config remains the fallback. |
 | `MYOS_BACKGROUND_AGENTS_ENABLED` | `0` is the background kill switch: the planner emits no fan-out lanes, the hook tells the model not to spawn background subagents, and the sidecar runner refuses to execute tasks. |
 | `MYOS_INTENT_FIDELITY_ENABLED` | `0` disables the interactive latest-intent, reversible-assumption, and execute-before-report contract. Hard gates are preserved whether this feature is enabled or disabled. |
-| `MYOS_INTENT_HORIZON_ENABLED` | `0` disables the bounded post-verification upgrade sweep for actionable interactive Goal Scale 3 and 4 work. |
+| `MYOS_INTENT_HORIZON_ENABLED` | Off by default. `1` opts in to the bounded post-verification upgrade sweep for actionable interactive Goal Scale 3 and 4 work; `0` forces it off. Durable opt-in: `~/.myos-dispatch/config/orchestration-features.json` with `{"intentHorizon":{"enabled":true}}`. |
+| `MYOS_FASTPATH_MIN_SCORE` | Minimum fast path match score (default 12; a multi-word phrase match always qualifies). A fastpaths file can set `policy.min_match_score` instead. |
 | `MYOS_PARALLELIZATION_VERSION` / `_AUTO_PROMOTE` | Pin / disable fan-out stage promotion. |
 | `MYOS_DISPATCH_HEALTH_VERSION` / `_AUTO_PROMOTE` / `_AUTO_REPAIR` | Dispatcher-health self-promotion controls. |
 | `MYOS_TYPED_EVIDENCE_SHADOW_VERSION` / `_AUTO_PROMOTE` | Typed-evidence shadow-routing controls. |
