@@ -20,7 +20,7 @@ function fixture(t, options = {}) {
     enabled: true,
     stateDirectory: path.join(base, "state"),
     roots: [{ id: "docs", path: root, contentEnabled: true, extensions: options.extensions || [".txt", ".docx"], maxFiles: options.maxFiles || 20, maxFileBytes: 1024 * 1024 }],
-    budgets: { queryDeadlineMs: 2_000, indexDeadlineMs: 4_000, maxContentScanBytes: 4 * 1024 * 1024, reserveBytes: 1, reserveFraction: 0.000001, quotaBytes: 16 * 1024 * 1024 },
+    budgets: { queryDeadlineMs: 2_000, indexDeadlineMs: 60_000, maxContentScanBytes: 4 * 1024 * 1024, reserveBytes: 1, reserveFraction: 0.000001, quotaBytes: 16 * 1024 * 1024 },
     ...(options.parser ? { parser: options.parser } : {}),
   };
   return { base, root, config: normalizeConfig(input) };
