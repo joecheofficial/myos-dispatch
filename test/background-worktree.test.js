@@ -364,12 +364,31 @@ test("artifact collection preserves the index, all bytes, and detects later tamp
   assert.throws(() => verifyPatchArtifact(result.patchArtifact, result.patchSha256), /hash mismatch/);
 });
 
+// Timeout tests on a loaded machine (a customer refresh ran while Zoom was
+// busy): node can take longer than a short timeout just to start the child, so
+// the runner's SIGTERM can land before the child installed its handler. That
+// run says nothing about the runner. Each child marks when its handler is in
+// place; a run that timed out before the marker is retried with a longer
+// timeout. A run that did reach the marker is asserted in full.
+const TIMEOUT_LADDER_MS = [300, 1200, 4800, 15000];
+
+async function untilReadyBeforeTimeout(attempt) {
+  for (const timeoutMs of TIMEOUT_LADDER_MS) {
+    const outcome = await attempt(timeoutMs);
+    if (outcome.ready) return outcome;
+  }
+  assert.fail(`child never became ready within ${TIMEOUT_LADDER_MS.at(-1)}ms; machine too loaded to test`);
+}
+
 test("runner waits for provider termination before capturing partial work on timeout", async () => {
   const { runCommand } = require("../src/background/background-agent-runner");
   assert.equal(typeof runCommand, "function");
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "myos-timeout-test-"));
-  const script = 'const fs=require("node:fs"); process.on("SIGTERM",()=>setTimeout(()=>{fs.writeFileSync("last.txt","preserved");process.exit(0)},80)); setInterval(()=>{},1000);';
-  const result = await runCommand({ command: process.execPath, args: ["-e", script], cwd: dir, env: { PATH: process.env.PATH }, timeoutMs: 300 });
+  const { dir, result } = await untilReadyBeforeTimeout(async (timeoutMs) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "myos-timeout-test-"));
+    const script = 'const fs=require("node:fs"); process.on("SIGTERM",()=>setTimeout(()=>{fs.writeFileSync("last.txt","preserved");process.exit(0)},80)); fs.writeFileSync("ready","1"); setInterval(()=>{},1000);';
+    const result = await runCommand({ command: process.execPath, args: ["-e", script], cwd: dir, env: { PATH: process.env.PATH }, timeoutMs });
+    return { dir, result, ready: fs.existsSync(path.join(dir, "ready")) };
+  });
   assert.equal(result.signal, "SIGTERM");
   assert.equal(fs.readFileSync(path.join(dir, "last.txt"), "utf8"), "preserved");
 });
@@ -393,7 +412,6 @@ test("human Codex invocation pins OAuth and sandbox policy while loading host ho
 for (const parentExit of ["timeout", "normal"]) {
   test(`runner stops a same-group stdio-ignore grandchild after ${parentExit} parent exit`, { skip: process.platform === "win32" }, async () => {
     const { runCommand } = require("../src/background/background-agent-runner");
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "myos-grandchild-test-"));
     // unref plus ignored stdio lets the direct parent close independently.
     // The grandchild stays in the runner-owned process group and ignores TERM.
     const grandchild = `const fs = require("node:fs");
@@ -408,9 +426,23 @@ for (const parentExit of ["timeout", "normal"]) {
         if (!fs.existsSync("ready.pid")) return;
         ${parentExit === "normal" ? "clearInterval(ready);" : "// Wait for the runner timeout."}
       }, 10);`;
+    let dir;
+    const killGroup = (folder) => {
+      if (!folder || !fs.existsSync(path.join(folder, "group.pid"))) return;
+      const pgid = Number(fs.readFileSync(path.join(folder, "group.pid"), "utf8"));
+      try { process.kill(-pgid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; }
+    };
     try {
-      const result = await runCommand({ command: process.execPath, args: ["-e", parent], cwd: dir,
-        env: { PATH: process.env.PATH }, timeoutMs: parentExit === "timeout" ? 300 : 5000 });
+      // The normal-exit case never waits on the timeout; give it a generous one.
+      const ladder = parentExit === "timeout" ? TIMEOUT_LADDER_MS : [60000];
+      let result;
+      for (const timeoutMs of ladder) {
+        if (dir) { killGroup(dir); fs.rmSync(dir, { recursive: true, force: true }); }
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), "myos-grandchild-test-"));
+        result = await runCommand({ command: process.execPath, args: ["-e", parent], cwd: dir,
+          env: { PATH: process.env.PATH }, timeoutMs });
+        if (fs.existsSync(path.join(dir, "ready.pid"))) break;
+      }
       assert.equal(fs.existsSync(path.join(dir, "ready.pid")), true, "grandchild reached its signal handler");
       const bytes = () => fs.existsSync(path.join(dir, "late.txt")) ? fs.readFileSync(path.join(dir, "late.txt"), "utf8") : "";
       const captured = bytes();
@@ -425,11 +457,8 @@ for (const parentExit of ["timeout", "normal"]) {
       const pgid = Number(fs.readFileSync(path.join(dir, "group.pid"), "utf8"));
       assert.throws(() => process.kill(-pgid, 0), { code: "ESRCH" });
     } finally {
-      if (fs.existsSync(path.join(dir, "group.pid"))) {
-        const pgid = Number(fs.readFileSync(path.join(dir, "group.pid"), "utf8"));
-        try { process.kill(-pgid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; }
-      }
-      fs.rmSync(dir, { recursive: true, force: true });
+      killGroup(dir);
+      if (dir) fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 }
