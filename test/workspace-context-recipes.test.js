@@ -14,7 +14,8 @@ process.env.MYOS_DATA_SOURCES_CONFIG = "none";
 const workspace = path.join(process.env.MYOS_HOME_ROOT, "workspace");
 fs.mkdirSync(workspace, { recursive: true });
 fs.writeFileSync(path.join(workspace, "DISPATCH-FASTPATHS.json"), JSON.stringify({
-  fastpaths: [{ intent: "handoff", match_terms: ["handoff"], project_path: "projects/example" }],
+  // A multi-word term: a single short word no longer clears the fast path bar.
+  fastpaths: [{ intent: "handoff", match_terms: ["daily handoff"], project_path: "projects/example" }],
 }));
 const { matchRecipes, resolveDispatchPlan } = require("../src/workspace-context");
 const { formatDispatchContext } = require("../bin/myos-dispatch-hook");

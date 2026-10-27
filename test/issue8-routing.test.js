@@ -514,6 +514,63 @@ test('regression: a configured fastpath still wins with its own scope', t => {
   assert.match(out.scope, /projects\/lumen\/BRAIN\.md$/);
 });
 
+// Customer report (4.4.0-rc.3): any fast path score above 0 took the fast path
+// branch, "stop after match" was set with no scope, and the hook never printed
+// which fast path it took.
+function stopAfterMatch(context) {
+  const line = context.match(/^Stop after match: (yes|no)$/m);
+  if (line) return line[1] === 'yes';
+  const json = context.match(/^\{.*"stopAfterMatch":(true|false).*\}$/m);
+  return json ? json[1] === 'true' : null;
+}
+
+test('regression: a single short word does not take the fast path', t => {
+  const install = freshInstall(t);
+  fs.writeFileSync(path.join(install.workspace, 'DISPATCH-FASTPATHS.json'), JSON.stringify({ version: 1, fastpaths: [{
+    intent: 'weekly report', match_terms: ['report'], reference_path: 'projects/lumen/BRAIN.md', target_type: 'reference',
+  }] }));
+  const out = runPrompt(install, 'write me a short report about the garden');
+  assert.notEqual(out.branch, 'fastpath', out.context);
+  assert.doesNotMatch(out.context, /Fast path/);
+});
+
+test('regression: the fastpath file policy can lower the bar for curated single-word terms', t => {
+  const install = freshInstall(t);
+  fs.writeFileSync(path.join(install.workspace, 'DISPATCH-FASTPATHS.json'), JSON.stringify({ version: 1, policy: { min_match_score: 10 }, fastpaths: [{
+    intent: 'lumen brand brain', match_terms: ['lumen'], reference_path: 'projects/lumen/BRAIN.md', target_type: 'reference',
+  }] }));
+  assert.equal(runPrompt(install, 'open lumen').branch, 'fastpath');
+  assert.notEqual(runPrompt(install, 'open lumen', { env: { MYOS_FASTPATH_MIN_SCORE: '12' } }).branch, 'fastpath');
+});
+
+test('regression: a taken fast path prints its target, cli and stop rule', t => {
+  const install = freshInstall(t);
+  fs.writeFileSync(path.join(install.workspace, 'DISPATCH-FASTPATHS.json'), JSON.stringify({ version: 1, fastpaths: [{
+    intent: 'lumen release notes', match_terms: ['lumen release notes'], reference_path: 'projects/lumen/BRAIN.md',
+    target_type: 'reference', cli: 'node bin/lumen-notes.js --latest', stop_rule: 'Answer from the release notes file only.',
+  }] }));
+  const out = runPrompt(install, 'open the lumen release notes');
+  assert.equal(out.branch, 'fastpath', out.context);
+  assert.match(out.context, /node bin\/lumen-notes\.js --latest/);
+  assert.match(out.context, /Answer from the release notes file only\./);
+  assert.match(out.context, /projects\/lumen\/BRAIN\.md/);
+  assert.equal(stopAfterMatch(out.context), true);
+});
+
+test('regression: a fast path without a scope never sets stop after match', t => {
+  const install = freshInstall(t);
+  fs.writeFileSync(path.join(install.workspace, 'DISPATCH-FASTPATHS.json'), JSON.stringify({ version: 1, fastpaths: [{
+    intent: 'garden weather digest', match_terms: ['garden weather digest'], target_type: 'tool',
+    cli: 'node bin/garden-weather.js --today', stop_rule: 'Run the cli once.',
+  }] }));
+  const out = runPrompt(install, 'show the garden weather digest');
+  assert.equal(out.branch, 'fastpath', out.context);
+  assert.match(out.context, /node bin\/garden-weather\.js --today/);
+  assert.match(out.context, /Run the cli once\./);
+  assert.equal(out.scope, '');
+  assert.equal(stopAfterMatch(out.context), false);
+});
+
 test('regression: project lookups stay read-only data lookups; authoring keeps the source as context only', t => {
   const install = freshInstall(t, { dataSources: true });
   for (const prompt of ["what is Lumen's brand voice", 'show me the Lumen brand brain']) {
