@@ -245,7 +245,9 @@ test("settings FIFO is rejected without blocking", (t) => {
     "--dispatch-root", path.resolve(__dirname, ".."),
     "--settings", settingsPath,
     "describe",
-  ], { encoding: "utf8", timeout: 1_000 });
+    // Opening a FIFO with no writer blocks forever, so any finite limit proves
+    // the refusal does not block; 1 s was shorter than Node startup under load.
+  ], { encoding: "utf8", timeout: 30_000 });
 
   assert.equal(child.error, undefined, child.error?.message);
   assert.equal(child.status, 1, child.stderr);

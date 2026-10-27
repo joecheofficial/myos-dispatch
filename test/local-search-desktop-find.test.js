@@ -25,7 +25,10 @@ function writeSettings(filePath, value, mode = 0o600) {
 }
 
 function invoke(args) {
-  const child = spawnSync(process.execPath, [entrypoint, ...args], { encoding: "utf8", timeout: 2_000 });
+  // A hang guard only. The CLI bounds its own search (the desktop response cap),
+  // and Node startup alone can pass 2 s on a saturated machine.
+  const child = spawnSync(process.execPath, [entrypoint, ...args], { encoding: "utf8", timeout: 60_000 });
+  assert.equal(child.error, undefined, `myos-find did not finish: ${child.error?.message}`);
   return { child, result: JSON.parse(child.stdout) };
 }
 
@@ -402,43 +405,68 @@ test("owned process groups drain and finish bounded after TERM-ignoring descenda
   const { runSearch } = require("../packages/local-search/desktop-find");
   const directory = temporaryDirectory(t);
   const script = path.join(directory, "term-ignoring-wrapper.js");
+  // The pid file is the readiness marker: the descendant writes it (atomically)
+  // only after installing its TERM handler, and the wrapper ignores TERM before
+  // spawning. The overflow case overflows only once the descendant is ready.
   fs.writeFileSync(script, [
     '"use strict";',
     'const fs = require("node:fs");',
     'const { spawn } = require("node:child_process");',
+    'process.on("SIGTERM", () => {});',
     'const pidFile = process.argv[2];',
     'const overflow = process.argv[3] === "overflow";',
-    'const descendant = spawn(process.execPath, ["-e", "process.on(\\"SIGTERM\\", () => {}); setInterval(() => {}, 1000)"], { stdio: "inherit" });',
-    'fs.writeFileSync(pidFile, String(descendant.pid));',
-    'if (overflow) process.stdout.write("x".repeat(1024));',
-    'process.on("SIGTERM", () => {});',
+    'const descendant = `process.on("SIGTERM", () => {}); const fs = require("node:fs"); fs.writeFileSync(${JSON.stringify(pidFile + ".tmp")}, String(process.pid)); fs.renameSync(${JSON.stringify(pidFile + ".tmp")}, ${JSON.stringify(pidFile)}); setInterval(() => {}, 1000);`;',
+    'spawn(process.execPath, ["-e", descendant], { stdio: "inherit" });',
+    'const ready = setInterval(() => {',
+    '  if (!fs.existsSync(pidFile)) return;',
+    '  clearInterval(ready);',
+    '  if (overflow) process.stdout.write("x".repeat(1024));',
+    '}, 10);',
     'setInterval(() => {}, 1000);',
   ].join("\n"), { mode: 0o700 });
   const parsed = { query: "needle", mode: "native", numbers: { "--context-bytes": 512 } };
   const settings = { node24: process.execPath, configPath: path.join(directory, "config.json") };
-  for (const [kind, expected] of [["timeout", "timedOut"], ["cancel", "cancelled"], ["overflow", "budgetExceeded"]]) {
-    const pidFile = path.join(directory, `${kind}.pid`);
-    let cancel;
-    // Child startup alone can pass one second while the full suite loads the
-    // machine. The timeout case needs the wrapper to have spawned its
-    // TERM-ignoring descendant before the deadline fires, and the other cases
-    // need a deadline past the startup wait.
-    const startupWaitMs = 5_000;
+  // Child startup alone can pass several seconds on a saturated machine. The
+  // timeout case only proves something once the wrapper has spawned its
+  // TERM-ignoring descendant before the deadline fires; a run whose deadline
+  // came first is discarded and retried with a longer deadline. The cancel and
+  // overflow cases wait for the descendant with no deadline in play.
+  const timeoutLadderMs = [3_000, 12_000, 48_000];
+  const startupWaitMs = timeoutLadderMs.at(-1);
+  // Cleanup is two 40 ms grace periods, measured from the trigger rather than
+  // from child startup; the rest of the margin absorbs timer delay.
+  const boundedMs = 5_000;
+  const attempt = async (kind, timeoutMs) => {
+    const pidFile = path.join(directory, `${kind}-${timeoutMs}.pid`);
+    const calledAt = Date.now();
     const resultPromise = runSearch(parsed, settings, {
-      timeoutMs: kind === "timeout" ? 3_000 : startupWaitMs * 2,
+      timeoutMs,
       cleanupGraceMs: 40,
       spawn(_command, _args, options) {
         assert.equal(options.detached, true);
         return spawn(process.execPath, [script, pidFile, kind], options);
       },
     });
-    await waitFor(() => fs.existsSync(pidFile), startupWaitMs);
-    const startedAt = Date.now();
-    if (kind === "cancel") process.emit("SIGINT");
+    let settled = false;
+    resultPromise.then(() => { settled = true; }, () => { settled = true; });
+    await waitFor(() => fs.existsSync(pidFile) || settled, startupWaitMs * 2);
+    const readyAt = Date.now();
+    const ready = fs.existsSync(pidFile) && (kind !== "timeout" || readyAt < calledAt + timeoutMs);
+    if (ready && kind === "cancel") process.emit("SIGINT");
     const result = await resultPromise;
-    assert.equal(result.status, expected);
-    assert.ok(Date.now() - startedAt < startupWaitMs, `${kind} did not finish bounded`);
-    const descendantPid = Number(fs.readFileSync(pidFile, "utf8"));
-    await waitFor(() => !processExists(descendantPid), 5_000);
+    return { pidFile, ready, result, finishedAt: Date.now(), triggeredAt: kind === "timeout" ? Math.max(readyAt, calledAt + timeoutMs) : readyAt };
+  };
+  for (const [kind, expected] of [["timeout", "timedOut"], ["cancel", "cancelled"], ["overflow", "budgetExceeded"]]) {
+    let outcome;
+    for (const timeoutMs of kind === "timeout" ? timeoutLadderMs : [startupWaitMs * 4]) {
+      outcome = await attempt(kind, timeoutMs);
+      if (outcome.ready) break;
+      if (fs.existsSync(outcome.pidFile)) await waitFor(() => !processExists(Number(fs.readFileSync(outcome.pidFile, "utf8"))), 30_000);
+    }
+    assert.equal(outcome.ready, true, `${kind}: wrapper never spawned its descendant; machine too loaded to test`);
+    assert.equal(outcome.result.status, expected);
+    assert.ok(outcome.finishedAt - outcome.triggeredAt < boundedMs, `${kind} did not finish bounded`);
+    const descendantPid = Number(fs.readFileSync(outcome.pidFile, "utf8"));
+    await waitFor(() => !processExists(descendantPid), 30_000);
   }
 });

@@ -92,7 +92,7 @@ function invokeChild(fixture, request) {
       stateDirectory: fixture.stateDirectory,
       ...request,
     }),
-    timeout: 5_000,
+    timeout: 60_000, // hang guard; Node 24 startup alone can pass 5 s under load
   });
 }
 
@@ -220,7 +220,9 @@ function rootIndex(t, ids, withFiles = true) {
     enabled: true,
     stateDirectory: path.join(base, "state"),
     roots,
-    budgets: { queryDeadlineMs: 10_000, indexDeadlineMs: 10_000, reserveBytes: 1, reserveFraction: 0.000001, quotaBytes: 1024 ** 2 },
+    // Deadlines are not under test here (the deadline cases set their own); 65
+    // roots took 17 s of a 10 s deadline on a saturated machine.
+    budgets: { queryDeadlineMs: 120_000, indexDeadlineMs: 120_000, reserveBytes: 1, reserveFraction: 0.000001, quotaBytes: 1024 ** 2 },
   });
   const catalogue = reconcile(config, { publish: false }).catalogue;
   const staged = stage(config, catalogue, "a".repeat(64));

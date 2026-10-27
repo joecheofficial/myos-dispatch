@@ -24,10 +24,15 @@ function run(args, options = {}) {
 }
 
 function fakeNode(t, version = "v24.9.0") {
-  const executable = path.join(temporaryDirectory(t), "fake-node");
-  fs.writeFileSync(executable, `#!/usr/bin/env node
-if(process.argv[2]==="--version"){process.stdout.write(${JSON.stringify(`${version}\n`)});process.exit(0)}
-const args=process.argv.slice(3);process.stdout.write(JSON.stringify({argv:args})+"\\n");process.exit(args[0]==="fail"?7:0)
+  const directory = temporaryDirectory(t);
+  const executable = path.join(directory, "fake-node");
+  const script = path.join(directory, "fake-node.js");
+  // The entrypoint probes --version under a fixed 5 s timeout. Answer it from
+  // the shell, so a saturated machine's Node startup time cannot fail the probe.
+  fs.writeFileSync(script, `const args=process.argv.slice(3);process.stdout.write(JSON.stringify({argv:args})+"\\n");process.exit(args[0]==="fail"?7:0)\n`);
+  fs.writeFileSync(executable, `#!/bin/sh
+if [ "$1" = "--version" ]; then printf '%s\\n' ${JSON.stringify(version)}; exit 0; fi
+exec ${JSON.stringify(process.execPath)} ${JSON.stringify(script)} "$@"
 `);
   fs.chmodSync(executable, 0o755);
   return executable;

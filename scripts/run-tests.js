@@ -94,7 +94,10 @@ function runNodeTest(args, env) {
 }
 
 async function main(argv = process.argv.slice(2)) {
-  const env = { MYOS_OAUTH_RECOVERY: "0", MYOS_BACKGROUND_BACKPRESSURE_ENABLED: "0", ...process.env };
+  // Local-search residency probes wait 1 s by default and drop a file that does
+  // not answer; under load that removes fixture files. No test measures it.
+  const env = { MYOS_OAUTH_RECOVERY: "0", MYOS_BACKGROUND_BACKPRESSURE_ENABLED: "0",
+    MYOS_LOCAL_SEARCH_PROBE_TIMEOUT_MS: "30000", ...process.env };
   const concurrency = defaultConcurrency(env);
   const targets = argv.length ? argv : testFiles();
   const first = await runNodeTest([`--test-concurrency=${concurrency}`, ...targets], env);

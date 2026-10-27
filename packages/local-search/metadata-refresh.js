@@ -278,7 +278,9 @@ async function refreshMetadata(config, options = {}) {
   };
   const processedByRoot = Object.fromEntries(cursor.roots.map((state) => [state.root.id, 0]));
   const resultBudget = { budgets, usage, processedByRoot, budgetQualifier: "cooperativeBudgetNotHardDeadline" };
-  const deadline = Math.min(options.deadline ?? Date.now() + 100, Date.now() + 100);
+  // options.now is an injectable clock; the slice never runs past 100 ms of it.
+  const clock = typeof options.now === "function" ? options.now : Date.now;
+  const deadline = Math.min(options.deadline ?? clock() + 100, clock() + 100);
   if (options.signal?.aborted) return { complete: false, status: "aborted", changed: 0, ...resultBudget };
   await immediate();
   const { acquire } = require("./maintenance");
@@ -295,7 +297,7 @@ async function refreshMetadata(config, options = {}) {
     const now = new Date().toISOString();
     let changed = catalogue.records.length - records.size;
     let idle = 0;
-    while (usage.entries < budgets.entries && usage.rootFiles < budgets.rootFiles && Date.now() <= deadline && idle < cursor.roots.length && !options.signal?.aborted) {
+    while (usage.entries < budgets.entries && usage.rootFiles < budgets.rootFiles && clock() <= deadline && idle < cursor.roots.length && !options.signal?.aborted) {
       let state;
       for (let attempts = 0; attempts < cursor.roots.length; attempts += 1) {
         const candidate = cursor.roots[cursor.nextRoot++ % cursor.roots.length];

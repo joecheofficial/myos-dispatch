@@ -25,7 +25,9 @@ function fixture(t, files, budgets = {}, roots = null) {
   return { root, config: normalizeConfig({
     enabled: true, stateDirectory: path.join(base, "state"),
     roots: roots || [{ id: "docs", path: root, contentEnabled: true, extensions: [".md", ".txt"], maxFiles: 64, maxFileBytes: 64 * 1024 }],
-    budgets: { queryDeadlineMs: 2000, indexDeadlineMs: 2000, reserveBytes: 1, reserveFraction: 0.000001, quotaBytes: 1024 ** 2, ...budgets },
+    // Only the FIFO case exercises a deadline, and it sets its own. A 2 s query
+    // deadline expired on a saturated machine and turned results partial.
+    budgets: { queryDeadlineMs: 120_000, indexDeadlineMs: 120_000, reserveBytes: 1, reserveFraction: 0.000001, quotaBytes: 1024 ** 2, ...budgets },
   }) };
 }
 

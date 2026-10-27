@@ -51,7 +51,13 @@ for (const variant of ['missing','valid','invalid','unavailable']) test(`ambiguo
   ]}));
   const calls=path.join(home,'calls'),preload=path.join(home,'transport.cjs');
   const status=variant==='invalid'?401:variant==='unavailable'?503:200;
-  fs.writeFileSync(preload,`global.fetch=async()=>{require('fs').appendFileSync(${JSON.stringify(calls)},'1');return new Response(JSON.stringify({answers:{route:{type:'choice',choice:'r0',confidence:0.99}},usage:{input_tokens:24,output_tokens:3}}),{status:${status}});};`);
+  // The hook's semantic route gives Jev a fixed 1.2 s. With a starved hook
+  // process that budget can lapse before the synthetic response is read, which
+  // looks like an unavailable provider. The preload widens the client timeout
+  // to a hang guard; the provider statuses alone decide each variant.
+  const jevClient=path.resolve(__dirname,'../src/runtime/jev-client.js');
+  fs.writeFileSync(preload,`global.fetch=async()=>{require('fs').appendFileSync(${JSON.stringify(calls)},'1');return new Response(JSON.stringify({answers:{route:{type:'choice',choice:'r0',confidence:0.99}},usage:{input_tokens:24,output_tokens:3}}),{status:${status}});};
+const client=require(${JSON.stringify(jevClient)});const create=client.createJevClient;client.createJevClient=(opts={})=>create({...opts,timeoutMs:60000});`);
   const overrides={MYOS_JEV_MODE:'auto',TYPESAFE_API_KEY:variant==='missing'?'':'fixture',NODE_OPTIONS:'--require='+preload};
   const first=run('Show cohort onboarding readiness','codex',overrides);
   assert.equal(first.status,0,first.stderr);

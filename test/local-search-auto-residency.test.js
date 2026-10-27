@@ -7,6 +7,10 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
+// No test here exercises a deadline. A tight one ends discovery early on a
+// saturated machine, which reads as missing records.
+const UNTESTED_DEADLINE_MS = 120_000;
+
 function statRow(filePath, flags) {
   const stat = fs.lstatSync(filePath, { bigint: true });
   return [stat.dev, stat.ino, stat.size, stat.nlink, stat.uid, stat.mode.toString(8), flags].join(":");
@@ -47,7 +51,7 @@ test("auto reconciliation batches discovery and fresh metadata residency without
     stateDirectory: path.join(base, "state"),
     roots: [{ id: "docs", path: rootPath, contentEnabled: false, extensions: [".md"], maxFiles: 129, maxFileBytes: 4096 }],
   });
-  const first = reconcile(config, { publish: false, deadline: Date.now() + 5000 });
+  const first = reconcile(config, { publish: false, deadline: Date.now() + UNTESTED_DEADLINE_MS });
 
   assert.equal(first.catalogue.records.length, names.length);
   assert.deepEqual(first.catalogue.records.map((record) => record.relative), names);
@@ -64,7 +68,7 @@ test("auto reconciliation batches discovery and fresh metadata residency without
   assert.deepEqual(batches.flat(), [...names.map((name) => path.join(rootPath, name)), ...names.map((name) => path.join(rootPath, name))]);
 
   flags = 0x40000000;
-  const second = reconcile(config, { publish: false, deadline: Date.now() + 5000 });
+  const second = reconcile(config, { publish: false, deadline: Date.now() + UNTESTED_DEADLINE_MS });
   assert.equal(second.catalogue.records.length, 0);
   assert.equal(second.unavailable.filter((item) => item.reason === "cloudPlaceholderOrFlagsUnavailable").length, names.length);
 });
@@ -89,6 +93,15 @@ test("partial discovery and an early metadata denial retain later reconciliation
     scope.verifyMetadata = verifyMetadata;
     delete require.cache[cataloguePath];
   });
+  // Residency probes spawn /usr/bin/stat with a fixed 1 s timeout per call and
+  // fail closed, so a saturated machine drops every file. Answer them from the
+  // real metadata (resident, flags 0) so only discovery and the denial decide.
+  const originalExec = childProcess.execFileSync;
+  childProcess.execFileSync = (command, args, options) => {
+    if (command !== "/usr/bin/stat") return originalExec(command, args, options);
+    return args[1].includes(":") ? `${args.slice(2).map((filePath) => statRow(filePath, 0)).join("\n")}\n` : "0\n";
+  };
+  t.after(() => { childProcess.execFileSync = originalExec; });
 
   const { normalizeConfig } = require("../packages/local-search/config");
   const { reconcile } = require("../packages/local-search/catalogue");
@@ -97,7 +110,8 @@ test("partial discovery and an early metadata denial retain later reconciliation
     stateDirectory: path.join(base, "state"),
     roots: [{ id: "docs", path: rootPath, contentEnabled: false, extensions: [".md"], maxFiles: 129, maxFileBytes: 4096 }],
   });
-  const result = reconcile(config, { publish: false, deadline: Date.now() + 5000 });
+  // maxFiles and the denial, not the deadline, make this sweep partial.
+  const result = reconcile(config, { publish: false, deadline: Date.now() + UNTESTED_DEADLINE_MS });
 
   assert.equal(result.complete, false);
   assert.deepEqual(result.catalogue.records.map((record) => record.relative), names.slice(1, 129));
@@ -127,7 +141,7 @@ test("discovery preserves bigint-stat fractional modification milliseconds", { c
   const { discoverRoot } = require("../packages/local-search/scope");
   const discovered = discoverRoot({
     path: rootPath, contentEnabled: false, extensions: [".md"], maxFiles: 1, maxFileBytes: 4096,
-  }, Date.now() + 5000);
+  }, Date.now() + UNTESTED_DEADLINE_MS);
 
   assert.equal(discovered.files[0].mtimeMs, expectedMilliseconds);
 });

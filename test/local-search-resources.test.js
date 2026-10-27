@@ -100,6 +100,16 @@ test("maintenance reserves amplified vector payload and rows per exact chunk", (
   assert.match(fourChunks.limitation, /not a hard quota promise/);
 });
 
+// Waits on controller state with a fake resource clock. Polls return as soon as
+// the condition holds; the long limit only stops a hang, so a starved machine
+// cannot make a passing run fail.
+const SETTLE_LIMIT_MS = 30_000;
+async function until(check, limitMs = SETTLE_LIMIT_MS) {
+  const deadline = Date.now() + limitMs;
+  while (!check() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 5));
+  return check();
+}
+
 function childCode() {
   return `
     const fs=require('node:fs');
@@ -257,14 +267,16 @@ test("memory is resampled inside the held slot and a failed sample releases it",
   const readings = { availableBytes: 16 * 1024 ** 2, totalBytes: 32 * 1024 ** 2 };
   assert.equal(memoryAdmission(config, { readings }).ok, true);
   const owner = await acquireInference(config);
-  const waiting = acquireInferenceWithMemory(config, { memoryOptions: { readings }, timeoutMs: 500 });
+  // Memory is sampled only once the slot is held, after owner.release(); the
+  // wait limit is a hang guard, not part of the proof.
+  const waiting = acquireInferenceWithMemory(config, { memoryOptions: { readings }, timeoutMs: SETTLE_LIMIT_MS });
   await new Promise((resolve) => setTimeout(resolve, 30));
   readings.availableBytes = 1;
   owner.release();
   const result = await waiting;
   assert.equal(result.ok, false);
   assert.equal(result.status, "memoryHeadroom");
-  const successor = await acquireInference(config, { timeoutMs: 100 });
+  const successor = await acquireInference(config, { timeoutMs: SETTLE_LIMIT_MS });
   successor.release();
 });
 
@@ -439,13 +451,12 @@ test("paused watcher coalesces triggers until idle and healthy dwell pass", asyn
   void controller.reconcileNow();
   void controller.reconcileNow();
   readings.onBattery = false;
-  await new Promise((resolve) => setTimeout(resolve, 30));
+  await until(() => controller.getState().resources.pausedReason === "healthyDwell");
   assert.equal(controller.getState().resources.pausedReason, "healthyDwell");
   now += 60_000;
   await new Promise((resolve) => setTimeout(resolve, 30));
   now += 60_000;
-  const deadline = Date.now() + 1000;
-  while (controller.getState().runs === 0 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+  await until(() => controller.getState().runs > 0);
   await controller.stop();
   // The two explicit triggers sent while paused never run on their own: they
   // stay queued until the periodic timer runs the first pass after the healthy
@@ -476,20 +487,21 @@ test("periodic hard-resource probes abort and drain active injected maintenance"
       qmdStatus: () => ({ available: true, semanticAvailable: false }),
       updateIndex: (_staged, operation = {}) => new Promise((resolve) => {
         readings.onBattery = true;
-        const timeout = setTimeout(() => resolve({ ok: false, status: "notAborted" }), 250);
+        // Only an abort settles this run; controller.stop() aborts it too, so
+        // the probe's abort is recorded before stop is called.
         operation.signal?.addEventListener("abort", () => {
           aborted = true;
-          clearTimeout(timeout);
           resolve({ ok: false, status: "aborted" });
         }, { once: true });
       }),
     },
   });
   t.after(() => controller.stop());
-  const deadline = Date.now() + 500;
-  while (!aborted && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 5));
+  const abortedByProbe = await until(() => aborted);
+  const pausedReason = controller.getState().resources.pausedReason;
   await controller.stop();
-  assert.equal(aborted, true);
+  assert.equal(abortedByProbe, true);
+  assert.equal(pausedReason, "onBattery");
   assert.equal(controller.getState().resources.pausedReason, "onBattery");
   assert.equal(controller.getState().running, false);
 });
@@ -517,10 +529,9 @@ test("periodic resource-status publication failure resets healthy dwell after re
         const status = path.join(config.stateDirectory, "resource-status.json");
         fs.unlinkSync(status);
         fs.mkdirSync(status);
-        const timeout = setTimeout(() => resolve({ ok: false, status: "notAborted" }), 500);
+        // Only an abort settles this run (t.after's stop aborts a hung one).
         operation.signal?.addEventListener("abort", () => {
           aborted = true;
-          clearTimeout(timeout);
           resolve({ ok: false, status: "aborted" });
         }, { once: true });
       }),
@@ -528,10 +539,7 @@ test("periodic resource-status publication failure resets healthy dwell after re
   });
   t.after(() => controller.stop());
   now += 100;
-  const deadline = Date.now() + 500;
-  while ((!aborted || controller.getState().running) && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
+  await until(() => aborted && !controller.getState().running);
   const state = controller.getState();
   assert.equal(aborted, true);
   assert.equal(state.running, false);
@@ -541,10 +549,7 @@ test("periodic resource-status publication failure resets healthy dwell after re
   assert.equal(fs.readdirSync(config.stateDirectory).some((name) => name.endsWith(".tmp")), false);
 
   fs.rmSync(path.join(config.stateDirectory, "resource-status.json"), { recursive: true });
-  const recoveryDeadline = Date.now() + 500;
-  while (controller.getState().resources.pausedReason !== "healthyDwell" && Date.now() < recoveryDeadline) {
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
+  await until(() => controller.getState().resources.pausedReason === "healthyDwell");
   assert.equal(controller.getState().resources.pausedReason, "healthyDwell");
   assert.equal(controller.getState().resources.healthySince, now);
   assert.equal(invocations, 1);
@@ -552,8 +557,7 @@ test("periodic resource-status publication failure resets healthy dwell after re
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(invocations, 1);
   now += 1;
-  const resumedDeadline = Date.now() + 500;
-  while (invocations === 1 && Date.now() < resumedDeadline) await new Promise((resolve) => setTimeout(resolve, 5));
+  await until(() => invocations !== 1);
   // A 5 ms poll may complete another legitimate index before this waiter resumes.
   assert.ok(invocations >= 2);
   await controller.stop();

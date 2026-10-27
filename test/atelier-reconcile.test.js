@@ -10,7 +10,21 @@ const { reconcileAtelierSource } = require('../src/atelier-reconcile');
 const { sourceManifest, readAtelierSource } = require('../src/atelier-source');
 const { syncAtelier } = require('../src/atelier-sync');
 const hash = b => crypto.createHash('sha256').update(b).digest('hex');
+// Reconciliation reads git state with a fixed 5 s timeout. On a saturated
+// machine git can take longer, and the timeout error replaces the failure a
+// test is asserting. Tests give git a hang guard instead; no test here is
+// about git latency.
+const GIT_HANG_GUARD_MS = 120000;
+const loadTolerantGit = new WeakSet();
+function tolerateSlowGit(t) {
+  if (loadTolerantGit.has(t)) return;
+  loadTolerantGit.add(t);
+  const execFileSync = cp.execFileSync;
+  t.mock.method(cp, 'execFileSync', (command, args, options) => execFileSync(command, args,
+    command === 'git' && options?.timeout ? { ...options, timeout: GIT_HANG_GUARD_MS } : options));
+}
 function fixture(t) {
+  tolerateSlowGit(t);
   const raw = fs.mkdtempSync(path.join(os.tmpdir(), 'reconcile-'));
   const root = fs.realpathSync(raw);
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
