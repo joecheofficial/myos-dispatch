@@ -265,40 +265,55 @@ function capabilityRootOwner(capability = {}) {
   return id ? id[1].toLowerCase() : null;
 }
 
-function readRecipeManifest(capability = {}) {
-  try {
-    const manifestPath = path.resolve(capability.scan_dir || WORKSPACE_ROOT, String(capability.source_path || ""));
-    return manifestPath.endsWith(".recipe.json") ? readJsonCached(manifestPath) : null;
-  } catch {
-    return null;
-  }
+// A recipe's source_path is relative to the tree its index describes. An
+// explicit scan_dir wins; otherwise the directory of an explicitly supplied
+// index comes before this machine's workspace. Resolving only against the
+// machine's workspace made an explicit index read whatever manifests happened
+// to be installed locally: the fixture-backed owner-invocation test passed on a
+// machine with the real Doctor recipes and failed in the clean qualification
+// home every customer refresh uses (customer refresh rollback, 4.4.0-rc.3).
+function manifestBaseDirs(options = {}) {
+  const explicit = options.scanDir || options.scan_dir || null;
+  if (explicit) return [explicit];
+  return options.indexPath ? [path.dirname(options.indexPath), WORKSPACE_ROOT] : [WORKSPACE_ROOT];
 }
 
-function isClearlyReadOnlyRecipe(capability = {}) {
-  if (isMutatingRecipe(capability)) return false;
+function readRecipeManifest(capability = {}, bases = null) {
+  const source = String(capability.source_path || "");
+  if (!source.endsWith(".recipe.json")) return null;
+  const roots = capability.scan_dir ? [capability.scan_dir] : (bases && bases.length ? bases : [WORKSPACE_ROOT]);
+  for (const root of roots) {
+    try {
+      const manifestPath = path.resolve(root, source);
+      if (!fs.existsSync(manifestPath)) continue;
+      return readJsonCached(manifestPath);
+    } catch {
+      // Try the next base.
+    }
+  }
+  return null;
+}
+
+function isClearlyReadOnlyRecipe(capability = {}, bases = null) {
+  if (isMutatingRecipe(capability, bases)) return false;
   const operation = String(capability.id || "").replace(/^recipe:/, "").split("/").pop()
     .replace(/[-_]+/g, " ").toLowerCase();
   if (READ_OPERATION_RE.test(operation)) return true;
-  const manifest = readRecipeManifest(capability);
+  const manifest = readRecipeManifest(capability, bases);
   return manifest?.readOnly === true
     || (Array.isArray(manifest?.tags) && manifest.tags.some((tag) => normalizeText(tag) === "read-only"))
     || /^read[ -]only\b/i.test(String(manifest?.safety?.rule || ""));
 }
 
-function isMutatingRecipe(capability = {}) {
+function isMutatingRecipe(capability = {}, bases = null) {
   const operation = String(capability.id || "").replace(/^recipe:/, "").split("/").pop()
     .replace(/[-_]+/g, " ").toLowerCase();
   const description = normalizeText(capability.description || "").trim();
   if (MUTATING_OPERATION_RE.test(operation) || MUTATING_OPERATION_RE.test(description)) return true;
-  try {
-    const manifestPath = path.resolve(capability.scan_dir || WORKSPACE_ROOT, String(capability.source_path || ""));
-    if (!manifestPath.endsWith(".recipe.json")) return false;
-    const manifest = readJsonCached(manifestPath);
-    if (manifest?.safety?.destructive === true) return true;
-    return (manifest?.actions || []).some((action) => MUTATING_OPERATION_RE.test(normalizeText(action)));
-  } catch {
-    return false;
-  }
+  const manifest = readRecipeManifest(capability, bases);
+  if (!manifest) return false;
+  if (manifest?.safety?.destructive === true) return true;
+  return (manifest?.actions || []).some((action) => MUTATING_OPERATION_RE.test(normalizeText(String(action))));
 }
 
 // Returns the invoked owner's read-only recipes, best fit first, or null.
@@ -321,7 +336,7 @@ function ownerRecipeInvocation(text, options = {}, workerCandidates = []) {
   const candidates = recipes
     .filter((capability) => recipeOwner(capability) === owner)
     .map((capability) => ({ ...capability, ...(scanDir ? { scan_dir: scanDir } : {}) }))
-    .filter((capability) => isClearlyReadOnlyRecipe(capability))
+    .filter((capability) => isClearlyReadOnlyRecipe(capability, manifestBaseDirs(options)))
     .map((capability) => {
       const match = scoreCapabilityMatch(capability, text);
       const terms = new Set(tokenize(`${capability.id} ${(capability.aliases || []).join(" ")}`));
@@ -358,7 +373,7 @@ function selectExecutionLane(text, options = {}) {
   // is not "create a payment link").
   const readRequest = READ_REQUEST_RE.test(normalizeText(text).trim());
   const recipeCandidates = shortlistCapabilities(text, 'recipe_dispatcher', 3, options)
-    .filter((entry) => !readRequest || !isMutatingRecipe(entry.capability));
+    .filter((entry) => !readRequest || !isMutatingRecipe(entry.capability, manifestBaseDirs(options)));
   const workerCandidates = shortlistCapabilities(text, 'worker_skill', 3, options);
 
   if (

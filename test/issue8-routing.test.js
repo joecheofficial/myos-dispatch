@@ -383,6 +383,24 @@ test('regression: owner invocation yields to a worker capability that clearly ou
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });
 
+// Customer refresh rollback (4.4.0-rc.3 -> refresh): the qualification run uses
+// a disposable HOME with no installed workspace. An explicit index must resolve
+// its recipe manifests beside itself, not in whatever workspace this machine has.
+test('regression: owner invocation reads manifests beside an explicit index in a clean home', (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'issue8-clean-home-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const indexPath = path.join(FIXTURE, 'workspace/capabilities-index.json');
+  const script = `const { selectExecutionLane } = require(${JSON.stringify(path.resolve(__dirname, '../src/capability-router'))});
+    process.stdout.write(JSON.stringify(selectExecutionLane('run the doctor', { indexPath: ${JSON.stringify(indexPath)} })));`;
+  const result = spawnSync(process.execPath, ['-e', script], {
+    env: { PATH: process.env.PATH, HOME: tmp }, cwd: tmp, encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const route = JSON.parse(result.stdout);
+  assert.equal(route.reason, 'owner_recipe_invocation', `${route.lane} ${route.reason}`);
+  assert.ok(route.candidates.every(entry => /doctor/.test(entry.capability.id)));
+});
+
 // Live-index shape (Joe's machine, 2026-10-22): the owner's own umbrella agent
 // capability ("agent:doctor", aliases doctor/diagnostics/health) outscored the
 // Doctor recipes by more than 15, so the worker-veto sent "check dispatch health
