@@ -370,3 +370,27 @@ test("status alone cannot select unrelated status recipes",()=>{
  assert.equal(selectExecutionLane("check the typed evidence dispatch shadow comparison status",{indexPath}).lane,"worker_skill");
  assert.equal(selectExecutionLane("backup status",{indexPath}).lane,"recipe_dispatcher");
 });
+
+
+test("generic chat and transactional words do not select unrelated agent owners", () => {
+  const indexPath = writeIndex({ capabilities: [
+    { id: "agent:mandrill", type: "agent", execution_lane: "worker_skill",
+      aliases: ["mandrill", "transactional", "transactional email"],
+      use_when: ["transactional"], description: "Transactional email API", priority: 50 },
+    { id: "agent:emmie", type: "agent", execution_lane: "worker_skill",
+      aliases: ["emmie", "chat"], use_when: ["chat"], description: "Inbox manager", priority: 50 },
+  ] });
+  for (const query of [
+    "What's happening with Codex? Is all the routing working correctly? I'm getting these weird transactional things that I don't know what they are. I'm a little worried that Codex is off in some way.",
+    "And why is this coming? Why are we getting things from other chats? Can you look into that? It says from ChatGPT from another chat. We got to get Codex properly working again.",
+  ]) {
+    assert.deepEqual(shortlistCapabilities(query, "worker_skill", 5, { indexPath }), []);
+  }
+  for (const [query, owner] of [
+    ["Check Mandrill transactional email delivery", "agent:mandrill"],
+    ["Ask Emmie about the inbox", "agent:emmie"],
+    ["Check transactional email delivery", "agent:mandrill"],
+  ]) {
+    assert.equal(shortlistCapabilities(query, "worker_skill", 5, { indexPath })[0]?.capability.id, owner);
+  }
+});
