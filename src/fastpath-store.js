@@ -259,10 +259,10 @@ function auditFastpathsDoc(fastpathsDoc, options = {}) {
     if (!entry.added_at) warnings.push(`${label}: added_at missing`);
     if (status !== "retired" && !entry.last_seen_at) warnings.push(`${label}: last_seen_at missing`);
 
-    if (entry.capability_id && capabilityIds.size > 0 && !capabilityIds.has(entry.capability_id)) {
+    if (status !== "retired" && entry.capability_id && capabilityIds.size > 0 && !capabilityIds.has(entry.capability_id)) {
       errors.push(`${label}: capability_id not found in capabilities-index.json (${entry.capability_id})`);
     }
-    if (entry.verify_capability_id && capabilityIds.size > 0 && !capabilityIds.has(entry.verify_capability_id)) {
+    if (status !== "retired" && entry.verify_capability_id && capabilityIds.size > 0 && !capabilityIds.has(entry.verify_capability_id)) {
       errors.push(`${label}: verify_capability_id not found in capabilities-index.json (${entry.verify_capability_id})`);
     }
     if (entry.target_type && !TARGET_TYPES.has(entry.target_type)) {
