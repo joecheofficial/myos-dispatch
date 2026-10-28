@@ -2,7 +2,102 @@
 
 All notable changes to MyOS Dispatch are documented here.
 
+## Unreleased (issue #8 customer install fixes)
+
+- Customer refresh no longer rolls back on the owner-invocation test: recipe manifests resolve beside an explicit capability index (then the workspace), so a clean qualification home routes "run the doctor" to the Doctor's read-only recipes.
+- A fast path needs a meaningful match (score 12, i.e. one 12+ character term or two terms, or any multi-word phrase; `MYOS_FASTPATH_MIN_SCORE` or the fastpaths file's `policy.min_match_score` override it). Stop-after-match is never emitted without a scope, and the hook prints the taken fast path's intent, target, cli and stop rule.
+- Intent Horizon is off by default. Opt in with `MYOS_INTENT_HORIZON_ENABLED=1` or `~/.myos-dispatch/config/orchestration-features.json` `{"intentHorizon":{"enabled":true}}`.
+- `npm test` runs `scripts/run-tests.js`: full suite, bounded concurrency, one serial retry of timeout-class failures only. Runner timeout tests and the replay-corpus test no longer depend on machine speed or a shared HOME.
+- Owner invocation ("check dispatch health with doctor") is no longer vetoed by the invoked owner's own umbrella capability (`agent:doctor`), which scores on the owner name the invocation matched; a different capability that clearly outscores the recipe still keeps the request. An explicit agent invocation also outranks a project that matched only on an alias ("health" -> personal); a project named by slug, name or path still owns the request.
+- Find the Codex and Claude CLIs without relying on PATH. Hooks run with a minimal PATH, and on macOS both CLIs often ship only inside ChatGPT.app/Codex.app or the Claude desktop app. Discovery, sign-in probes, the model report and execution now search overrides (`MYOS_CODEX_BIN`, `MYOS_CLAUDE_BIN`), PATH, common install directories and the app bundles. `MYOS_PROVIDER_SEARCH=path` restores PATH-only lookup.
+- Select OAuth models by ranked family (luna/terra/sol/astra; haiku/sonnet/opus/fable) over the live discovered list instead of a frozen ID table, so gpt-6.1-sol, gpt-6-sol and gpt-6-luna route as soon as they are discovered. Add an optional class policy file (`~/.myos-dispatch/oauth-class-policy.json` or `MYOS_OAUTH_CLASS_POLICY`). Fit effort to the levels a model reports.
+- Resolve Claude aliases to current exact IDs from the Anthropic catalog and route Claude on all five text classes. A never-invoked subscription model is offered as a first call; add `myos-oauth-doctor unlock` to make those first calls deliberately and learn the exact ID from the alias when a catalog ID is rejected. `status` now prints CLI paths and the per-class routes.
+- Update the Anthropic catalog to Claude Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5; previous generations stay for explicit pins as `legacy`.
+- The installer model report explains the Codex/Claude subscription path, assigns text classes from it when signed in, and says why a CLI was not detected.
+- Hook registration replaces older Dispatch hook entries (no `--surface` flag, flags before `--surface`, the `.js` entrypoint, an npm-bin shim) instead of appending a second one. Foreign hooks and private `agents/shared` hooks are preserved.
+
+## v4.4.0-rc.3 - 2026-10-16
+
+- Preserve prompt authority in the lean desktop startup context.
+- Reconcile approved Atelier projections before an automatic refresh. Fail closed on reconcile races, bound retries after a failed refresh, and hold changes to reviewed document sidecar metadata for review.
+- Add a bounded API runtime: one reserved, single-attempt provider call per request with caller cancellation, host absolute deadlines, a launch guard rechecked after reservation, and auth resolved from a scalar option.
+- Add hash-pinned bounded PNG visual review with a conservative, dated image token reservation that fails closed after its review window.
+- Retain bounded, allowlisted provider failure diagnostics (HTTP status, request and response ids, retry-after, error code and type). These values never authorize a retry.
+
+## v4.4.0-rc.2 - 2026-10-10
+
+- Keep delivery channels from replacing the subject project in desktop routing. Preserve send and execution gates while resolving the registered owner.
+- Resolve explicit project/repository headers through reviewed local aliases, including short names. Reject unsupported headers and stale repository hints.
+- Version desktop ownership evidence so legacy transport-only hints cannot seed a new route. Private bot resolution remains unchanged.
+
+## v4.4.0-rc.1 - 2026-10-10
+
+- Execute one explicitly approved read-only evidence step inside a larger desktop task, preserving the remaining task and its permissions. Project names accept spaced slug spelling and reject substring ownership.
+- Bound default desktop fanout to useful distinct context and verification lanes; avoid duplicate native/background workers and speculative recursive repository scans.
+- Clear rejected session project ownership before inheriting hints. Keep exact routes and unsupported requests free of Jev calls.
+- Add native parent/child token accounting, per-invocation output/adoption reports, and a reproducible actual-model accepted-work benchmark. Missing API charges remain unknown.
+- Controlled exact and ambiguous lookup benchmarks reduced model turns from two to one. This release candidate does not claim verified savings across the representative40 historical tasks and is not approved for broad promotion on that basis.
+
 ## Unreleased
+
+- Make fastpath `status: "retired"` real: `matchFastpaths` now skips retired entries. Gated by `MYOS_FASTPATH_SKIP_RETIRED`, default ON; set it to `0` to restore the old behavior (status ignored). Correct wrongly retired entries in the data file before rolling this out. Default policy caps used when a fastpaths file has no policy are raised from 30/20/10 to 120/80/40 (active/stable/probation) and `config/dispatch-fastpaths.example.json` now ships that policy block. `scripts/audit-dispatch-fastpaths.js` prints a WARN summary counting retired entries with no `retired_at`/`retired_reason`.
+
+- Treat a single passing project mention as weak evidence in long prompts. When a prompt is over 60 words and a project has exactly one hit that starts at or after character 200, the project is not selected on that alone (so a long audit brief listing several systems no longer routes to whatsapp). The hit still counts when the project slug is the object of a directive verb in the first sentence. Short prompts and multi-mention prompts score exactly as before.
+
+- Stop repeating the "Mandatory behavior" footer on every UserPromptSubmit. The full block is emitted on the first prompt of a session, when its text hash changes, and every Nth prompt (`MYOS_DISPATCH_FOOTER_EVERY`, default 6, `1` restores the old behavior); other prompts get one short line. State (`lastFooterHash`, `promptsSinceFullFooter`) lives in the existing route-context state file; unreadable or unwritable state fails open to the full footer.
+
+## v4.2.1 - 2026-09-21
+
+- Connect verified Claude subscription CLI execution for foreground, tool-free text tasks. Exact live-verified Sonnet 5 is eligible for cheap routing, default automation and planning as a bounded unsupported-model fallback, or an explicit pin. API routes, writer affinity and private bots are unchanged.
+- Strip inherited Desktop session and API credentials, recheck subscription auth per invocation, enforce caller output budgets, disable tools/MCP/hooks and validate reported model participation. Refuse grounding/media/tool requirements instead of silently dropping them.
+- Include cache-read and cache-creation input tokens in Claude usage totals. OAuth authentication is not a guarantee against account credit usage.
+
+## v4.2.0 - 2026-09-21
+
+### Added
+
+- OAuth-only model inventory, task-class defaults, exact model identity and explicit bounded read-only fallback. User pins and lane assignments retain priority; API plans are unchanged.
+- Failure-triggered, coalesced `myos-oauth-doctor` scans with official Codex model metadata, provider auth provenance, atomic revisions, last-good recovery and model-scoped quarantine. Discovery never claims successful inference or quality validation. No periodic job or automatic login.
+- Foreground ChatGPT-only CLI execution with bounded owned-process cleanup, class-appropriate effort, validated success receipts and warm-first local Qwen routing using the existing offline-cache and memory guards.
+
+### Fixed
+
+- OAuth sidecars start with `exec` so the MyOS wrapper cannot mistake them for interactive TUI requests. Explicit IDs are never silently replaced, including unsupported or unknown IDs.
+- Recovery rechecks fallback eligibility, preserves deadlines and does not retry quota/auth failures, explicit pins or writable tasks. See `docs/oauth-recovery.md` for operational boundaries.
+
+## v4.0.1 - 2026-09-20
+
+### Fixed
+
+- Hook environment scoping: Claude registration no longer writes a global `env.MYOS_HOME_ROOT`. Explicit `--remove` cleans up the legacy key; backups and exact transaction rollback remain available.
+- Settings merge-preserve: re-registration replaces only marker-owned Dispatch hooks, retaining foreign hooks, empty event arrays, custom environment, permissions, and unchanged JSON text across repeated installs.
+- Sidecars default off without a provider credential, with one quiet route-context reason. Customer installs also default off with credentials until explicitly opted in. Customer detection uses an All Sorted home path, a `.all-sorted` marker in `MYOS_HOME_ROOT`, or `MYOS_CUSTOMER_INSTALL=1`. Set `MYOS_PARALLELIZATION_AGGRESSION=balanced` or `deep` in the hook's environment configuration to opt in; `off` disables sidecars. Credentialed non-customer installs retain their existing default.
+- Central child environment loading: every recipe child launched through the dispatcher loads `<MYOS_HOME_ROOT>/.env`, preserving existing shell and caller variables, including empty values. The dependency-free parser supports comments, quoted values, and `export` assignments without shell expansion. `NODE_DEBUG=myos-dispatch` logs only the path and loaded key count once per path.
+- OAuth seat detection trusts same-provider human-interactive callers before credential lookups, checks the macOS Claude Code Keychain with a two-second timeout before falling back to the credentials file, and rejects empty tokens. Unattended callers still require API credentials.
+
+These fixes address a customer install report dated 2026-09-18. No new dependencies.
+
+## v4.0.0 - 2026-09-12
+
+### Breaking
+
+- Background worker callers must explicitly declare a recognized `callerProvider`, including same-provider read-only callers. Missing or unknown callers fail closed; a worker command alone does not establish caller identity. General same-provider affinity remains enforced. The sole cross-provider writer contract is explicit human-interactive Claude-to-Codex code delegation.
+- Writable handbacks are patch proposals: success is `needs-review`, and `reviewRequired` stays true. Replay the hash-verified patch at `baseSha` in a separate checkout for independent review. Record SHA256 outside the mutable writer worktree and recheck before integration; self-review and later worktree contents are not approval.
+- Windows-native writable execution is refused before worktree allocation. Use WSL for the writer. Native Windows hook installation does not enable native writable workers.
+
+### Added
+
+- `myos-writer` package command for one bounded task with explicit repository, owned paths, caller, provider, and exact model; retained binary/new-file patches, SHA256, and a review manifest. No apply, commit, publish, or model fallback option.
+- Claude/Codex setup with hook merge previews for dry review, explicit acceptance, backups, and separate registration/smoke/host-trust evidence. The installer ends with a read-only model report; saving machine setup is explicit.
+- Model catalog tools for exact model add/select and hash-guarded catalog-only undo, preserving existing assignments and overrides. Model metadata does not establish account access.
+- Cleanup evidence fields: `cleanupScope: "owned-process-group"`, `ownedGroupStopped: true|false|null`, and `treeQuiescence: "unverified"`. Detached processes may survive and retained worktrees may change. The writer instruction forbids background servers, daemons, and detached processes as an execution rule, not enforced containment.
+
+### Fixed
+
+- POSIX cleanup handles both normal exit and timeout, including same-group children with ignored stdio. Failed cleanup blocks normal patch capture. Group termination never establishes worktree deletion safety; every writer worktree is retained.
+- Ownership validation accepts repository-root path aliases such as macOS `/var` and `/private/var` while preserving symlink and out-of-repository refusal.
+
+Node.js remains `>=20`; no new dependencies.
 
 ## v3.7.0 - 2026-08-24
 

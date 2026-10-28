@@ -4,6 +4,7 @@ const path = require("node:path");
 
 const { getParallelizationStage } = require("./promotion/parallelization-version-policy");
 const { backgroundAgentsDisabled, isUnattendedContext } = require("./env-context");
+const { sidecarOffReason } = require("./sidecar-policy");
 const { inferGoalScale } = require("./goal-scale");
 const {
   buildExecutionEnvelope,
@@ -128,6 +129,18 @@ function resolveWritableLaneCap(env = process.env, maxSidecars = DEFAULT_MAX_SID
 }
 
 function inferAggression(text, plan = {}, env = process.env) {
+  // Explicit delegation opt-outs take precedence over multipart work and env
+  // preferences. A read-only constraint alone is not a delegation opt-out.
+  const noDelegation = /\b(?:do not|don't|don’t|never)\s+(?:launch|spawn|use|start|run)\s+(?:(?:any|background|parallel|additional|more)\s+)*(?:agents?|subagents?|sidecars?)\b|\bno\s+(?:(?:background|parallel|additional|more)\s+)*(?:agents?|subagents?|sidecars?)\b|\b(?:do not|don't|don’t|never)\s+delegate\b|\bwork\s+solo\b|\bdo\s+(?:it|this|the work)\s+yourself\b/i.test(text);
+  if (noDelegation) return "off";
+  // Conversational turns and factual questions do not demonstrate independent
+  // work lanes, even when the general intent classifier calls them exploratory.
+  const question = /^(what|what's|who|where|which|how|why|is|are|does|do)\b|^when\s+(is|are|does|do|will|can|should)\b/i.test(text);
+  const correction = /^(no\b|actually\b|i meant\b|only launch\b|don't launch\b|do not launch\b)/i.test(text);
+  const workVerbs = text.match(/\b(audit|investigate|research|analyze|implement|refactor|migrate|review|verify|fix|build|test|compare|create|update|add|deploy|repair)\b/gi) || [];
+  const explicitParallelWork = workVerbs.length >= 2 && /\b(and|then|also|plus|while)\b|[,;]/i.test(text);
+  if ((correction || question) && !explicitParallelWork) return "off";
+  if (!IMPLEMENTATION_RE.test(text) && !VERIFICATION_RE.test(text) && !RESEARCH_RE.test(text)) return "off";
   const override = String(env?.MYOS_PARALLELIZATION_AGGRESSION || "").trim().toLowerCase();
   if (["off", "balanced", "deep"].includes(override)) return override;
 
@@ -433,11 +446,17 @@ function buildParallelizationPlan(input, basePlan = {}, signals = {}) {
   const blockedReasons = detectBlockedReasons(text, basePlan);
   if (backgroundDisabled) blockedReasons.push("background_agents_disabled");
   const criticalPath = getCriticalPath(basePlan);
-  const aggression = inferAggression(text, basePlan, env);
+  const offReason = sidecarOffReason(env, signals.callerProvider || signals.hookSurface);
+  if (offReason) blockedReasons.push(offReason);
+  // Tool commands contain quoted code, paths and search patterns, not a new
+  // user request. Safety classification still runs, but orchestration does not.
+  const toolEvent = ["PreToolUse", "pre_tool_use"].includes(signals.hookEventName);
+  const aggression = offReason || toolEvent ? "off" : inferAggression(text, basePlan, env);
   const maxSidecars = resolveMaxSidecars(env);
   const depth = resolveDepth(aggression, env);
   const writableLaneCap = resolveWritableLaneCap(env, maxSidecars);
   const repositoryRouting = resolveRepositoryTarget(text, basePlan, {
+    discoverNested: env.MYOS_DESKTOP_BOUNDED_ROUTING !== '1',
     workspaceRoot: signals.workspaceRoot,
     projectIndexPath: signals.projectIndexPath,
     cwd: signals.cwd,

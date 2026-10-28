@@ -127,7 +127,8 @@ function buildUsageEvent(event) {
   const caller = event?.caller && typeof event.caller === "object" ? event.caller : {};
   const billable = event?.billable === true;
   const rawEstimatedCostUsd = safeNumber(event?.estimatedCostUsd);
-  const normalizedEstimatedCostUsd = billable ? rawEstimatedCostUsd : 0;
+  const accountUsage = event?.complianceLane === "unattended_codex" && event?.billingMode === "subscription";
+  const normalizedEstimatedCostUsd = accountUsage ? null : billable ? rawEstimatedCostUsd : 0;
 
   return {
     ...event,
@@ -139,6 +140,7 @@ function buildUsageEvent(event) {
     ts,
     billable,
     estimatedCostUsd: normalizedEstimatedCostUsd,
+    ...(accountUsage ? {costBasis: "account_usage_unmetered", accountChargeUsd: null} : {}),
     ...(billable || rawEstimatedCostUsd <= 0
       ? {}
       : { originalEstimatedCostUsd: rawEstimatedCostUsd }),

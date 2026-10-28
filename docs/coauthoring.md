@@ -1,0 +1,118 @@
+# Subscription writer orchestration
+
+Claude can delegate bounded implementation work through Antigravity first for suitable tasks, then Codex Sol, with an explicit handback to the driving Claude session when subscriptions are unavailable. Each writer returns a patch for independent review. This is an explicit human-interactive contract, not a general cross-provider sidecar permission.
+
+## Agree before writing
+
+1. Name the human goal, acceptance checks, exact model, repository, and owned paths.
+2. Assign **one owner per file**. Do not run conflicting writes simultaneously, including in the source checkout. Split disjoint work between writers; the parent orchestrator owns all fan-out.
+3. Name an independent verifier. The writer can report tests, but cannot approve its own patch. Claude may coordinate and review; Claude writable mode remains disabled.
+4. Start from a clean repository with a committed HEAD. Finish or preserve existing changes yourself; this command does not stash, reset, clean, or commit them.
+
+## Delegate once
+
+From the installed Dispatch directory (or use `myos-writer` when the package bin entry is installed):
+
+```sh
+node bin/myos-writer.js --scope /absolute/path/to/repo \
+  --paths src/example.js,test/example.test.js \
+  --provider auto --model auto --caller-provider claude \
+  --prompt "Implement the agreed change in the owned files. Run the agreed tests and report real results." \
+  --json
+```
+
+`--prompt-file /path/task.txt` replaces `--prompt`. Exactly one is required, with a maximum of 32768 bytes. Paths are literal repository-relative files or directories, comma separated; no globs, repository-wide scope, traversal, Git internals, or symlink ownership. Scope must be the repository root. Unknown and duplicate arguments fail. There is no `--apply`, arbitrary command, config, environment override, billing fallback, or arbitrary fallback option.
+
+`--timeout-ms` accepts an integer from 1 to 1800000 milliseconds. The default is 900000 (15 minutes); use `--timeout-ms 1800000` for a 30-minute bound. Automatic routing defaults to `taskClass: "default_automation"`. Explicit provider pins retain the existing `heavy_synthesis` default; `--task-class` may select a supported class. Exact provider/model pins stay exact. The timeout bounds provider execution; process cleanup can take up to four additional seconds, followed by artifact collection.
+
+The CLI supplies this runner contract alongside the task's ownership paths:
+
+```json
+{
+  "callerProvider": "claude",
+  "workerProvider": "codex",
+  "purpose": "code-write",
+  "context": "human-interactive"
+}
+```
+
+For an embedding, pass the object as `options.delegation`, also declare `options.callerProvider`, and request `task.mode: "workspace_write"`. Use `runBackgroundTasks` with an orchestrator context so quarantine and backpressure apply. Every caller must now declare its provider, including ordinary same-provider read-only calls. Omitting the caller cannot bypass affinity. The declaration is a trusted orchestrator assertion, not authentication or proof of a human's identity.
+
+Embedding caller declarations accept the recognized names `codex`, `claude`, and `gemini`, executable paths, and the aliases `claude-code`, `claude_code`, `gemini-cli`, and `gemini_cli` (including `.exe`, `.cmd`, or `.bat` suffixes). Missing or unknown names fail closed. The dispatcher can take a caller from an explicit `callerProvider`, `workerCommand`, or worker `request.fallback.command`; `backgroundWorkerCommand` never establishes the root caller. The public delegation CLI requires `--caller-provider claude`; `--provider auto --model auto` selects the bounded subscription plan. Explicit `codex` or `antigravity` provider/model pairs remain supported.
+
+Cross-provider research, general sidecars, bot/unattended contexts, protected surfaces, nested workers, and caller/worker mismatches are refused. Existing global/writable disable switches, OAuth environment scrubbing, quarantine, disk/load checks, and concurrency limits remain active. If your environment disables background agents, the command fails; it does not override that policy or install a scheduler.
+
+## Read the handback honestly
+
+A successful writer run returns `status: "needs-review"`, never approval to integrate. Failures return `status: "failed"` and exit code 1. `reviewRequired` is always true. The result includes:
+
+- `requestedModel` and `resolvedModel`: the explicit model requested and passed to the CLI, without substitution.
+- `providerReportedModel`: a model explicitly reported in provider events, or `null` when the provider does not report it. A requested or resolved model is not proof of the actual served model. A reported mismatch fails the handback.
+- `baseSha`, `ownershipPaths`, `changedFiles`, `ownedChangedFiles`, and any `ownershipViolations`.
+- `patchArtifact`, its `patchSha256`, `manifestArtifact`, and retained `worktreePath`.
+- `cleanupScope: "owned-process-group"`, `ownedGroupStopped` (`true`, `false`, or `null` without observation), and `treeQuiescence: "unverified"`. These report the actual runner cleanup evidence; they never certify the entire process tree.
+- `verificationEvidence`: runner patch integrity/applicability evidence, provider response validation, writer-reported checks, and independent review still pending. A reverse-apply check does not prove the feature works.
+
+Patches preserve binary bytes and new files. Capture uses a separate temporary index and leaves the writer's index intact. Every worktree is retained, including failure, timeout, quota, malformed output, and ownership violations; failed patches are evidence only. Ignored files remain in the retained worktree and are not included by Git's ordinary add rules. Artifact directories are unique, outside the source checkout, and default to `~/.myos/state/myos-dispatch/sidecar-artifacts`. Retained worktrees are under the OS temporary directory: preserve them elsewhere before OS/manual cleanup if they contain needed ignored or partial work. There is no age-based deletion.
+
+On POSIX, each provider starts in its own process group. Timeout or normal parent exit starts teardown: TERM, a two-second grace period, then KILL if the group remains. Parent exit and closed output pipes do not prove completion; the runner also waits until the owned group no longer exists. If that cannot be verified within the four-second cleanup bound, the result has `cleanupFailed: true`, status `failed`, and no patch capture. Preserve and inspect the retained worktree; it may still be changing. This controls only descendants that remain in the owned group. Detached processes may survive, and the retained worktree may change even after successful group cleanup. `treeQuiescence` therefore stays `unverified`. Group termination never establishes cleanup or deletion safety. Windows-native writable execution is refused before allocation; use WSL for the writer.
+
+The actual writer instruction envelope forbids background servers, daemons, and detached processes. This is an execution rule, not enforced containment. The handback is a hash-pinned patch proposal: independent review and integration cover **only the recorded patch hash**, never later contents of the retained worktree. Capture freezes the bytes staged in its temporary index; it does not prove a coherent snapshot of a concurrently changing tree.
+
+Codex loads host configuration and hooks and uses its existing ChatGPT OAuth context. The runner pins `forced_login_method="chatgpt"`, `model_provider="openai"`, workspace-write networking off, and no additional writable roots, without `--ignore-user-config`. The authentication restriction is documented in the [Codex configuration reference](https://developers.openai.com/codex/config-reference/). Claude read-only invocations omit `--bare`, which local CLI help documents as disabling hooks and OAuth. Missing authentication, unavailable models, or host hook/trust failures must be resolved by the human; no automatic login or token repair is performed by this command.
+
+## Independent review and orchestrator integration
+
+1. Preserve the JSON result and patch. Record the hash outside the mutable writer worktree; changing both a patch and an adjacent manifest cannot establish trust.
+2. Recompute SHA256 and compare it with the exact handback hash. The exported `verifyPatchArtifact(file, expectedSha256)` throws on mismatch. Recheck immediately before any application. Any byte change invalidates earlier review.
+3. Have a verifier other than the writer review the exact patch, every changed path, binary/new files, and the acceptance criteria. Replay the hash-verified patch in a separate clean review checkout at `baseSha` and reproduce the relevant tests there; do not rely solely on the writer's `checks` text.
+4. Record the verifier identity, exact SHA256, base SHA, approved paths, commands, and observed outcomes. A writer's statement that it reviewed itself is not this record.
+5. The parent orchestrator alone may integrate after confirming the target HEAD still equals `baseSha`, the target and ownership paths are clean, all changed paths are owned, the recorded hash still matches, and no conflicting writer is active. Run `git apply --check` before applying the reviewed patch. If HEAD or content changed, prepare and independently review a new patch against the new base.
+6. Verify the integrated behavior before committing or publishing under the project's normal process. Retire retained work only after the parent confirms integration or explicit preservation. This CLI implements none of these application or cleanup steps.
+
+Codex delegation obeys the pinned model ceiling and speed in [execution policy](codex-execution-policy.md). An agent-selected `--model` does not authorize raising the ceiling.
+
+## Quota handback to the driving Claude session
+
+Before every real native call from this Claude-to-Codex bridge, the writer reads Codex's
+included allowance through the native app server. At exhaustion, even if purchased credits
+remain, no Codex inference starts. Unknown capacity also returns control rather than spending
+blindly. Existing ownership, auth, nested-worker, cleanup and review gates run first.
+
+A failed delegation can include `continuation.provider="claude"`,
+`continuation.execution="active-session"` and `continuation.billingMode="subscription"`.
+This is an instruction to the existing driving Claude session to continue the bounded task
+itself, including source authoring. It is not a new Claude subprocess, an API retry or proof
+that Claude already executed the work. The Codex child remains `status:"failed"`, exit code 1;
+the parent must consume the continuation and act. Safety/policy failures do not grant this exception.
+
+A quota error returned after a native call begins also receives this continuation. Failed
+worktrees and partial patches remain preserved for independent review, never auto-applied.
+The preflight is a point-in-time check: usage by an in-flight/concurrent call can cross the
+allowance after admission. This does not change the account's credit settings or disable its
+provider-side credit balance. See [subscription capacity](subscription-capacity.md).
+
+## Antigravity-first selection and spending protection
+
+Automatic `cheap_routing` uses Gemini 3.8 Flash Low for small bounded edits; `default_automation`
+uses Gemini 4 Argon Medium for normal bounded implementation. Heavy synthesis, planning, elite
+work and paths identifying auth/security/credentials/payments/migrations/deployment/infrastructure
+go directly to Codex 6.1 Sol. The parent must classify risk honestly and independently review quality;
+a passing fixture does not prove that Antigravity matches Sol on arbitrary projects.
+
+The policy is `config/subscription-writer-policy.json`. No classifier model or new parallel fanout
+is used. Native deterministic tools/recipes remain first. Local Qwen is not added to this writer chain.
+
+Every managed Antigravity task checks native zero-turn `/settings` and `/usage` metadata at the
+shared runner boundary. `useG1Credits` must be false and the selected model's quota pool/reset
+must be fresh and eligible. Unknown or enabled overages refuse Antigravity inference. No API keys
+are inherited by its child. Antigravity runs with native `--sandbox`, the isolated worktree as
+`--add-dir`, and the existing owned-process-group cleanup. This does not establish full filesystem
+or detached-process containment; ownership violations and unverified cleanup stop the chain.
+
+Safe Antigravity failures or a low-confidence report may try Sol in a separate fresh worktree.
+Partial and low-confidence patches remain retained, never automatically applied or used as the
+next attempt's base. Sol still obeys the model ceiling, Standard speed default and included-quota
+preflight. Its exhaustion returns the existing active-Claude-session continuation. `subscriptionRoute`
+records each attempt and its retained artifact location. Account credit settings are never changed
+to enable spending. Provider overages and API fallback are not eligible alternatives.

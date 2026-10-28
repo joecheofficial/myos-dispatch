@@ -14,6 +14,7 @@ function tempDir(prefix) {
 
 function fakeProbes({
   cli = [],
+  login = "unknown",
   envKeys = [],
   ollama = false,
   ollamaModels = [],
@@ -23,6 +24,7 @@ function fakeProbes({
   const cliSet = new Set(cli);
   const envSet = new Set(envKeys);
   return {
+    loginStatus() { return login; },
     cliAvailable(command) {
       if (command === "ollama") return ollama;
       return cliSet.has(command);
@@ -45,10 +47,12 @@ function fakeProbes({
 test("detection covers oauth-only, api-only, both, nothing, and ollama-only", () => {
   const oauthOnly = setup.buildModelCatalog({
     homeRoot: "/tmp/myos",
-    probes: fakeProbes({ cli: ["codex"] }),
+    probes: fakeProbes({ cli: ["codex"], login: "oauth" }),
   });
   assert.deepEqual(oauthOnly.providers.openai, {
     oauthCli: "codex",
+    installed: true,
+    loginStatus: "oauth",
     oauth: true,
     apiKey: false,
   });
@@ -60,16 +64,20 @@ test("detection covers oauth-only, api-only, both, nothing, and ollama-only", ()
   });
   assert.deepEqual(apiOnly.providers.openai, {
     oauthCli: undefined,
+    installed: false,
+    loginStatus: "not_installed",
     oauth: false,
     apiKey: true,
   });
 
   const both = setup.buildModelCatalog({
     homeRoot: "/tmp/myos",
-    probes: fakeProbes({ cli: ["codex"], envKeys: ["OPENAI_API_KEY"] }),
+    probes: fakeProbes({ cli: ["codex"], login: "oauth", envKeys: ["OPENAI_API_KEY"] }),
   });
   assert.deepEqual(both.providers.openai, {
     oauthCli: "codex",
+    installed: true,
+    loginStatus: "oauth",
     oauth: true,
     apiKey: true,
   });
@@ -94,7 +102,7 @@ test("detection covers oauth-only, api-only, both, nothing, and ollama-only", ()
 test("assignment prefers oauth lane before api lane when both exist", () => {
   const catalog = setup.buildModelCatalog({
     homeRoot: "/tmp/myos",
-    probes: fakeProbes({ cli: ["codex"], envKeys: ["OPENAI_API_KEY"] }),
+    probes: fakeProbes({ cli: ["codex"], login: "oauth", envKeys: ["OPENAI_API_KEY"] }),
   });
 
   assert.equal(catalog.assignments.cheap_routing.lane, "interactive_oauth");
@@ -162,7 +170,7 @@ test("overrides are preserved verbatim across re-runs", () => {
   const existing = JSON.parse(fs.readFileSync(targetPath, "utf8"));
   const next = setup.buildModelCatalog({
     homeRoot,
-    probes: fakeProbes({ cli: ["codex"] }),
+    probes: fakeProbes({ cli: ["codex"], login: "oauth" }),
     existing,
   });
   assert.deepEqual(next.overrides, overrides);
@@ -175,16 +183,16 @@ test("overrides are preserved verbatim across re-runs", () => {
 test("report contains the exact closing sentence and no em dash", () => {
   const catalog = setup.buildModelCatalog({
     homeRoot: "/tmp/myos",
-    probes: fakeProbes({ cli: ["codex"], envKeys: ["OPENAI_API_KEY"] }),
+    probes: fakeProbes({ cli: ["codex"], login: "oauth", envKeys: ["OPENAI_API_KEY"] }),
   });
 
   const report = setup.renderReport(catalog);
   const closing = "Here are the task classes. I've assigned them to these models. Let me know if you would like to change any of them.";
 
   assert.ok(report.includes(closing));
-  assert.ok(report.includes("These are the models I identified as available on this machine:"));
+  assert.ok(report.includes("These are the provider installations and credentials detected on this machine:"));
   assert.ok(report.includes("I've made my best guess assigning the eight task classes to them:"));
-  assert.ok(report.includes("- openai: codex CLI signed in on this machine, plus an API key in your environment"));
+  assert.ok(report.includes("- openai: codex CLI installed; login: oauth, plus an API key detected in your environment (not tested)"));
   assert.ok(!report.includes("—"));
 });
 
@@ -290,4 +298,148 @@ test("routing honors overrides, ignores invalid overrides, and falls back when t
   routing.clearLocalAssignmentsCache();
   delete process.env.MYOS_MODEL_CATALOG_LOCAL;
   delete process.env.MYOS_LANE_STATE_PATH;
+});
+
+test("installed CLI without verified auth never creates OAuth assignments", () => {
+  const catalog = setup.buildModelCatalog({ probes: fakeProbes({ cli: ["codex"] }) });
+  assert.equal(catalog.providers.openai.oauth, false);
+  assert.equal(catalog.providers.openai.installed, true);
+  assert.equal(catalog.providers.openai.loginStatus, "unknown");
+  assert.equal(catalog.assignments.planning.unassigned, true);
+  assert.doesNotMatch(setup.renderReport(catalog), /signed in on this machine/);
+});
+
+test("report is read-only; setup preserves metadata and choices with backup and stable bytes", () => {
+  const home = tempDir("catalog-safe-");
+  const target = path.join(home, "config", "model-catalog.local.json");
+  const { spawnSync } = require("node:child_process");
+  const run = (...args) => spawnSync(process.execPath, [path.resolve(__dirname, "../scripts/setup-model-catalog.js"), "--home", home, ...args], {
+    encoding: "utf8", env: { HOME: home, PATH: "", MYOS_MODEL_CATALOG_LOCAL: target, MYOS_PROVIDER_SEARCH: "path" },
+  });
+  assert.equal(run("--report").status, 0);
+  assert.equal(fs.existsSync(target), false);
+  const original = { version: 1, generatedAt: "old", metadata: { owner: "user" }, models: [{ id: "custom" }], assignments: { planning: { unassigned: true, reason: "user choice" } }, overrides: { custom: { note: "keep" } } };
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  const bytes = JSON.stringify(original);
+  fs.writeFileSync(target, bytes);
+  assert.equal(run("--report", "--json").status, 0);
+  assert.equal(fs.readFileSync(target, "utf8"), bytes);
+  assert.deepEqual(fs.readdirSync(path.dirname(target)), [path.basename(target)]);
+  assert.equal(run().status, 0);
+  const saved = fs.readFileSync(target, "utf8");
+  const parsed = JSON.parse(saved);
+  for (const key of ["metadata", "models", "overrides"]) assert.deepEqual(parsed[key], original[key]);
+  assert.deepEqual(parsed.assignments.planning, original.assignments.planning);
+  const backups = fs.readdirSync(path.dirname(target)).filter(x => x.includes(".bak-"));
+  assert.equal(backups.length, 1);
+  assert.equal(fs.readFileSync(path.join(path.dirname(target), backups[0]), "utf8"), bytes);
+  assert.equal(run().status, 0);
+  assert.equal(fs.readFileSync(target, "utf8"), saved);
+  fs.writeFileSync(target, "{broken");
+  assert.notEqual(run().status, 0);
+  assert.equal(fs.readFileSync(target, "utf8"), "{broken");
+});
+
+test("setup keeps custom provider and local metadata while refreshing detection", () => {
+  const existing = { providers: { custom: { note: "keep" }, openai: { label: "my account", oauth: true } }, local: { note: "keep", ollama: { tags: ["mine"] } } };
+  const next = setup.buildModelCatalog({ existing, probes: fakeProbes({ cli: ["codex"] }) });
+  assert.deepEqual(next.providers.custom, existing.providers.custom);
+  assert.equal(next.providers.openai.label, "my account");
+  assert.equal(next.providers.openai.oauth, false);
+  assert.equal(next.local.note, "keep");
+  assert.deepEqual(next.local.ollama.tags, ["mine"]);
+});
+
+test("auth status parsing distinguishes OAuth, API login, logged out, error and unsupported CLI", () => {
+  const run = (stdout, status = 0, stderr = "") => (_cmd, args) => {
+    assert.ok(args.includes("status"));
+    return { stdout, stderr, status };
+  };
+  assert.equal(setup.probeLoginStatus("codex", run("", 0, "Logged in using ChatGPT")), "oauth");
+  assert.equal(setup.probeLoginStatus("codex", run("Logged in using an API key")), "api");
+  assert.equal(setup.probeLoginStatus("codex", run("Not logged in", 1)), "unauthenticated");
+  assert.equal(setup.probeLoginStatus("codex", run("Logged in using ChatGPT", 1)), "unknown");
+  assert.equal(setup.probeLoginStatus("codex", run("unknown output")), "unknown");
+  assert.equal(setup.probeLoginStatus("claude", run(JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }))), "oauth");
+  assert.equal(setup.probeLoginStatus("claude", run(JSON.stringify({ loggedIn: false }))), "unauthenticated");
+  assert.equal(setup.probeLoginStatus("claude", run("not JSON")), "unknown");
+  assert.equal(setup.probeLoginStatus("gemini", () => assert.fail("unsupported CLI must not be invoked")), "unknown");
+});
+
+test("Claude subscription CLI schema enables OAuth only for a successful logged-in subscription", () => {
+  for (const [status, body, expected] of [
+    [0, { loggedIn: true, authMethod: "claude.ai" }, true],
+    [0, { loggedIn: true, authMethod: "api_key" }, false],
+    [0, { loggedIn: false, authMethod: "claude.ai" }, false],
+    [1, { loggedIn: true, authMethod: "claude.ai" }, false],
+    [0, { loggedIn: true, authMethod: "unknown" }, false],
+  ]) {
+    const login = setup.probeLoginStatus("claude", (command, args) => {
+      assert.equal(command, "claude");
+      assert.deepEqual(args, ["auth", "status", "--json"]);
+      return { status, stdout: JSON.stringify(body) };
+    });
+    const providers = setup.normalizeProviderAvailability({ cliAvailable: cli => cli === "claude", loginStatus: () => login, envHas: () => false });
+    assert.equal(providers.anthropic.oauth, expected);
+  }
+});
+
+test("CLI detection does not source shell startup files during report", () => {
+  const home = tempDir("report-no-startup-");
+  const marker = path.join(home, "profile-ran");
+  fs.writeFileSync(path.join(home, ".profile"), "printf x > \"$HOME/profile-ran\"\n");
+  const { spawnSync } = require("node:child_process");
+  const result = spawnSync(process.execPath, [path.resolve(__dirname, "../scripts/setup-model-catalog.js"), "--home", home, "--report"], { env: { HOME: home, PATH: "/usr/bin:/bin", MYOS_PROVIDER_SEARCH: "path" }, encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.existsSync(marker), false);
+});
+
+// Issue #8 item 11: every class was "Unassigned" with only API-key advice even
+// though the Codex/Claude subscription path existed.
+test("(issue8) subscription sign-in assigns text classes from the OAuth registry", () => {
+  const { mergeDiscovery } = require("../src/runtime/oauth-registry");
+  const now = new Date().toISOString();
+  const oauthState = mergeDiscovery(null, [
+    ...["gpt-6.1-sol", "gpt-6-astra", "gpt-6-luna", "gpt-5.6-terra"].map((model) => ({ provider: "codex", model, visible: true, auth: "subscription", observedAt: now })),
+    { provider: "claude", model: "claude-opus-5-5", visible: true, auth: "subscription", observedAt: now },
+  ]);
+  const catalog = setup.buildModelCatalog({ homeRoot: "/tmp/myos", probes: fakeProbes({ cli: ["codex", "claude"], login: "oauth" }), oauthState });
+  assert.equal(catalog.assignments.cheap_routing.model, "gpt-6-luna");
+  assert.equal(catalog.assignments.heavy_synthesis.model, "gpt-6.1-sol");
+  assert.equal(catalog.assignments.task_class_is_elite.model, "gpt-6.1-sol");
+  assert.equal(catalog.assignments.planning.source, "oauth-registry");
+  assert.equal(catalog.assignments.planning.authMode, "oauth");
+  const report = setup.renderReport(catalog);
+  assert.match(report, /Subscription path \(no API key needed\)/);
+  assert.match(report, /Assigned: gpt-6-luna, through your ChatGPT\/Codex subscription/);
+  assert.ok(!report.includes("—"));
+
+  // Claude-only subscription still routes, flagged as a first call.
+  const claudeOnly = setup.buildModelCatalog({ homeRoot: "/tmp/myos", probes: { ...fakeProbes({ cli: ["claude"], login: "oauth" }) }, oauthState });
+  assert.equal(claudeOnly.assignments.heavy_synthesis.model, "claude-opus-5-5");
+  assert.equal(claudeOnly.assignments.heavy_synthesis.firstCall, true);
+  assert.match(setup.renderReport(claudeOnly), /first call unlocks it/);
+});
+
+test("(issue8) unassigned text classes explain the subscription path, not only API keys", () => {
+  const nothing = setup.buildModelCatalog({ homeRoot: "/tmp/myos", probes: fakeProbes() });
+  assert.match(nothing.assignments.planning.enableWith, /codex login/);
+  assert.match(nothing.assignments.planning.enableWith, /claude auth login --claudeai/);
+  assert.match(nothing.assignments.planning.enableWith, /GEMINI_API_KEY|OPENAI_API_KEY/);
+  const report = setup.renderReport(nothing);
+  assert.match(report, /codex: CLI not found \(searched PATH/);
+  const installed = setup.renderReport(setup.buildModelCatalog({ homeRoot: "/tmp/myos", probes: fakeProbes({ cli: ["claude"], login: "unauthenticated" }) }));
+  assert.match(installed, /claude: found, but not signed in with a subscription/);
+});
+
+test("(issue8) CLI detection finds installs outside PATH (~/.local/bin)", (t) => {
+  const home = fs.realpathSync(tempDir("catalog-bin-"));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const bin = path.join(home, ".local", "bin");
+  fs.mkdirSync(bin, { recursive: true });
+  fs.writeFileSync(path.join(bin, "claude"), "#!/bin/sh\necho '{\"loggedIn\":true,\"authMethod\":\"claude.ai\"}'\n", { mode: 0o755 });
+  const probes = setup.defaultProbes({ HOME: home, PATH: "/usr/bin:/bin" });
+  assert.equal(probes.cliAvailable("claude"), true);
+  assert.equal(probes.cliPath("claude"), path.join(bin, "claude"));
+  assert.equal(probes.loginStatus("claude"), "oauth");
 });

@@ -5,13 +5,24 @@ const os = require("node:os");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 
+// Routing tests exercise credentialed planning without relying on a local login.
+process.env.OPENAI_API_KEY = "fixture-only";
+// Planning only: these tests never execute the returned background tasks.
+process.env.MYOS_BACKGROUND_AGENTS_ENABLED = "1";
+
+const { preserveEnv } = require("./helpers/isolated-home");
+
+test.beforeEach((t) => preserveEnv(t, ["HOME", "MYOS_HOME_ROOT", "OPENCLAW_HOME_ROOT", "MYOS_DATA_SOURCES_CONFIG"]));
+
 function loadWorkspaceContextWithHome(homeDir) {
   process.env.HOME = homeDir;
+  process.env.MYOS_HOME_ROOT = path.join(homeDir, ".myos");
+  process.env.OPENCLAW_HOME_ROOT = process.env.MYOS_HOME_ROOT;
   const dataSourcesConfig = path.join(homeDir, ".myos", "workspace", "data-sources.json");
   if (fs.existsSync(dataSourcesConfig)) {
     process.env.MYOS_DATA_SOURCES_CONFIG = dataSourcesConfig;
   } else {
-    delete process.env.MYOS_DATA_SOURCES_CONFIG;
+    process.env.MYOS_DATA_SOURCES_CONFIG = "none";
   }
   const modulePath = require.resolve("../src/workspace-context");
   const registryPath = require.resolve("../src/data-source-registry");
@@ -969,7 +980,8 @@ test("relative scan directory routes external Git repo correctly after process c
     const { resolveDispatchPlan } = loadWorkspaceContextWithHome(tmpDir);
     const plan = resolveDispatchPlan("external git deploy", { indexPath });
 
-    assert.equal(plan.branch, "capability");
+    assert.equal(plan.branch, "recipe");
+    assert.equal(plan.route.reason, "recipe_exact_match");
     assert.equal(fs.realpathSync(plan.searchScope), fs.realpathSync(recipePath));
 
     fs.rmSync(anotherDir, { recursive: true, force: true });
@@ -1032,12 +1044,12 @@ test("clamps parallelization fanout for goalScale 2 prompts", () => {
   assert.equal(plan.parallelizationPlan.clampReason, "trivial_goal_scale");
 });
 
-test("does not clamp parallelization fanout for goalScale 3 prompts", () => {
+test("goalScale 3 alone does not allocate a team for a single file rename", () => {
   const { resolveDispatchPlan } = require("../src/workspace-context");
   const plan = resolveDispatchPlan("rename this file to notes.md");
   assert.equal(plan.goalScale, 3);
-  assert.notEqual(plan.parallelizationPlan.aggression, "off");
-  assert.ok(plan.parallelizationPlan.backgroundTasks.length > 0);
+  assert.equal(plan.parallelizationPlan.aggression, "off");
+  assert.equal(plan.parallelizationPlan.backgroundTasks.length, 0);
   assert.equal(plan.parallelizationPlan.clampReason, undefined);
 });
 
@@ -1051,15 +1063,15 @@ test("preserves deep fanout for goalScale 4 multi-part implementation prompts", 
   assert.equal(plan.parallelizationPlan.clampReason, undefined);
 });
 
-test("operator env override MYOS_PARALLELIZATION_AGGRESSION=deep prevents clamping on goalScale 1", () => {
+test("deep aggression preference does not allocate agents for a status ping", () => {
   const { resolveDispatchPlan } = require("../src/workspace-context");
   const origEnv = process.env.MYOS_PARALLELIZATION_AGGRESSION;
   try {
     process.env.MYOS_PARALLELIZATION_AGGRESSION = "deep";
     const plan = resolveDispatchPlan("is everything ok");
     assert.equal(plan.goalScale, 1);
-    assert.equal(plan.parallelizationPlan.aggression, "deep");
-    assert.ok(plan.parallelizationPlan.backgroundTasks.length > 0);
+    assert.equal(plan.parallelizationPlan.aggression, "off");
+    assert.equal(plan.parallelizationPlan.backgroundTasks.length, 0);
     assert.equal(plan.parallelizationPlan.clampReason, undefined);
   } finally {
     if (origEnv === undefined) {
@@ -1068,4 +1080,41 @@ test("operator env override MYOS_PARALLELIZATION_AGGRESSION=deep prevents clampi
       process.env.MYOS_PARALLELIZATION_AGGRESSION = origEnv;
     }
   }
+});
+
+
+test("tool safety matches full-plan labels including protected project aliases", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "workspace-tool-safety-"));
+  const workspace = path.join(tmpDir, ".myos", "workspace");
+  fs.mkdirSync(path.join(workspace, "projects"), { recursive: true });
+  fs.writeFileSync(path.join(workspace, "projects/_index.json"), JSON.stringify({ projects: {
+    allsorted: { name: "All Sorted", aliases: ["customer console"], path: "allsorted" },
+  } }));
+  fs.writeFileSync(path.join(workspace, "capabilities-index.json"), JSON.stringify({ capabilities: [] }));
+  fs.writeFileSync(path.join(workspace, "DISPATCH-FASTPATHS.json"), JSON.stringify({ fastpaths: [] }));
+  const { resolveToolSafetyPlan, resolveDispatchPlan } = loadWorkspaceContextWithHome(tmpDir);
+  const { compactRoute, toolSafetyLabels } = require("../bin/myos-dispatch-hook");
+  const options = { hookSurface: "codex", hookEventName: "PreToolUse" };
+  for (const command of ["rm -rf ./cache", "rotate api key", "send email to client", "open browser page",
+    "login github account", "update billing account", "cat ./notes", "update customer console"]) {
+    assert.equal(JSON.stringify(toolSafetyLabels(compactRoute(resolveToolSafetyPlan(command, options)))),
+      JSON.stringify(toolSafetyLabels(compactRoute(resolveDispatchPlan(command, options)))), command);
+  }
+  const protectedPlan = resolveToolSafetyPlan("update customer console", options);
+  assert.ok(toolSafetyLabels(compactRoute(protectedPlan)).includes("protected_surface_write"));
+});
+
+test("authorized execution complaint is recognized before project routing", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "workspace-autonomy-complaint-"));
+  const { collectDispatchSignals } = loadWorkspaceContextWithHome(tmpDir);
+  const signals = collectDispatchSignals("Log that as a major mistake. Go check MyOS Dispatch and all your rules and contacts files because something is wrong.");
+  assert.equal(signals.isRoutingComplaint, true);
+  assert.deepEqual(signals.projectMatches, []);
+  assert.deepEqual(signals.route.candidates, []);
+});
+
+test("upgrade is an authorized write directive",()=>{
+ const {inferIntentType,inferActionType}=loadWorkspaceContextWithHome(fs.mkdtempSync(path.join(os.tmpdir(),"upgrade-intent-")));
+ assert.equal(inferIntentType("Well, upgrade everything that you found."),"directive");
+ assert.equal(inferActionType("Well, upgrade everything that you found."),"write");
 });

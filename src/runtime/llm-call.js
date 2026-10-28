@@ -28,6 +28,11 @@ const { appendUsageEvent, summarizeUsage } = require("./myos-usage-ledger");
 const { resolveWorkspacePath, workspaceEnvPath } = require("../myos-compat");
 const { inferGoalScale } = require("../goal-scale");
 const { isSensitiveEnvKey, resolveSecretValue } = require("./runtime-secrets");
+const { localCandidate, executeLocalCandidate } = require("./local-provider");
+const { readState, updateState } = require("./oauth-state");
+const { selectModels, recordFailure } = require("./oauth-registry");
+const { registryPath, refreshRegistry } = require("./oauth-doctor");
+const { isClaudeTextRequest } = require("./oauth-claude");
 
 const WORKSPACE_ENV_PATH = workspaceEnvPath();
 let workspaceEnvLoaded = false;
@@ -107,7 +112,8 @@ function normalizeProvider(value) {
   }
   if (normalized === "codex" || normalized === "local-codex") return "openai";
   if (normalized === "gemini") return "google";
-  if (normalized === "openai" || normalized === "openrouter" || normalized === "google") {
+  if (normalized === "muse") return "meta";
+  if (normalized === "openai" || normalized === "openrouter" || normalized === "google" || normalized === "meta") {
     return normalized;
   }
 
@@ -311,13 +317,14 @@ function isGpt55OauthAllowed(options = {}) {
   );
 }
 
+const CODEX_OAUTH_CHEAP_MODEL = process.env.MYOS_CODEX_OAUTH_CHEAP_MODEL || "gpt-5.6-terra";
+const CODEX_OAUTH_STRONG_MODEL = process.env.MYOS_CODEX_OAUTH_STRONG_MODEL || "gpt-6-astra";
+
 function resolveCodexOauthModel(model, options = {}) {
   const normalized = String(model || "").trim().toLowerCase();
-  if (!normalized) return "gpt-5.4-mini";
-  if (normalized.includes("5.5")) return options.allowGpt55 ? "gpt-5.5" : "gpt-5.4";
-  if (normalized.includes("mini") || normalized.includes("nano")) return "gpt-5.4-mini";
-  if (normalized.includes("o3") || normalized.includes("o4")) return "o3";
-  return "gpt-5.4";
+  // Discovery and explicit fallback policy decide eligibility. Never lie about
+  // an explicit identity by guessing a replacement from its name.
+  return normalized || CODEX_OAUTH_CHEAP_MODEL;
 }
 
 function buildCodexExecPrompt(messages = [], responseMode = "text") {
@@ -354,34 +361,10 @@ function resolveCodexCommand(env = process.env) {
   return "codex";
 }
 
-function defaultCodexExecRunner({ prompt, model, timeoutMs, allowGpt55 }) {
-  const outFile = path.join(
-    os.tmpdir(),
-    `myos-codex-oauth-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`
-  );
-  const codexModel = resolveCodexOauthModel(model, { allowGpt55 });
-
-  try {
-    execFileSync(
-      resolveCodexCommand(),
-      ["exec", "-m", codexModel, "--skip-git-repo-check", "-o", outFile, "-"],
-      {
-        cwd: os.homedir(),
-        input: prompt,
-        encoding: "utf8",
-        timeout: Number(timeoutMs || 180000) + 2000,
-        stdio: ["pipe", "pipe", "pipe"],
-      }
-    );
-
-    return fs.readFileSync(outFile, "utf8").trim();
-  } finally {
-    try {
-      fs.unlinkSync(outFile);
-    } catch {
-      // Best-effort cleanup only.
-    }
-  }
+async function defaultCodexExecRunner({ prompt, model, timeoutMs, effort }) {
+  return require("./oauth-text").executeCodexText({
+    prompt, model: resolveCodexOauthModel(model), timeoutMs, effort, command: resolveCodexCommand(),
+  });
 }
 
 function setCodexExecRunnerForTest(runner) {
@@ -398,16 +381,18 @@ async function callOpenAIViaCodexOauth({
   timeoutMs,
   responseMode,
   allowGpt55,
+  effort,
 }) {
-  const text = codexExecRunner({
+  const output = await codexExecRunner({
     prompt: buildCodexExecPrompt(messages, responseMode),
     model,
     timeoutMs,
     allowGpt55,
+    effort,
   });
-
+  if (typeof output === "object" && output !== null) return output;
   return {
-    text,
+    text: output,
     raw: { provider: "codex-oauth", model: resolveCodexOauthModel(model, { allowGpt55 }) },
     usage: { inputTokens: 0, outputTokens: 0 },
   };
@@ -542,6 +527,74 @@ async function callOpenRouter({
   } catch (error) {
     if (error?.name === "AbortError") {
       throw buildProviderError("openrouter", 408, `OpenRouter request timed out after ${timeoutMs}ms`, {
+        code: "ETIMEDOUT",
+        retryable: true,
+      });
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Meta Model API (Muse Spark / Muse Wonder): OpenAI-compatible chat completions at api.meta.ai.
+// Muse models always reason, so reasoning_effort "none" is rejected; "minimal" is the floor.
+async function callMeta({
+  apiKey,
+  model,
+  messages,
+  timeoutMs,
+  maxOutputTokens,
+  responseMode,
+  temperature,
+  reasoningEffort,
+}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch("https://api.meta.ai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        max_tokens: maxOutputTokens,
+        temperature,
+        reasoning_effort: reasoningEffort && reasoningEffort !== "none" ? reasoningEffort : "low",
+        response_format: responseMode === "json" ? { type: "json_object" } : undefined,
+      }),
+      signal: controller.signal,
+    });
+
+    const json = await response.json();
+    if (!response.ok) {
+      throw buildProviderError(
+        "meta",
+        response.status,
+        json?.error?.message || `Meta Model API request failed (${response.status})`,
+        {
+          code: json?.error?.code,
+          // billing_not_configured / invalid_api_key are account problems, never retryable.
+          retryable: [408, 409, 429, 500, 502, 503, 504].includes(response.status),
+        }
+      );
+    }
+
+    return {
+      text: extractTextContent(json?.choices?.[0]?.message?.content),
+      raw: json,
+      usage: {
+        inputTokens: json?.usage?.prompt_tokens || 0,
+        outputTokens: json?.usage?.completion_tokens || 0,
+      },
+    };
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw buildProviderError("meta", 408, `Meta Model API request timed out after ${timeoutMs}ms`, {
         code: "ETIMEDOUT",
         retryable: true,
       });
@@ -726,6 +779,13 @@ function resolveProviderApiKey(provider) {
     return resolveSecretValue({
       envKeys: ["OPENROUTER_API_KEY"],
       workspaceEnvKeys: ["OPENROUTER_API_KEY"],
+    });
+  }
+  if (provider === "meta") {
+    return resolveSecretValue({
+      envKeys: ["MODEL_API_KEY", "META_MODEL_API_KEY"],
+      workspaceEnvKeys: ["MODEL_API_KEY", "META_MODEL_API_KEY"],
+      keychainServices: ["myos-meta-model-api-key"],
     });
   }
   if (provider === "google") {
@@ -929,6 +989,13 @@ function applySpendPolicyToCandidate({ candidate, options, taskClass, compliance
   const summary = readSpendSummaryCached(policy);
   enforceDailyCaps({ summary, policy, caller, authLabel, reserveUsd });
 
+  // OAuth selection belongs to its explicit route/registry, not API price tiers.
+  // Keep the global kill switch and caps above; never silently rewrite identity.
+  if (authMode === "oauth") return {
+    candidate: { ...candidate, model: resolved.model, profile: resolved.profile },
+    spendControlAction: null,
+  };
+
   if (!isPremiumModel(resolved.model, policy)) {
     return {
       candidate: {
@@ -1104,6 +1171,7 @@ function resolveAuthLabel({ provider, authMode, options = {} } = {}) {
   if (provider === "openai") return "OPENAI_API_KEY";
   if (provider === "google") return "GEMINI_API_KEY";
   if (provider === "openrouter") return "OPENROUTER_API_KEY";
+  if (provider === "meta") return "MODEL_API_KEY";
   if (provider) return `${provider}:${authMode || "api"}`;
   return "unknown";
 }
@@ -1288,6 +1356,7 @@ async function llmCallAsync(options = {}) {
         timeoutMs,
         responseMode,
         allowGpt55: isGpt55OauthAllowed(options),
+        effort: options.effort,
       });
     } else {
       const apiKey = resolveOpenAICredential(authMode);
@@ -1320,6 +1389,19 @@ async function llmCallAsync(options = {}) {
       maxOutputTokens,
       responseMode,
       temperature,
+    });
+  } else if (provider === "meta") {
+    const apiKey = resolveProviderApiKey(provider);
+    if (!apiKey) throw new Error("Meta Model API key is not set (MODEL_API_KEY or Keychain myos-meta-model-api-key)");
+    result = await callMeta({
+      apiKey,
+      model,
+      messages,
+      timeoutMs,
+      maxOutputTokens,
+      responseMode,
+      temperature,
+      reasoningEffort: options.reasoningEffort,
     });
   } else if (provider === "google") {
     const apiKey = resolveProviderApiKey(provider);
@@ -1377,6 +1459,24 @@ async function myosRun(options = {}) {
     taskClass,
     audio: options.audio,
   });
+  const unattendedCodex = complianceLane === "unattended_codex";
+  let codexInstallation;
+  if (unattendedCodex) {
+    codexInstallation = require("../policy/codex-unattended").assertUnattendedCodexOptions(options, {authMode, executionPolicy});
+    const policyPath = resolveSpendPolicyPath();
+    if (process.env.MYOS_SPEND_POLICY_PATH || fs.existsSync(policyPath)) {
+      const policy = JSON.parse(fs.readFileSync(policyPath, "utf8"));
+      if (!policy || typeof policy !== "object" || Array.isArray(policy) ||
+          (policy.killSwitch != null && typeof policy.killSwitch !== "boolean")) {
+        throw new Error("Invalid unattended_codex spend policy");
+      }
+    }
+  }
+  const billingMode = unattendedCodex ? "subscription" : authMode;
+  const codexSelectionReceipt = unattendedCodex ? {
+    reasoningEffort: codexInstallation.selection.effort,
+    modelSelection: options.model ? "explicit_eligible" : "codex_task_class",
+  } : {};
 
   if (executionPolicy === "interactive_session" && complianceLane !== "interactive_oauth") {
     throw new Error(
@@ -1390,7 +1490,7 @@ async function myosRun(options = {}) {
     );
   }
 
-  if (complianceLane !== "interactive_oauth" && authMode !== "api") {
+  if (complianceLane !== "interactive_oauth" && !unattendedCodex && authMode !== "api") {
     throw new Error(
       `MyOS automation cannot run with auth_mode=${authMode}; unattended flows must use API auth`
     );
@@ -1418,10 +1518,34 @@ async function myosRun(options = {}) {
     audio: options.audio,
     pinnedProvider: options.pinnedProvider,
     providerPreference: options.providerPreference || options.provider,
-    model: options.model,
+    model: unattendedCodex ? codexInstallation.selection.model : options.model,
     profile: options.profile,
     responseMode: options.responseMode,
   });
+  const oauthRegistry = authMode === "oauth" && !unattendedCodex ? registryPath() : null;
+  let oauthState = readState(oauthRegistry);
+  const oauthDeadline = Date.now() + Number(options.timeoutMs || 180000);
+  const registryDefaultRoute = oauthState && plan.allowsLocalProvider === true && plan.routingSource === "taskClass" && !options.profile && plan.candidates.some(candidate => candidate.type === "llm");
+  if (registryDefaultRoute) {
+    if (!selectModels(oauthState, { provider: "codex", taskClass }).length && codexExecRunner === defaultCodexExecRunner) {
+      try { oauthState = await refreshRegistry(oauthRegistry, { timeoutMs: Math.min(8000, Math.max(1, oauthDeadline - Date.now())) }); }
+      catch { /* Unavailable discovery must not enable a stale model. */ }
+    }
+    plan.candidates = selectModels(oauthState, { provider: "codex", taskClass }).map(candidate => ({
+      type: "llm", provider: "openai", model: candidate.model, profile: taskClass, authMode: "oauth", effort: candidate.effort,
+    }));
+    if (isClaudeTextRequest(options)) plan.candidates.push(...selectModels(oauthState, {provider:"claude",taskClass}).map(candidate => ({
+      type:"llm",provider:"anthropic",model:candidate.model,profile:taskClass,authMode:"oauth",effort:candidate.effort,
+    })));
+  }
+  const localEnv = oauthState ? {
+    ...process.env,
+    MYOS_PUBLIC_LOCAL_PROVIDER_CONFIG: process.env.MYOS_PUBLIC_LOCAL_PROVIDER_CONFIG || process.env.MYOS_OAUTH_LOCAL_PROVIDER_CONFIG ||
+      path.join(process.env.HOME || os.homedir(), ".myos-dispatch", "oauth-local-provider.json"),
+  } : process.env;
+  const local = plan.allowsLocalProvider === true && plan.routingSource === "taskClass"
+    ? localCandidate({ ...options, taskClass }, localEnv) : null;
+  if (local) plan.candidates.unshift(local);
   const goalMetadata = options.dispatchPlan?.goalScale
     ? inferGoalScale(options.dispatchPlan)
     : inferGoalScale(options, {
@@ -1443,7 +1567,7 @@ async function myosRun(options = {}) {
 
   for (let index = 0; index < plan.candidates.length; index += 1) {
     const candidate = plan.candidates[index];
-    const authLabel = resolveAuthLabel({
+    const authLabel = candidate.provider === "local" ? "local:none" : resolveAuthLabel({
       provider:
         candidate.type === "deterministic"
           ? candidate.tool
@@ -1456,7 +1580,14 @@ async function myosRun(options = {}) {
     let spendControlAction = null;
 
     try {
-      ({
+      if (authMode === "oauth" && Date.now() >= oauthDeadline) throw new Error("OAuth execution deadline exceeded");
+      if (registryDefaultRoute && ["openai","anthropic"].includes(candidate.provider) && !selectModels(readState(oauthRegistry), {
+        provider: candidate.provider === "anthropic" ? "claude" : "codex", taskClass,
+      }).some(model => model.model === candidate.model)) throw new Error("OAuth model is no longer eligible in the refreshed registry");
+      if (candidate.provider === "local" && loadSpendPolicy().killSwitch) {
+        throw new Error("MyOS spend policy kill switch is active");
+      }
+      if (candidate.provider !== "local") ({
         candidate: executionCandidate,
         spendControlAction,
       } = applySpendPolicyToCandidate({
@@ -1468,9 +1599,33 @@ async function myosRun(options = {}) {
         authLabel,
         authMode,
       }));
-      validateExecutionCandidate(plan, executionCandidate, { authMode, audio: options.audio });
+      const claudeOauthVerified = authMode === "oauth" && isClaudeTextRequest(options) &&
+        selectModels(readState(oauthRegistry), {provider:"claude",taskClass}).some(model=>model.model===executionCandidate.model);
+      validateExecutionCandidate(plan, executionCandidate, { authMode, audio: options.audio, claudeOauthVerified });
+      if (unattendedCodex) require("../policy/codex-unattended").resolveInstalledCodexModel({
+        taskClass,model:executionCandidate.model,effort:codexInstallation.selection.effort,
+      });
       const result =
-        executionCandidate.type === "deterministic"
+        unattendedCodex
+          ? await require("./oauth-text").executeCodexText({
+              model: executionCandidate.model, prompt: buildCodexExecPrompt(buildMessages(options), options.responseMode),
+              effort: codexInstallation.selection.effort, timeoutMs: Math.min(options.timeoutMs || 180000,codexInstallation.expiresAt-Date.now()),
+              approvalExpiresAt: codexInstallation.expiresAt,
+              unattended: true, command: codexInstallation.executable,
+            }).then(output => ({...output, provider: "openai", model: executionCandidate.model,
+              estimatedCostUsd: null, json: maybeParseJson(output.text, options.responseMode)}))
+          : executionCandidate.provider === "local"
+          ? await executeLocalCandidate(executionCandidate, { ...options, taskClass,
+              ...(authMode === "oauth" ? {
+                timeoutMs: Math.max(1, Math.min(10000, oauthDeadline - Date.now())),
+                allowColdStart: options.allowLocalColdStart === true && oauthDeadline - Date.now() >= 75000,
+              } : {}),
+            }, buildMessages(options))
+          : executionCandidate.provider === "anthropic" && authMode === "oauth"
+          ? await require("./oauth-claude").executeClaudeText({model:executionCandidate.model,
+              prompt:buildCodexExecPrompt(buildMessages(options),options.responseMode),responseMode:options.responseMode,
+              effort:executionCandidate.effort,maxOutputTokens:options.maxOutputTokens,timeoutMs:Math.max(1,oauthDeadline-Date.now())})
+          : executionCandidate.type === "deterministic"
           ? await executeDeterministicCandidate(executionCandidate, options)
           : await llmCallAsync({
               provider: executionCandidate.provider,
@@ -1481,7 +1636,8 @@ async function myosRun(options = {}) {
               audio: options.audio,
               profile: executionCandidate.profile || resolveProfileId(options.profile, taskClass),
               model: executionCandidate.model || options.model,
-              timeoutMs: options.timeoutMs,
+              timeoutMs: authMode === "oauth" ? Math.max(1, oauthDeadline - Date.now()) : options.timeoutMs,
+              effort: executionCandidate.effort,
               maxOutputTokens: options.maxOutputTokens,
               responseMode: options.responseMode,
               budgetCapUsd: options.budgetCapUsd,
@@ -1497,6 +1653,10 @@ async function myosRun(options = {}) {
 
       const finalResult = {
         ...result,
+        ...(unattendedCodex ? {costBasis: "account_usage_unmetered", accountChargeUsd: null} : {}),
+        ...codexSelectionReceipt,
+        transportAuthMode: executionCandidate.provider === "local" ? "none" : authMode,
+        billingMode: executionCandidate.provider === "local" ? "local" : billingMode,
         authMode,
         authLabel,
         caller,
@@ -1529,7 +1689,10 @@ async function myosRun(options = {}) {
       attemptEvents.push({
         index,
         status: "success",
+        ...codexSelectionReceipt,
         type: executionCandidate.type,
+        transportAuthMode: executionCandidate.provider === "local" ? "none" : authMode,
+        billingMode: executionCandidate.provider === "local" ? "local" : billingMode,
         providerOrTool:
           executionCandidate.type === "deterministic"
             ? executionCandidate.tool
@@ -1540,7 +1703,7 @@ async function myosRun(options = {}) {
             : finalResult.resolvedModelOrEngine || executionCandidate.model || null,
         latencyMs: Date.now() - attemptStartedAt,
         retryable: false,
-        estimatedCostUsd: Number(result.estimatedCostUsd || 0),
+        estimatedCostUsd: unattendedCodex ? null : Number(result.estimatedCostUsd || 0),
         inputTokens: Number(result.usage?.inputTokens || 0),
         outputTokens: Number(result.usage?.outputTokens || 0),
         spendControlAction,
@@ -1548,7 +1711,10 @@ async function myosRun(options = {}) {
       appendUsageEvent({
         ts: new Date().toISOString(),
         outcome: "success",
-        billable: authMode === "api" && executionCandidate.type === "llm",
+        ...codexSelectionReceipt,
+        billable: authMode === "api" && executionCandidate.type === "llm" && executionCandidate.provider !== "local",
+        transportAuthMode: executionCandidate.provider === "local" ? "none" : authMode,
+        billingMode: executionCandidate.provider === "local" ? "local" : billingMode,
         caller,
         taskClass,
         intent,
@@ -1563,7 +1729,7 @@ async function myosRun(options = {}) {
         resolvedProfile: finalResult.resolvedProfile,
         fallbackIndex: index,
         authLabel: finalResult.authLabel,
-        estimatedCostUsd: Number(finalResult.estimatedCostUsd || 0),
+        estimatedCostUsd: unattendedCodex ? null : Number(finalResult.estimatedCostUsd || 0),
         inputTokens: Number(result.usage?.inputTokens || 0),
         outputTokens: Number(result.usage?.outputTokens || 0),
         totalLatencyMs: Date.now() - runStartedAt,
@@ -1581,14 +1747,37 @@ async function myosRun(options = {}) {
         attempts: attemptEvents,
       });
       spendSummaryCache = null;
+      if (oauthState && ["openai","anthropic"].includes(executionCandidate.provider) &&
+          (codexExecRunner === defaultCodexExecRunner || process.env.MYOS_OAUTH_REGISTRY)) {
+        try {
+          updateState(oauthRegistry, state => ({ ...state, revision: state.revision + 1,
+            models: state.models.map(model => model.provider === (executionCandidate.provider === "anthropic" ? "claude" : "codex") && model.model === result.model
+              ? { ...model, invokedAt: new Date().toISOString() } : model),
+          }));
+        } catch { /* Registry contention must not repeat a successful inference. */ }
+      }
       return finalResult;
     } catch (error) {
       lastError = error;
-      const retryableError = isRetryableProviderError(error);
+      let retryableError = unattendedCodex ? false : isRetryableProviderError(error);
+      if (!unattendedCodex && authMode === "oauth" && executionCandidate.provider !== "local" && executionCandidate.type === "llm") {
+        const failure = { provider: executionCandidate.provider === "anthropic" ? "claude" : "codex", model: executionCandidate.model || options.model, stderr: error.message,
+          signal: error.signal, cleanupFailed: error.cleanupFailed };
+        retryableError = recordFailure({ revision: 0, models: [] }, failure).lastFailure.retryAllowed && Date.now() < oauthDeadline;
+        if (oauthState && (codexExecRunner === defaultCodexExecRunner || process.env.MYOS_OAUTH_REGISTRY)) {
+          try {
+            updateState(oauthRegistry, state => recordFailure(state, failure));
+            if (oauthDeadline - Date.now() > 1000) await refreshRegistry(oauthRegistry, { timeoutMs: Math.min(8000, oauthDeadline - Date.now() - 500) });
+          } catch { retryableError = false; }
+        }
+      }
       attemptEvents.push({
         index,
         status: "error",
+        ...codexSelectionReceipt,
         type: executionCandidate.type,
+        transportAuthMode: executionCandidate.provider === "local" ? "none" : authMode,
+        billingMode: executionCandidate.provider === "local" ? "local" : billingMode,
         providerOrTool:
           executionCandidate.type === "deterministic"
             ? executionCandidate.tool
@@ -1609,7 +1798,7 @@ async function myosRun(options = {}) {
       if (fallbackCandidate && retryableError) {
         continue;
       }
-      await maybeNotifyProviderIssue({
+      if (!unattendedCodex) await maybeNotifyProviderIssue({
         provider:
           executionCandidate.type === "llm"
             ? executionCandidate.provider
@@ -1625,7 +1814,10 @@ async function myosRun(options = {}) {
       appendUsageEvent({
         ts: new Date().toISOString(),
         outcome: "error",
-        billable: authMode === "api" && executionCandidate.type === "llm",
+        ...codexSelectionReceipt,
+        billable: authMode === "api" && executionCandidate.type === "llm" && executionCandidate.provider !== "local",
+        transportAuthMode: executionCandidate.provider === "local" ? "none" : authMode,
+        billingMode: executionCandidate.provider === "local" ? "local" : billingMode,
         caller,
         taskClass,
         intent,
@@ -1904,7 +2096,70 @@ function geminiCall(promptOrOptions, model, timeoutMs = 180000) {
   return options.includeMetadata ? result : result.text;
 }
 
+async function myosRunBoundedAPI(options = {}) {
+  return require('./bounded-api').runBoundedAPI(options, prepareBoundedApiLaunch);
+}
+
+async function myosRunBoundedCodex(options = {}) {
+  return require('./bounded-codex').runBoundedCodex(options, prepareBoundedCodexLaunch);
+}
+
+function prepareBoundedCodexLaunch(options) {
+  if (!isCanonicalTaskClass(options.taskClass) || resolveAuthMode(options.authMode) !== 'oauth') throw new Error('route');
+  const installation = require('../policy/codex-unattended').assertUnattendedCodexOptions(options,
+    {authMode: resolveAuthMode(options.authMode), executionPolicy: options.executionPolicy});
+  const policyPath = resolveSpendPolicyPath();
+  if (process.env.MYOS_SPEND_POLICY_PATH || fs.existsSync(policyPath)) {
+    const policy = JSON.parse(fs.readFileSync(policyPath, 'utf8'));
+    if (!policy || typeof policy !== 'object' || Array.isArray(policy) ||
+        (policy.killSwitch != null && typeof policy.killSwitch !== 'boolean')) throw new Error('policy');
+  }
+  const selected = {...options, model: installation.selection.model};
+  const plan = resolveExecutionPlan(selected);
+  if (plan.candidates.length !== 1) throw new Error('route');
+  spendSummaryCache = null;
+  const {candidate, spendControlAction} = applySpendPolicyToCandidate({candidate:plan.candidates[0],
+    options:selected, taskClass:options.taskClass, complianceLane:'unattended_codex',
+    caller:resolveCallerContext(selected),authLabel:resolveAuthLabel({provider:'openai',authMode:'oauth',options:selected}),authMode:'oauth'});
+  validateExecutionCandidate(plan,candidate,{authMode:'oauth'});
+  if (candidate.model !== selected.model || spendControlAction) throw new Error('route');
+  return {...installation,policyIdentity:JSON.stringify({plan,candidate,policy:loadSpendPolicy()})};
+}
+
+// Deliberately opt-in: legacy, OAuth and private bot execution are unchanged.
+function prepareBoundedApiLaunch(options) {
+  if (!isCanonicalTaskClass(options.taskClass) || resolveAuthMode(options.authMode) !== 'api') {
+    throw new Error('route');
+  }
+  // Unlike the legacy loader, an unreadable explicit policy fails closed.
+  const policyPath = resolveSpendPolicyPath();
+  if (process.env.MYOS_SPEND_POLICY_PATH || fs.existsSync(policyPath)) {
+    const policy = JSON.parse(fs.readFileSync(policyPath, 'utf8'));
+    if (!policy || typeof policy !== 'object' || Array.isArray(policy)) throw new Error('policy');
+  }
+  const plan = resolveExecutionPlan(options);
+  if (plan.candidates.length !== 1) throw new Error('route');
+  spendSummaryCache = null;
+  const { candidate, spendControlAction } = applySpendPolicyToCandidate({
+    candidate: plan.candidates[0], options, taskClass: options.taskClass,
+    complianceLane: 'unattended_api', caller: resolveCallerContext(options),
+    authLabel: resolveAuthLabel({ provider: 'openai', authMode: 'api', options }), authMode: 'api',
+  });
+  validateExecutionCandidate(plan, candidate, { executionPolicy: 'internal_automation', authMode: 'api' });
+  if (candidate.type !== 'llm' || candidate.provider !== 'openai' ||
+      candidate.model !== options.model || spendControlAction) throw new Error('route');
+  const { meta } = resolveModelForProvider('openai', candidate.profile, options.model);
+  const apiKey = resolveProviderApiKey('openai');
+  if (!apiKey) throw new Error('credential');
+  return { apiKey, pricing: meta?.pricing_per_1m_tokens,
+    policyIdentity: JSON.stringify({ plan, candidate, policy: loadSpendPolicy() }) };
+}
+
 module.exports = {
+  myosRunBoundedCodex,
+  myosRunBoundedAPI,
+  CODEX_OAUTH_CHEAP_MODEL,
+  CODEX_OAUTH_STRONG_MODEL,
   claudeCall,
   claudeCallAsync,
   codexCall,

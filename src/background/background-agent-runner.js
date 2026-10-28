@@ -1,4 +1,5 @@
 "use strict";
+const {codexExecutionSettings}=require("../policy/codex-execution-policy");
 
 const fs = require("node:fs");
 const os = require("node:os");
@@ -7,7 +8,10 @@ const crypto = require("node:crypto");
 const { spawn, execFileSync } = require("node:child_process");
 
 const { loadCatalog, resolveProfileModel } = require("../model-catalog");
-const { resolveCodexOauthModel } = require("../runtime/llm-call");
+const { CODEX_OAUTH_CHEAP_MODEL, resolveCodexOauthModel } = require("../runtime/llm-call");
+const { readState, updateState } = require("../runtime/oauth-state");
+const { selectModels, recordFailure } = require("../runtime/oauth-registry");
+const { refreshRegistry, registryPath } = require("../runtime/oauth-doctor");
 const { parseCodexJsonl } = require("./codex-worker");
 const {
   isParallelizationTargetQuarantined,
@@ -22,9 +26,7 @@ const EXECUTION_MODES = Object.freeze({
 const LEGACY_METADATA_ONLY_MODES = new Set(["observe"]);
 const DEFAULT_TIMEOUT_MS = 180 * 1000;
 const DEFAULT_MAX_CONCURRENT_SIDECARS = 4;
-const DEFAULT_MAX_LOAD_AVG = 12;
 const DEFAULT_MIN_FREE_DISK_GIB_FOR_WRITABLE = 12;
-const ORPHAN_WORKTREE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const STRUCTURED_RESULT_CONTRACT = '- End your reply with a single line containing only this JSON object: {"findings":[{"file":"...","note":"..."}],"risks":["..."],"checks":["..."],"confidence":"low|medium|high"}';
 const ORCHESTRATOR_NAME = "myos-dispatch";
 const DEFAULT_OPTIONAL_SIDECAR_GRACE_MS = 1000;
@@ -71,9 +73,22 @@ const SAFE_SIDECAR_ENV_KEYS = new Set([
 
 function normalizeWorkerKind(command = "") {
   const base = path.basename(String(command || "codex").trim()).toLowerCase();
+  if (base === "agy" || base === "antigravity") return "antigravity";
   if (base === "claude" || base === "claude-code" || base === "claude_code") return "claude";
   if (base === "gemini" || base === "gemini-cli" || base === "gemini_cli") return "gemini";
   return "codex";
+}
+
+function normalizeCallerProvider(command) {
+  if (typeof command !== "string") return null;
+  const value = command.trim();
+  if (!value || /[\\/]$/.test(value)) return null;
+  const base = value.split(/[\\/]/).pop().toLowerCase().replace(/\.(?:exe|cmd|bat)$/, "");
+  if (base === "codex") return "codex";
+  if (["agy", "antigravity"].includes(base)) return "antigravity";
+  if (["claude", "claude-code", "claude_code"].includes(base)) return "claude";
+  if (["gemini", "gemini-cli", "gemini_cli"].includes(base)) return "gemini";
+  return null;
 }
 
 function findGeminiApiKeyEnv(env = process.env) {
@@ -190,14 +205,14 @@ function resolveProviderCapabilities(kind, options = {}) {
   const fromFlag = (value) => String(value || "").trim() === "1";
   // Provider-affine fan-out: a sidecar on the caller's own provider inherits
   // the caller's human OAuth lane without needing an explicit enable flag.
-  const callerKind = options.callerProvider ? normalizeWorkerKind(options.callerProvider) : null;
+  const callerKind = normalizeCallerProvider(options.callerProvider);
   const sameProviderAsCaller = callerKind != null && callerKind === kind;
-  if (kind === "codex") {
+  if (kind === "codex" || kind === "antigravity") {
     return {
       supportsReadOnly: true,
       supportsStructuredJson: true,
       supportsHumanOauth: true,
-      supportsWritablePatchWorktree: true,
+      supportsWritablePatchWorktree: kind === "codex" || !["0","false"].includes(String(env.MYOS_BACKGROUND_ANTIGRAVITY_WRITABLE || env.MYOS_BACKGROUND_GEMINI_WRITABLE).toLowerCase()),
     };
   }
   if (kind === "claude") {
@@ -205,7 +220,7 @@ function resolveProviderCapabilities(kind, options = {}) {
       supportsReadOnly: true,
       supportsStructuredJson: true,
       supportsHumanOauth: sameProviderAsCaller || fromFlag(env.MYOS_BACKGROUND_CLAUDE_HUMAN_OAUTH),
-      supportsWritablePatchWorktree: fromFlag(env.MYOS_BACKGROUND_CLAUDE_WRITABLE),
+      supportsWritablePatchWorktree: false,
     };
   }
   return {
@@ -216,13 +231,29 @@ function resolveProviderCapabilities(kind, options = {}) {
   };
 }
 
-function assertProviderAffinity(kind, options = {}) {
-  if (!options.callerProvider) return;
-  const callerKind = normalizeWorkerKind(options.callerProvider);
-  if (callerKind !== kind) {
-    throw new Error(
-      `Provider-affine fan-out refuses ${kind} sidecars for a ${callerKind} caller (cross-provider mixing is disabled).`,
-    );
+function assertProviderAffinity(kind, options = {}, task = {}) {
+  const caller = normalizeCallerProvider(options.callerProvider);
+  if (!caller) {
+    throw new Error("Provider-affine fan-out requires an explicit valid callerProvider.");
+  }
+  const delegation = options.delegation;
+  if (delegation) {
+    const env = options.env || process.env;
+    const protectedContext = isUnattendedContext(env) || isSidecarProcess(env) ||
+      options.protectedSurface === true || task.protectedSurface === true ||
+      ["bot", "unattended", "scheduler", "cron", "sidecar"].includes(String(env.MYOS_INITIATOR || "").toLowerCase()) ||
+      ["allsorted", "goldenclaw"].includes(String(task.projectSlug || options.projectSlug || "").toLowerCase());
+    if (caller !== "claude" || !["codex","antigravity"].includes(kind) ||
+        delegation.callerProvider !== caller || delegation.workerProvider !== kind ||
+        delegation.purpose !== "code-write" || delegation.context !== "human-interactive" ||
+        task.effectiveMode !== EXECUTION_MODES.WRITE || protectedContext ||
+        !Array.isArray(task.ownershipPaths) || task.ownershipPaths.length === 0) {
+      throw new Error("Explicit delegation refused: requires human-interactive Claude to Codex code-write with ownership and matching caller.");
+    }
+    return;
+  }
+  if (caller !== kind) {
+    throw new Error(`Provider-affine fan-out refuses ${kind} sidecars for a ${caller} caller (cross-provider mixing is disabled).`);
   }
 }
 
@@ -245,6 +276,7 @@ function assertOauthOnlyWorker(kind, options = {}) {
 
 function resolveBackgroundModel({ provider, profile, command }) {
   const kind = normalizeWorkerKind(command);
+  if (kind === "antigravity") return "gemini-4-argon-medium";
   if (kind === "claude") return process.env.MYOS_BACKGROUND_CLAUDE_MODEL || "haiku";
   if (kind === "gemini") return process.env.MYOS_BACKGROUND_GEMINI_MODEL || null;
 
@@ -259,7 +291,8 @@ function resolveBackgroundModel({ provider, profile, command }) {
   }
 
   if (kind === "codex") {
-    return resolveCodexOauthModel(resolvedModel || process.env.MYOS_BACKGROUND_CODEX_MODEL || "gpt-5.4-mini");
+    const legacyProfileDefaults = { "gpt-5.4-nano": "gpt-6-luna", "gpt-5-mini": "gpt-5.6-terra", "gpt-5.4-mini": "gpt-5.6-terra", "gpt-5.4": "gpt-6.1-sol", "gpt-5.5": "gpt-6.1-sol" };
+    return legacyProfileDefaults[resolvedModel] || resolveCodexOauthModel(resolvedModel || process.env.MYOS_BACKGROUND_CODEX_MODEL || CODEX_OAUTH_CHEAP_MODEL);
   }
 
   return resolvedModel;
@@ -269,7 +302,15 @@ function resolveTaskModel(task = {}, options = {}) {
   const command = options.command || "codex";
   const kind = normalizeWorkerKind(command);
   if (kind === "codex" && task.model) {
-    return resolveCodexOauthModel(task.model);
+    return task.model;
+  }
+  if (kind === "codex" && !isUnattendedContext(options.env || process.env)) {
+    const state = readState(registryPath(options.env || process.env));
+    const selection = selectModels(state, {
+      provider: kind, taskClass: task.taskClass || task.modelProfile || "cheap_routing",
+    });
+    if (selection.length) return selection[0].model;
+    if (state) throw new Error("No eligible OAuth model for this task class; run myos-oauth-doctor scan or resolve the reported auth/quarantine condition.");
   }
   return task.model || resolveBackgroundModel({
     provider: options.provider,
@@ -316,6 +357,10 @@ function buildWritablePrompt(task = {}) {
     "- Do not authenticate, refresh tokens, read secret material, or mutate external systems.",
     "- Do not spawn background agents, sidecars, myos-sidecar.js, Codex/Claude/Gemini subagents, or nested workers.",
     "- All fan-out is owned by the parent MyOS Dispatch orchestrator; if more lanes are needed, report that as a finding.",
+    "- Do not start background servers, daemons, or detached processes. This is an execution rule, not enforced process containment.",
+    "- Do not commit, apply patches to the source checkout, publish, or change Git configuration.",
+    "- Do not access the source checkout. Work only in this worktree; one owner per file.",
+    "- Report verification commands and their real results. Your report is not independent review.",
     "- Keep edits narrow and produce a clean patch artifact.",
     "- Return concise findings, changed files, verification result, and blockers.",
     `Execution envelope: ${JSON.stringify(task.executionEnvelope || {})}.`,
@@ -335,7 +380,8 @@ function buildBackgroundWorkerInvocation(task = {}, options = {}) {
   const readOnly = task.effectiveMode !== EXECUTION_MODES.WRITE;
   const prompt = readOnly ? buildReadOnlyPrompt(task) : buildWritablePrompt(task);
 
-  assertProviderAffinity(kind, options);
+  assertProviderAffinity(kind, options, task);
+  if (kind === "claude" && !readOnly) throw new Error("Claude code authoring is disabled.");
   if (!isUnattendedContext(options.env || process.env)) {
     assertOauthOnlyWorker(kind, options);
   }
@@ -352,12 +398,19 @@ function buildBackgroundWorkerInvocation(task = {}, options = {}) {
       "--permission-mode",
       readOnly ? "plan" : "acceptEdits",
       "--no-session-persistence",
-      "--bare",
       "--tools",
       readOnly ? "Read,Grep,Glob,LS" : "Read,Grep,Glob,LS,Edit,MultiEdit,Write",
     ];
     if (model) args.push("--model", model);
     return { kind, command, args, cwd, input: "", model: model || null, readOnly };
+  }
+
+  if(kind === "antigravity") {
+    const args=["-p",prompt,"--output-format","json","--add-dir",cwd,
+      "--print-timeout",`${Math.max(1,Math.round(Number(task.timeoutMs || DEFAULT_TIMEOUT_MS)/1000))}s`,"--sandbox"];
+    if(!readOnly)args.push("--dangerously-skip-permissions");
+    if(model)args.push("--model",model);
+    return {kind,command,args,cwd,input:"",model,readOnly};
   }
 
   if (kind === "gemini") {
@@ -375,65 +428,203 @@ function buildBackgroundWorkerInvocation(task = {}, options = {}) {
     return { kind, command, args, cwd, input: "", model: model || null, readOnly };
   }
 
-  const args = [
-    "-a",
-    "never",
-    "exec",
+  const selected = selectModels(readState(registryPath(options.env || process.env)), {
+    provider:kind,taskClass:task.taskClass || task.modelProfile || "cheap_routing",
+  }).find(candidate => candidate.model === model);
+  const execution = codexExecutionSettings(model, selected?.effort || "medium");
+
+  const args = isUnattendedContext(options.env || process.env)
+    ? ["-a", "never", "exec"]
+    : ["exec", "-c", 'approval_policy="never"'];
+  args.push(
     "--json",
     "--skip-git-repo-check",
     "--ephemeral",
-    "--ignore-user-config",
     "-s",
     readOnly ? "read-only" : "workspace-write",
-  ];
+  );
+  args.push("-c", "sandbox_workspace_write.network_access=false", "-c", "sandbox_workspace_write.writable_roots=[]");
+  if (!isUnattendedContext(options.env || process.env)) {
+    args.push("-c", 'forced_login_method="chatgpt"', "-c", 'model_provider="openai"');
+  }
+  args.push(...execution.args);
   if (cwd) args.push("-C", cwd);
   if (model) args.push("-m", model);
   args.push("-");
-  return { kind, command, args, cwd, input: prompt, model: model || null, readOnly };
+  return { kind, command, args, cwd, input: prompt, model: model || null, readOnly,
+    executionPolicy:{ceilingModel:execution.ceilingModel,speed:execution.speed} };
 }
 
-function runCommand({ command, args, cwd, input, timeoutMs, env }) {
+function runCommand({ command, args, cwd, input, timeoutMs, env, maxOutputBytes, signal, beforeSpawn, deadlineAt }) {
+  if (maxOutputBytes != null && (!Number.isSafeInteger(maxOutputBytes) || maxOutputBytes < 1)) {
+    throw new Error("Native process output bound must be a positive integer");
+  }
+  if (signal != null && !(signal instanceof AbortSignal)) throw new Error("Invalid native abort signal");
+  if (beforeSpawn != null && typeof beforeSpawn !== "function") throw new Error("Invalid native launch guard");
+  if (deadlineAt != null && (!Number.isSafeInteger(deadlineAt) || deadlineAt <= Date.now())) throw new Error("Native deadline expired or invalid");
+  if (signal?.aborted) throw new Error("Native process aborted before launch");
+  // No scoped Windows Job Object implementation is available here. Refuse to
+  // start a process without the owned-process-group cleanup used on POSIX.
+  if (process.platform === "win32") {
+    return Promise.resolve({ code: null, signal: null, stdout: "",
+      stderr: "Owned-process-group cleanup is not supported on Windows; use WSL", cleanupFailed: true,
+      cleanupScope: "owned-process-group", ownedGroupStopped: null, treeQuiescence: "unverified" });
+  }
   return new Promise((resolve) => {
-    const child = spawn(command, args, {
-      cwd,
-      stdio: ["pipe", "pipe", "pipe"],
-      env: env || process.env,
+    if (beforeSpawn && beforeSpawn() !== true) throw new Error("Native launch guard must synchronously approve");
+    if (signal?.aborted) throw new Error("Native process aborted before launch");
+    if (deadlineAt != null && deadlineAt <= Date.now()) throw new Error("Native deadline expired before launch");
+    // A bare provider name is resolved outside PATH as well: hooks run with a
+    // minimal PATH and macOS app bundles ship these CLIs without a shim.
+    let spawnCommand = command;
+    let spawnEnv = env || process.env;
+    if (command === "codex" || command === "claude") {
+      const { resolveProviderBinary, childPath } = require("../runtime/provider-binaries");
+      const resolved = resolveProviderBinary(command, { env: spawnEnv });
+      if (resolved) {
+        spawnCommand = resolved;
+        spawnEnv = { ...spawnEnv, PATH: childPath(resolved, spawnEnv) };
+      }
+    }
+    const child = spawn(spawnCommand, args, {
+      cwd, stdio: ["pipe", "pipe", "pipe"], env: spawnEnv,
+      detached: true,
     });
-
     let stdout = "";
     let stderr = "";
+    const bounded = maxOutputBytes != null;
+    const captured = {stdout: [], stderr: []};
+    let outputBytes = 0;
+    let outputLimitExceeded = false;
     let settled = false;
+    let timedOut = false;
+    let aborted = false;
+    let closed = false;
+    let exitCode = null;
+    let exitSignal = null;
+    let teardownStarted = false;
+    let killAt;
+    let deadline;
+    let killed = false;
+    let ownedGroupStopped = null;
+    let cleanupErrorCode = null;
+    let pollTimer;
+    const groupExists = () => {
+      if (!child.pid) return false;
+      try { process.kill(-child.pid, 0); return true; }
+      catch (error) { if (error.code === "ESRCH") return false; throw error; }
+    };
+    const stop = (signal) => {
+      // Only signal the group created by this spawn. Never fall back to a PID
+      // or discover/kill descendants by name after the parent has exited.
+      if (!child.pid) return;
+      try { process.kill(-child.pid, signal); }
+      catch (error) { if (error.code !== "ESRCH") throw error; }
+    };
+    const finish = (cleanupFailed) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      clearTimeout(pollTimer);
+      signal?.removeEventListener("abort", onAbort);
+      if (cleanupFailed) {
+        stderr += "\nOwned-process-group cleanup failed; tree quiescence could not be verified";
+        // Bound this call even if a surviving process holds inherited pipes.
+        child.stdin.destroy();
+        child.stdout.destroy();
+        child.stderr.destroy();
+        child.unref();
+      }
+      if (bounded) {
+        const {StringDecoder} = require("node:string_decoder");
+        stdout = new StringDecoder("utf8").write(Buffer.concat(captured.stdout));
+        stderr = new StringDecoder("utf8").write(Buffer.concat(captured.stderr));
+      }
+      resolve({ code: timedOut || aborted || cleanupFailed || outputLimitExceeded ? null : exitCode,
+        signal: timedOut ? "SIGTERM" : exitSignal, stdout, stderr, cleanupFailed,
+        ...(signal ? {aborted} : {}),
+        ...(bounded ? {outputLimitExceeded,cleanupErrorCode} : {}),
+        cleanupScope: "owned-process-group", ownedGroupStopped, treeQuiescence: "unverified" });
+    };
+    const checkTeardown = () => {
+      if (settled) return;
+      try {
+        const alive = groupExists();
+        ownedGroupStopped = child.pid ? !alive : null;
+        if (!alive && closed) { finish(false); return; }
+        if (alive && !killed && Date.now() >= killAt) {
+          stop("SIGKILL");
+          killed = true;
+        }
+      } catch (error) {
+        cleanupErrorCode = error.code || "PROCESS_GROUP_ERROR";
+        stderr += `\n${error.message}`;
+        // A just-terminated macOS process group may transiently return EPERM.
+        // Never treat that as stopped. Keep the same bounded ESRCH readback.
+        if (!bounded || error.code !== "EPERM") { finish(true); return; }
+      }
+      if (Date.now() >= deadline) { finish(true); return; }
+      pollTimer = setTimeout(checkTeardown, 25);
+    };
+    const beginTeardown = () => {
+      if (settled || teardownStarted) return;
+      teardownStarted = true;
+      clearTimeout(timeout);
+      killAt = Date.now() + 2000;
+      deadline = killAt + 2000;
+      try { stop("SIGTERM"); }
+      catch (error) {
+        cleanupErrorCode = error.code || "PROCESS_GROUP_ERROR";
+        stderr += `\n${error.message}`;
+        if (!bounded || error.code !== "EPERM") { finish(true); return; }
+      }
+      checkTeardown();
+    };
     const timeout = setTimeout(() => {
       if (settled) return;
-      settled = true;
-      child.kill("SIGTERM");
-      resolve({
-        code: null,
-        signal: "SIGTERM",
-        stdout,
-        stderr: `${stderr}\nTimed out after ${timeoutMs}ms`.trim(),
-      });
-    }, Number(timeoutMs || DEFAULT_TIMEOUT_MS));
-
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
+      timedOut = true;
+      stderr += `\nTimed out after ${timeoutMs || DEFAULT_TIMEOUT_MS}ms`;
+      beginTeardown();
+    }, Math.max(1,Math.min(Number(timeoutMs || DEFAULT_TIMEOUT_MS),deadlineAt == null ? Infinity : deadlineAt-Date.now())));
+    const onAbort = () => { aborted = true; beginTeardown(); };
+    signal?.addEventListener("abort", onAbort, {once:true});
+    if (signal?.aborted) onAbort();
+    const receive = (stream, chunk) => {
+      if (!bounded) {
+        if (stream === "stdout") stdout += chunk.toString();
+        else stderr += chunk.toString();
+        return;
+      }
+      if (settled || outputLimitExceeded) return;
+      if (outputBytes + chunk.length > maxOutputBytes) {
+        outputLimitExceeded = true;
+        beginTeardown();
+        return;
+      }
+      outputBytes += chunk.length;
+      captured[stream].push(chunk);
+    };
+    child.stdout.on("data", (chunk) => receive("stdout", chunk));
+    child.stderr.on("data", (chunk) => receive("stderr", chunk));
+    child.stdin.on("error", (error) => { if (error.code !== "EPIPE") stderr += `\n${error.message}`; });
     child.on("error", (error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      resolve({ code: null, signal: null, stdout, stderr: error.message });
+      stderr += `\n${error.message}`;
+      if (!child.pid) finish(false);
+      else beginTeardown();
+    });
+    // Exit starts teardown even when descendants hold output pipes open.
+    child.on("exit", (code, signal) => {
+      exitCode = code;
+      exitSignal = signal;
+      beginTeardown();
     });
     child.on("close", (code, signal) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      resolve({ code, signal, stdout, stderr });
+      exitCode = code;
+      exitSignal = signal;
+      closed = true;
+      beginTeardown();
+      // The poll must observe group ESRCH; this cannot prove tree quiescence.
     });
-
     if (input) child.stdin.write(input);
     child.stdin.end();
   });
@@ -513,6 +704,39 @@ function parseStructuredFindings(summary = "") {
   return null;
 }
 
+function validateWriterResponse(result, kind) {
+  if (!result || result.code !== 0 || result.signal) return { error: "provider_failed" };
+  try {
+    if(kind === "antigravity") {
+      const envelope=JSON.parse(String(result.stdout || ""));
+      if(envelope.status!=="SUCCESS")return {error:"antigravity_response_failed"};
+      const text=extractBackgroundSummary(result.stdout,kind);
+      const report=parseStructuredFindings(text);
+      if(!report || !["low","medium","high"].includes(report.confidence))return {error:"malformed_writer_report"};
+      return {report,reportedModels:typeof envelope.model==="string" ? [envelope.model] : []};
+    }
+    const events = String(result.stdout || "").trim().split(/\r?\n/).filter(Boolean).map(JSON.parse);
+    if (kind !== "codex" || !events.some((event) => event?.type === "turn.completed") ||
+        events.some((event) => !event || typeof event.type !== "string" || ["error", "turn.failed"].includes(event.type))) {
+      return { error: "provider_response_incomplete_or_failed" };
+    }
+    const parsed = parseCodexJsonl(result.stdout);
+    const finalLine = parsed.summary.trim().split(/\r?\n/).filter(Boolean).at(-1);
+    const report = JSON.parse(finalLine);
+    if (!report || !Array.isArray(report.findings) ||
+        !report.findings.every((item) => item && typeof item.file === "string" && typeof item.note === "string") ||
+        !Array.isArray(report.risks) || !report.risks.every((item) => typeof item === "string") ||
+        !Array.isArray(report.checks) || !report.checks.every((item) => typeof item === "string") ||
+        !["low", "medium", "high"].includes(report.confidence)) {
+      return { error: "malformed_writer_report" };
+    }
+    const reportedModels = [...new Set(events.flatMap((event) => typeof event.model === "string" ? [event.model] : []))];
+    return { report, reportedModels };
+  } catch {
+    return { error: "malformed_provider_response" };
+  }
+}
+
 function clampNumber(value, fallback, min, max) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
@@ -552,36 +776,20 @@ function freeDiskGib(targetPath) {
 function detectHostBackpressure(options = {}) {
   const env = options.env || process.env;
   if (String(env?.MYOS_BACKGROUND_BACKPRESSURE_ENABLED || "1") === "0") return null;
-  const maxLoad = clampNumber(env?.MYOS_BACKGROUND_MAX_LOAD, DEFAULT_MAX_LOAD_AVG, 1, 128);
-  const load = os.loadavg()[0];
+  const defaultMaxLoad = Math.max(8, Math.round((options.cpuCount ?? os.cpus().length) * 0.75));
+  const override = Number(env?.MYOS_BACKGROUND_LOAD_LIMIT ?? env?.MYOS_BACKGROUND_MAX_LOAD);
+  const maxLoad = Number.isSafeInteger(override) && override > 0 ? override : defaultMaxLoad;
+  const load = options.loadAverage ?? os.loadavg()[0];
   if (load > maxLoad) {
     return { reason: "host_backpressure", detail: `1m load average ${load.toFixed(1)} exceeds ${maxLoad}` };
   }
   return null;
 }
 
-let orphanWorktreeCleanupDone = false;
-
-function cleanupOrphanSidecarWorktrees(repoRoot) {
-  if (orphanWorktreeCleanupDone) return;
-  orphanWorktreeCleanupDone = true;
-  try {
-    const tmpRoot = os.tmpdir();
-    for (const entry of fs.readdirSync(tmpRoot)) {
-      if (!entry.startsWith("myos-sidecar-")) continue;
-      const fullPath = path.join(tmpRoot, entry);
-      try {
-        if (Date.now() - fs.statSync(fullPath).mtimeMs > ORPHAN_WORKTREE_MAX_AGE_MS) {
-          fs.rmSync(fullPath, { recursive: true, force: true });
-        }
-      } catch {}
-    }
-  } catch {}
-  if (repoRoot) {
-    try {
-      gitExec(["worktree", "prune"], repoRoot);
-    } catch {}
-  }
+function cleanupOrphanSidecarWorktrees() {
+  // Age is not proof of review or integration. Only the owning orchestrator
+  // may retire a retained handback after independent review and preservation.
+  return { removed: 0, reason: "explicit_review_required" };
 }
 
 function plannedResult(task, reason = "Background task planned but not executed.") {
@@ -621,6 +829,7 @@ function skippedResult(task, reason, extra = {}) {
     usage: null,
     model: null,
     runner: null,
+    ...(task.mode === EXECUTION_MODES.WRITE ? { reviewRequired: true } : {}),
     ...extra,
   };
 }
@@ -638,12 +847,48 @@ function gitExec(args, cwd) {
   }).trim();
 }
 
-function gitExecRaw(args, cwd) {
-  return execFileSync("git", args, {
-    cwd,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+
+function validateOwnershipPaths(repoRoot, paths) {
+  if (!Array.isArray(paths) || paths.length === 0) throw new Error("ownership paths are required");
+  const root = fs.realpathSync(repoRoot);
+  return [...new Set(paths.map((entry) => {
+    if (typeof entry !== "string" || !entry || /[\\\x00-\x1f]/.test(entry) || entry.split("/").includes("..")) {
+      throw new Error(`invalid ownership path: ${entry}`);
+    }
+    let absolute = path.resolve(root, entry);
+    if (path.isAbsolute(entry)) {
+      // Resolve aliases only up to the repository boundary (e.g. /var versus
+      // /private/var). Keep the owned suffix lexical so symlinks below the root
+      // still reach the lstat checks, including links back to the root itself.
+      let prefix = path.parse(absolute).root;
+      for (const part of absolute.slice(prefix.length).split(path.sep)) {
+        prefix = path.join(prefix, part);
+        try {
+          if (fs.realpathSync(prefix) === root) {
+            absolute = path.resolve(root, path.relative(prefix, absolute));
+            break;
+          }
+        } catch (error) {
+          if (error.code !== "ENOENT") throw error;
+          break;
+        }
+      }
+    }
+    const relative = path.relative(root, absolute).split(path.sep).join("/");
+    if (!relative || relative === ".." || relative.startsWith("../") || relative.split("/").some((part) => part.toLowerCase() === ".git")) {
+      throw new Error(`ownership_scope_outside_repository:${entry}`);
+    }
+    let current = root;
+    for (const part of relative.split("/")) {
+      current = path.join(current, part);
+      try {
+        if (fs.lstatSync(current).isSymbolicLink()) throw new Error(`ownership_symlink_refused:${entry}`);
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+      }
+    }
+    return relative;
+  }))];
 }
 
 function resolveWritableWorktree(task = {}, options = {}) {
@@ -654,88 +899,79 @@ function resolveWritableWorktree(task = {}, options = {}) {
   } catch {
     return null;
   }
+  const ownershipPaths = validateOwnershipPaths(repoRoot, task.ownershipPaths);
   cleanupOrphanSidecarWorktrees(repoRoot);
   if (gitExec(["status", "--porcelain"], repoRoot)) return null;
   const baseSha = gitExec(["rev-parse", "HEAD"], repoRoot);
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), `myos-sidecar-${task.id}-`));
+  const runId = String(options.orchestratorContext?.runId || "unscoped-run").replace(/[^a-zA-Z0-9_-]/g, "_");
+  const defaultArtifactRoot = path.join(
+    (options.env || process.env).MYOS_HOME_ROOT || path.join(os.homedir(), ".myos"),
+    "state", "myos-dispatch", "sidecar-artifacts", runId,
+  );
+  const requestedRoot = path.resolve(options.artifactRoot || defaultArtifactRoot);
+  let existing = requestedRoot;
+  while (!fs.existsSync(existing)) existing = path.dirname(existing);
+  const canonicalRoot = path.resolve(fs.realpathSync(existing), path.relative(existing, requestedRoot));
+  const relativeRoot = path.relative(fs.realpathSync(repoRoot), canonicalRoot);
+  if (!relativeRoot || (!relativeRoot.startsWith(`..${path.sep}`) && relativeRoot !== ".." && !path.isAbsolute(relativeRoot))) {
+    throw new Error("Artifact root must be outside the source checkout");
+  }
+  fs.mkdirSync(canonicalRoot, { recursive: true });
+  const artifactRoot = fs.mkdtempSync(path.join(canonicalRoot, "handback-"));
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "myos-sidecar-writer-"));
   try {
     gitExec(["worktree", "add", "--detach", tempRoot, baseSha], repoRoot);
-  } catch {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-    return null;
+  } catch (error) {
+    // Preserve even an incomplete allocation; never assume a failed Git operation wrote nothing.
+    throw new Error(`Cannot create isolated worktree; retained ${tempRoot}: ${error.message}`);
   }
-  const runId = options.orchestratorContext?.runId || "unscoped-run";
-  const defaultArtifactRoot = path.join(
-    process.env.MYOS_HOME_ROOT || path.join(os.homedir(), ".myos"),
-    "state",
-    "myos-dispatch",
-    "sidecar-artifacts",
-    runId,
-    task.id || "task",
-  );
-  const artifactRoot = path.resolve(
-    options.artifactRoot || process.env.MYOS_SIDECAR_ARTIFACT_ROOT || defaultArtifactRoot,
-  );
-  return { repoRoot, baseSha, worktreePath: tempRoot, artifactRoot };
+  return { repoRoot, baseSha, worktreePath: tempRoot, artifactRoot, ownershipPaths };
 }
 
-function cleanupWritableWorktree(context = null) {
-  if (!context?.repoRoot || !context?.worktreePath) return;
-  try {
-    gitExec(["worktree", "remove", "--force", context.worktreePath], context.repoRoot);
-  } catch {}
-  try {
-    fs.rmSync(context.worktreePath, { recursive: true, force: true });
-  } catch {}
+
+function verifyPatchArtifact(file, expectedSha256) {
+  if (!/^[a-f0-9]{64}$/.test(expectedSha256 || "")) throw new Error("Invalid patch SHA256");
+  const actual = crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+  if (actual !== expectedSha256) throw new Error("Patch hash mismatch; independent review is invalidated");
+  return true;
 }
 
 function collectWorktreeArtifacts(context, task = {}) {
   if (!context?.worktreePath || !context?.baseSha) {
     return { changedFiles: [], patchArtifact: null, patchSha256: null, verificationResult: null };
   }
-  gitExec(["add", "-A"], context.worktreePath);
-  const changedOutput = gitExec(["diff", "--cached", "--name-only", "-z", context.baseSha, "--"], context.worktreePath);
-  const changedFiles = changedOutput.split("\0").filter(Boolean);
-  const ownershipPaths = Array.isArray(task.ownershipPaths) && task.ownershipPaths.length > 0
-    ? task.ownershipPaths
-    : Array.isArray(task.writeScope)
-      ? task.writeScope
-      : [];
-  const canonicalRepoRoot = fs.realpathSync(context.repoRoot);
-  const allowedRoots = ownershipPaths.map((ownershipPath) => {
-    const absolute = path.resolve(context.repoRoot, ownershipPath);
-    const canonicalAbsolute = fs.existsSync(absolute) ? fs.realpathSync(absolute) : absolute;
-    const relative = path.relative(canonicalRepoRoot, canonicalAbsolute);
-    if (relative === "" || relative === ".") return "";
-    if (relative === ".." || relative.startsWith(`..${path.sep}`)) {
-      throw new Error(`ownership_scope_outside_repository:${ownershipPath}`);
-    }
-    return relative.split(path.sep).join("/");
+  fs.mkdirSync(context.artifactRoot, { recursive: true });
+  const indexPath = path.join(context.artifactRoot, `capture-${crypto.randomUUID()}.index`);
+  const git = (args, encoding = "utf8") => execFileSync("git", args, {
+    cwd: context.worktreePath, encoding, maxBuffer: 64 * 1024 * 1024,
+    env: { ...process.env, GIT_INDEX_FILE: indexPath }, stdio: ["ignore", "pipe", "pipe"],
   });
-  const ownershipViolations = changedFiles.filter((changedFile) => !allowedRoots.some((allowedRoot) => (
-    allowedRoot === "" ||
-    changedFile === allowedRoot ||
-    changedFile.startsWith(`${allowedRoot}/`)
-  )));
-  if (ownershipViolations.length > 0) {
-    throw new Error(`ownership_violation:${ownershipViolations.join(",")}`);
+  try {
+    git(["read-tree", context.baseSha]);
+    git(["add", "-A"]);
+    const changedFiles = git(["diff", "--cached", "--no-renames", "--name-only", "-z", context.baseSha, "--"]).split("\0").filter(Boolean);
+    const allowedRoots = context.ownershipPaths || validateOwnershipPaths(context.repoRoot, task.ownershipPaths);
+    const ownershipViolations = changedFiles.filter((file) => !allowedRoots.some((root) => file === root || file.startsWith(`${root}/`)));
+    const patch = git(["diff", "--cached", "--no-ext-diff", "--no-textconv", "--no-renames", "--binary", "--full-index", context.baseSha, "--"], null);
+    let patchArtifact = null;
+    let patchSha256 = null;
+    let verificationResult = "no_changes";
+    if (changedFiles.length) {
+      patchArtifact = path.join(context.artifactRoot, "changes.patch");
+      fs.writeFileSync(patchArtifact, patch, { flag: "wx", mode: 0o600 });
+      patchSha256 = crypto.createHash("sha256").update(patch).digest("hex");
+      verifyPatchArtifact(patchArtifact, patchSha256);
+      git(["apply", "--check", "--cached", "--reverse", patchArtifact]);
+      verificationResult = "patch_reverse_check_passed";
+    }
+    if (ownershipViolations.length) verificationResult = `ownership_violation:${ownershipViolations.join(",")}`;
+    try { validateOwnershipPaths(context.worktreePath, changedFiles.length ? changedFiles : allowedRoots); }
+    catch (error) { verificationResult = error.message; }
+    return { changedFiles, ownedChangedFiles: changedFiles.filter((file) => !ownershipViolations.includes(file)), ownershipViolations, patchArtifact, patchSha256, verificationResult };
+  } finally {
+    // This is a temporary capture index, never the writer's real index or work.
+    fs.rmSync(indexPath, { force: true });
   }
-  const patchText = gitExecRaw(["diff", "--cached", "--binary", context.baseSha, "--"], context.worktreePath);
-  let patchArtifact = null;
-  let patchSha256 = null;
-  if (changedFiles.length > 0) {
-    fs.mkdirSync(context.artifactRoot, { recursive: true });
-    patchArtifact = path.join(context.artifactRoot, `${task.id}.patch`);
-    fs.writeFileSync(patchArtifact, patchText, "utf8");
-    gitExec(["apply", "--check", "--cached", "--reverse", patchArtifact], context.worktreePath);
-    patchSha256 = crypto.createHash("sha256").update(patchText).digest("hex");
-  }
-  return {
-    changedFiles,
-    patchArtifact,
-    patchSha256,
-    verificationResult: changedFiles.length > 0 ? "patch_reverse_check_passed" : "no_changes",
-  };
 }
 
 function effectiveModeForTask(task = {}, options = {}) {
@@ -776,10 +1012,19 @@ async function runBackgroundTask(task, options = {}) {
 
   let worktree = null;
   if (effectiveMode === EXECUTION_MODES.WRITE) {
-    worktree = resolveWritableWorktree(normalizedTask, {
-      ...options,
-      orchestratorContext,
-    });
+    if (process.platform === "win32") {
+      return skippedResult(normalizedTask, "Writable task refused: owned-process-group cleanup is not supported on Windows; use WSL.", {
+        status: "failed", reviewRequired: true, cleanupFailed: true,
+        cleanupScope: "owned-process-group", ownedGroupStopped: null, treeQuiescence: "unverified",
+      });
+    }
+    try {
+      // Refuse invalid callers before allocating a worktree or running any provider.
+      assertProviderAffinity(normalizeWorkerKind(options.command || "codex"), options, normalizedTask);
+      worktree = resolveWritableWorktree(normalizedTask, { ...options, orchestratorContext });
+    } catch (error) {
+      return skippedResult(normalizedTask, `Writable task refused: ${error.message}`, { status: "failed", reviewRequired: true });
+    }
     if (!worktree) {
       return skippedResult(normalizedTask, "Writable task refused: repository is dirty, unavailable, or cannot create an isolated worktree.", {
         status: normalizedTask.required ? "failed" : "skipped",
@@ -790,6 +1035,11 @@ async function runBackgroundTask(task, options = {}) {
     }
   }
 
+  if (worktree) {
+    normalizedTask.ownershipPaths = worktree.ownershipPaths;
+    normalizedTask.writeScope = worktree.ownershipPaths;
+    normalizedTask.scope = worktree.worktreePath;
+  }
   let invocation;
   try {
     invocation = buildBackgroundWorkerInvocation(normalizedTask, {
@@ -797,8 +1047,8 @@ async function runBackgroundTask(task, options = {}) {
       cwd: worktree?.worktreePath || normalizedTask.scope || options.cwd,
     });
   } catch (error) {
-    cleanupWritableWorktree(worktree);
     return skippedResult(normalizedTask, `Skipped: ${error?.message || String(error)}`, {
+      ...(worktree ? { status: "failed", worktreePath: worktree.worktreePath, baseSha: worktree.baseSha, reviewRequired: true } : {}),
       runner: normalizeWorkerKind(options.command || "codex"),
     });
   }
@@ -830,15 +1080,27 @@ async function runBackgroundTask(task, options = {}) {
 
   await acquireSidecarSlot(options.env || process.env);
   let result;
+  const oauthRegistry = registryPath(options.env || process.env);
+  // Injected transports must opt into a dedicated registry path. Otherwise
+  // tests/custom runners could label the user's real models as live-verified.
+  const oauthRecovery = !unattended && (!options.runCommand || options.env?.MYOS_OAUTH_REGISTRY) && readState(oauthRegistry);
+  const deadline = started + Number(task.timeoutMs || options.timeoutMs || DEFAULT_TIMEOUT_MS);
+  const oauthAttempts = [];
   try {
+    for (let attempt = 0; attempt < 2; attempt++) {
     try {
+      if(invocation.kind==="antigravity") {
+        const agy=require("../runtime/antigravity-capacity");
+        const snapshot=await (options.readAntigravityCapacity || agy.refreshAntigravityCapacity)();
+        if(!agy.eligibleAntigravityCapacity(snapshot,invocation.model))throw new Error("Antigravity quota unavailable/exhausted or paid overages not verified off");
+      }
       result = await runCommandImpl({
         command: invocation.command,
         args: invocation.args,
         cwd: invocation.cwd,
         input: invocation.input,
         env: childEnv,
-        timeoutMs: Number(task.timeoutMs || options.timeoutMs || DEFAULT_TIMEOUT_MS),
+        timeoutMs: worktree || unattended ? Number(task.timeoutMs || options.timeoutMs || DEFAULT_TIMEOUT_MS) : Math.max(1, deadline - Date.now()),
         invocation,
         task: normalizedTask,
         worktree,
@@ -851,31 +1113,90 @@ async function runBackgroundTask(task, options = {}) {
         stderr: error?.message || String(error),
       };
     }
+    if (!oauthRecovery) break;
+    if (result?.code === 0 && invocation.kind === "codex") {
+      const parsed = parseCodexJsonl(result.stdout);
+      if (parsed.errorMessage || !extractBackgroundSummary(result.stdout, invocation.kind).trim()) {
+        result = { ...result, code: 1, stderr: parsed.errorMessage || "OAuth provider returned no validated assistant output" };
+      }
+    }
+    oauthAttempts.push({ model: invocation.model, provider: invocation.kind, code: result?.code ?? null });
+    if (result?.code === 0 && !result.signal && !result.cleanupFailed) {
+      break;
+    }
+    let failure;
+    try {
+      failure = updateState(oauthRegistry, state => recordFailure(state, {
+        provider: invocation.kind, model: invocation.model, ...result,
+        stderr: `${result?.stderr || ""}\n${result?.stdout || ""}`,
+      }));
+      if (deadline - Date.now() > 1000) await refreshRegistry(oauthRegistry, {
+        env: childEnv, cwd: invocation.cwd, timeoutMs: Math.min(8000, deadline - Date.now() - 500),
+      });
+    } catch { break; /* Keep original failure if the recovery state cannot be safely updated. */ }
+    if (attempt || worktree || task.model || !invocation.readOnly || !failure.lastFailure.retryAllowed || Date.now() >= deadline) break;
+    const fallback = selectModels(readState(oauthRegistry), {
+      provider: invocation.kind, taskClass: task.taskClass || task.modelProfile || "cheap_routing",
+    }).find(candidate => candidate.model !== invocation.model);
+    if (!fallback) break;
+    invocation = buildBackgroundWorkerInvocation({ ...normalizedTask, model: fallback.model }, {
+      ...options, cwd: invocation.cwd,
+    });
+    if (invocation.kind === "codex") invocation.args.splice(invocation.args.length - 1, 0, "-c", `model_reasoning_effort="${fallback.effort}"`);
+    }
   } finally {
     releaseSidecarSlot();
   }
+  result = result && typeof result === "object" ? result : { code: null, stderr: "Missing provider result" };
+  const writerResponse = worktree ? validateWriterResponse(result, invocation.kind) : null;
   const summary = extractBackgroundSummary(result.stdout, invocation.kind);
   const structured = parseStructuredFindings(summary);
-  let ok = result.code === 0 && !result.signal;
+  let ok = result.code === 0 && !result.signal && !result.cleanupFailed && !writerResponse?.error;
+  if(invocation.kind==="antigravity") {
+    try {if(JSON.parse(result.stdout).status!=="SUCCESS")ok=false;} catch {ok=false;}
+  }
+  if (oauthRecovery) {
+    const providerError = String(result.stdout || "").split(/\r?\n/).some(line => {
+      try {
+        const event = JSON.parse(line);
+        return event.type === "error" || event.type === "turn.failed" || event.is_error === true || Boolean(event.error);
+      } catch { return false; }
+    });
+    if (providerError || !summary.trim()) ok = false;
+  }
+  if (writerResponse?.reportedModels?.some((model) => model !== invocation.model)) ok = false;
   const artifacts = [];
   let changedFiles = [];
   let patchArtifact = null;
   let patchSha256 = null;
-  let verificationResult = null;
+  let verificationResult = result.cleanupFailed ? "process_cleanup_failed" : null;
+  let ownedChangedFiles = [];
+  let ownershipViolations = [];
 
-  if (normalizedTask.effectiveMode === EXECUTION_MODES.WRITE && worktree) {
+  if (normalizedTask.effectiveMode === EXECUTION_MODES.WRITE && worktree && !result.cleanupFailed) {
     try {
       const collected = collectWorktreeArtifacts(worktree, normalizedTask);
       changedFiles = collected.changedFiles;
+      ownedChangedFiles = collected.ownedChangedFiles;
+      ownershipViolations = collected.ownershipViolations;
       patchArtifact = collected.patchArtifact;
       patchSha256 = collected.patchSha256;
       verificationResult = collected.verificationResult;
       if (patchArtifact) artifacts.push({ kind: "patch", path: patchArtifact, sha256: patchSha256 });
+      if (!changedFiles.length || verificationResult !== "patch_reverse_check_passed") ok = false;
     } catch (error) {
       ok = false;
       changedFiles = [];
       verificationResult = `artifact_error:${error.message}`;
     }
+  }
+
+  if (ok && oauthRecovery) {
+    try {
+      updateState(oauthRegistry, state => ({ ...state, revision: state.revision + 1,
+        models: state.models.map(model => model.provider === invocation.kind && model.model === invocation.model
+          ? { ...model, invokedAt: new Date().toISOString(), quarantineUntil: null } : model) }));
+    } catch { /* Registry contention must not discard validated task output. */ }
   }
 
   const response = {
@@ -886,36 +1207,49 @@ async function runBackgroundTask(task, options = {}) {
     required: Boolean(normalizedTask.required),
     mode: normalizedTask.mode || EXECUTION_MODES.READ_ONLY,
     effectiveMode: normalizedTask.effectiveMode || EXECUTION_MODES.READ_ONLY,
-    status: ok ? "completed" : "failed",
+    status: ok ? (worktree ? "needs-review" : "completed") : "failed",
     summary: summary || result.stderr || (ok ? "Completed with no output" : "Background task failed"),
     findings: structured?.findings || [],
-    risks: structured?.risks || [],
+    risks: [...(structured?.risks || []), ...(worktree ? [
+      "Detached processes may survive owned-process-group cleanup; the retained worktree may change. Independent review and integration cover only the recorded patch hash, not later worktree contents. Group termination does not establish cleanup or deletion safety.",
+    ] : [])],
     checks: structured?.checks || [],
     confidence: ok ? (structured?.confidence || "medium") : "failed",
     artifacts,
     durationMs: Date.now() - started,
     usage: null,
+    oauthAttempts,
     model: invocation.model || null,
     runner: invocation.kind,
     orchestrator: orchestratorContext.orchestrator,
     sidecarRunId: orchestratorContext.runId,
     parentTaskId: orchestratorContext.parentTaskId || "root",
     stderr: result.stderr || "",
+    cleanupFailed: Boolean(result.cleanupFailed),
+    cleanupScope: result.cleanupScope || "owned-process-group",
+    ownedGroupStopped: typeof result.ownedGroupStopped === "boolean" ? result.ownedGroupStopped : null,
+    treeQuiescence: "unverified",
     ownershipPaths: Array.isArray(normalizedTask.ownershipPaths) ? normalizedTask.ownershipPaths : [],
     writeScope: Array.isArray(normalizedTask.writeScope) ? normalizedTask.writeScope : [],
+    reviewRequired: normalizedTask.mode === EXECUTION_MODES.WRITE,
+    requestedModel: normalizedTask.model || null,
+    resolvedModel: invocation.model || null,
+    providerReportedModel: writerResponse?.reportedModels?.length === 1 ? writerResponse.reportedModels[0] : null,
+    providerResponseError: writerResponse?.error || null,
     baseSha: worktree?.baseSha || null,
     worktreePath: worktree?.worktreePath || null,
+    artifactRoot: worktree?.artifactRoot || null,
     patchArtifact,
     patchSha256,
     changedFiles,
+    ownedChangedFiles,
+    ownershipViolations,
     verificationResult,
+    verificationEvidence: { patch: verificationResult, providerResponse: writerResponse?.error || (worktree ? "valid_structured_response" : "not_checked"), writerReportedChecks: structured?.checks || [], independentReview: "pending" },
     executionEnvelope: normalizedTask.executionEnvelope || null,
     capabilityEvidence: normalizedTask.effectiveMode === EXECUTION_MODES.WRITE ? "writablePatchWorktree" : "readOnlySidecars",
   };
 
-  if (options.cleanupWritableWorktrees !== false) {
-    cleanupWritableWorktree(worktree);
-  }
 
   return response;
 }
@@ -923,7 +1257,7 @@ async function runBackgroundTask(task, options = {}) {
 const DIGEST_SUMMARY_CHARS = 1200;
 
 function buildBackgroundDigest(results = [], options = {}) {
-  const completed = results.filter((result) => result && ["completed", "failed", "skipped"].includes(result.status));
+  const completed = results.filter((result) => result && ["completed", "needs-review", "failed", "skipped"].includes(result.status));
   if (!completed.length) return "";
   const summaryChars = Number(options.summaryChars || DIGEST_SUMMARY_CHARS);
   const lines = completed.map((result) => {
@@ -1079,6 +1413,9 @@ module.exports = {
   resolveBackgroundModel,
   resolveOptionalSidecarGraceMs,
   resolveProviderCapabilities,
+  verifyPatchArtifact,
+  validateOwnershipPaths,
+  runCommand,
   runBackgroundTask,
   runBackgroundTasks,
   startBackgroundTasks,

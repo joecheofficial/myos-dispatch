@@ -2,9 +2,9 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 const { readJsonCached } = require("./json-cache");
-const { shortlistCapabilities, selectExecutionLane } = require("./capability-router");
+const { loadCapabilityIndex, shortlistCapabilities, selectExecutionLane } = require("./capability-router");
 const { inferGoalScale } = require("./goal-scale");
-const { buildParallelizationPlan } = require("./parallelization-planner");
+const { buildParallelizationPlan, detectBlockedReasons } = require("./parallelization-planner");
 const { homeDir, resolveWorkspacePath, resolveWorkspaceRoot } = require("./myos-compat");
 const {
   getDataSearchScope: getConfiguredDataSearchScope,
@@ -26,17 +26,24 @@ const WORKSPACE = resolveWorkspaceRoot();
 const PROJECTS_INDEX = resolveWorkspacePath("projects/_index.json");
 const FASTPATHS_FILE = resolveWorkspacePath("DISPATCH-FASTPATHS.json");
 
-const DIRECTIVE_VERBS = /\b(make|create|generate|build|draft|render|produce|write|get|find|retrieve|look up|locate|open|extract|pull|send|forward|message|dm|notify|share|check|inspect|review|show|give me|list|tell me|give|download|add|update|save|mark|count)\b/;
+const DIRECTIVE_VERBS = /\b(make|create|generate|build|draft|render|produce|write|get|find|retrieve|look up|locate|open|extract|pull|send|forward|message|dm|notify|share|check|inspect|review|show|give me|list|tell me|give|download|add|update|save|mark|count|upgrade|fix|repair|implement|finish)\b/;
 const DIRECT_LOOKUP_HINTS = /\b(url|link|website|web page|page|download link|download url|homepage|payment link|promo code|dns|records|giveaway(?:s)?|office|address|location|size|sizes|dimensions|specs|email|rsvp|signed up|signups?|ein|tax id|entity info|business entity|company info)\b/;
 const EXPLORATORY_HINTS = /\b(help me understand|explain|what's going on|what is going on|how does|why does|brainstorm|strategy|architect|investigate|improve|refactor|context|overview)\b/;
 const FOLLOW_UP_HINTS = /\b(also|this|that|it|they|them|these|those|here|there|same|again|too|correct|yes|no|for this|for that|subdomain|rsvp)\b/;
 const READ_HINTS = /\b(what|what is|what's|what are|where is|where's|which|who is|who's|how many|show|find|get|look up|count|list|tell me|give me|retrieve|check)\b/;
-const WRITE_HINTS = /\b(add|update|save|mark|put|attach|send|forward|message|dm|notify|share|create|record|store|log|set|change|fix|repair|replace|redirect|deploy|commit|push|publish|implement|edit|upload|remove|delete|move|rename|prove|improve)\b/;
+const WRITE_HINTS = /\b(add|update|save|mark|put|attach|send|forward|message|dm|notify|share|create|record|store|log|set|change|fix|repair|replace|redirect|deploy|commit|push|publish|implement|edit|upload|remove|delete|move|rename|prove|improve|upgrade|finish)\b/;
 const PROJECT_OPERATION_HINTS = /\b(giveaway(?:s)? page|mentorship page|promo code|promo link|payment link|onboarding|calendar|invite|rsvp|signups?|cohort|participant|participants?)\b/;
+// A request to produce something new ("build a launch for Lumen", "create an email
+// sequence for Lumen") may USE a project's data source, but it is not a lookup of
+// it. Issue #8 F-27: these were short-circuited into a read-only BRAIN.md lookup.
+const AUTHORING_REQUEST_RE = /^(?:(?:please|can you|could you|i want you to|help me)\s+)?(?:build|create|write|draft|make|design|generate|produce|plan|implement|develop|compose|prepare|launch|redesign|rewrite|set up)\b/;
+function isAuthoringRequest(query) {
+  return AUTHORING_REQUEST_RE.test(normalizeText(query).trim());
+}
 const STATUS_HINTS = /\b(are you awake|are you there|your status|what's your status|what is your status)\b/;
 const WHATSAPP_OPERATION_HINTS = /\b(whatsapp link|whatsapp group|social media team on whatsapp|team destination|telegram workflows?|whatsapp\/telegram workflows?)\b/;
 const GENERIC_RESEARCH_HINTS = /\b(research a product|research a competitor|research a tool|research .* if it(?:'s| is) useful|tell me if it(?:'s| is) useful)\b/;
-const ROUTING_COMPLAINT_RE = /\b(bad routing error|routing is messed up|routing.*wrong|wrong route|not reading the whole context|not asking for a link|fix (?:this )?in the routing|fix your routing|log your mistake)\b/;
+const ROUTING_COMPLAINT_RE = /\b(bad routing error|routing is messed up|routing.*wrong|wrong route|not reading the whole context|not asking for a link|fix (?:this )?in the routing|fix your routing|log your mistake|log (?:that|this|it) as (?:a )?(?:major )?(?:mistake|error)|you just recommended things)\b/;
 const GENERIC_PROJECT_TERMS = new Set([
   "alumni",
   "book",
@@ -47,6 +54,7 @@ const GENERIC_PROJECT_TERMS = new Set([
   "podcasts",
   "speaking",
   "workshops",
+  "business", "deal", "roommate", "villa", "home", "website", "page", "report", "api", "memory",
 ]);
 
 function readOptional(filePath, maxChars = 8000) {
@@ -103,9 +111,36 @@ function scoreMatchedProjectField({ needle, kind, project }) {
   return 6;
 }
 
+const LONG_PROMPT_WORDS = 60;
+const WEAK_MENTION_WINDOW = 200;
+const DIRECTIVE_OBJECT_RE_PREFIX = "\\b(?:check|run|use|open|fix|update|audit|review|send|start|debug|inspect|read|show|build|deploy|test|improve|work on|look at|investigate)\\s+(?:(?:the|my|our)\\s+)?";
+
+function countPhraseHits(haystack, needle) {
+  const escaped = escapeRegex(needle).replace(/\s+/g, "\\s+");
+  const found = [];
+  const re = new RegExp(`\\b${escaped}\\b`, "gi");
+  let match;
+  while ((match = re.exec(haystack)) !== null) {
+    found.push(match.index);
+    if (match[0].length === 0) re.lastIndex += 1;
+  }
+  if (found.length === 0) {
+    const loose = normalizeLooseText(haystack);
+    const looseRe = new RegExp(`\\b${escapeRegex(normalizeLooseText(needle)).replace(/\s+/g, "\\s+")}\\b`, "gi");
+    while ((match = looseRe.exec(loose)) !== null) {
+      found.push(match.index);
+      if (match[0].length === 0) looseRe.lastIndex += 1;
+    }
+  }
+  return found;
+}
+
 function scoreProject(query, project) {
   const haystack = normalizeText(query);
   let score = 0;
+  const hitNeedles = new Set();
+  let hitCount = 0;
+  let firstHitIndex = Infinity;
   const fields = [
     { value: project.slug, kind: "slug" },
     { value: project.name, kind: "name" },
@@ -118,8 +153,27 @@ function scoreProject(query, project) {
     if (!needle) continue;
     if (needle.length < 4 && !/\s/.test(needle)) continue;
     if (hasBoundedPhrase(haystack, needle) || hasLooseBoundedPhrase(haystack, needle)) {
-      score += scoreMatchedProjectField({ needle, kind, project });
+      const fieldScore = scoreMatchedProjectField({ needle, kind, project });
+      score += fieldScore;
+      if (fieldScore > 0 && !hitNeedles.has(needle)) {
+        hitNeedles.add(needle);
+        const hits = countPhraseHits(haystack, needle);
+        hitCount += Math.max(1, hits.length);
+        if (hits.length) firstHitIndex = Math.min(firstHitIndex, hits[0]);
+        else firstHitIndex = 0;
+      }
     }
+  }
+
+  // A single passing mention deep inside a long brief is weak evidence: a 2,000
+  // character audit listing several systems must not route to one of them.
+  const words = String(query || "").trim().split(/\s+/).filter(Boolean).length;
+  if (score > 0 && words > LONG_PROMPT_WORDS && hitCount === 1 && firstHitIndex >= WEAK_MENTION_WINDOW) {
+    const firstSentence = haystack.split(/[.!?\n]/)[0] || "";
+    const slug = normalizeText(project.slug).trim();
+    const directiveObject = slug
+      && new RegExp(`${DIRECTIVE_OBJECT_RE_PREFIX}${escapeRegex(slug)}\\b`, "i").test(firstSentence);
+    if (!directiveObject) return 0;
   }
 
   return score;
@@ -214,16 +268,20 @@ function loadFastpaths(filePath = FASTPATHS_FILE) {
   }
 }
 
+const fastpathRegexCache = new Map();
+
 function hasFastpathTerm(text, term) {
   const normalizedText = normalizeText(text);
   const normalizedTerm = normalizeText(term).trim();
   if (!normalizedTerm) return false;
 
-  const escaped = normalizedTerm
-    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-    .replace(/\s+/g, "\\s+");
-
-  return new RegExp(`\\b${escaped}\\b`, "i").test(normalizedText);
+  let pattern = fastpathRegexCache.get(normalizedTerm);
+  if (!pattern) {
+    const escaped = escapeRegex(normalizedTerm).replace(/\s+/g, "\\s+");
+    pattern = new RegExp(`\\b${escaped}\\b`, "i");
+    fastpathRegexCache.set(normalizedTerm, pattern);
+  }
+  return pattern.test(normalizedText);
 }
 
 function scoreFastpath(query, fastpath) {
@@ -241,12 +299,106 @@ function scoreFastpath(query, fastpath) {
   return score;
 }
 
-function matchFastpaths(query, maxMatches = 3, filePath = FASTPATHS_FILE) {
+// Retired entries no longer match. MYOS_FASTPATH_SKIP_RETIRED=0 restores the old
+// behavior (status ignored); the default is ON.
+function skipRetiredFastpaths() {
+  return String(process.env.MYOS_FASTPATH_SKIP_RETIRED ?? "").trim() !== "0";
+}
+
+// A fast path stops the lookup, so one short word is not enough evidence to
+// take it. Every matched term scores at least 10, so a bare "> 0" let a single
+// generic word ("report", "brief") claim the whole request on customer
+// installs. A match is meaningful when it reaches the minimum score (default
+// 12: one 12+ character term, or two terms) or matches a multi-word phrase.
+// Override per install with MYOS_FASTPATH_MIN_SCORE or the fastpaths file's
+// policy.min_match_score (e.g. 10 for a curated file of distinctive names).
+const DEFAULT_FASTPATH_MIN_SCORE = 12;
+
+function positiveNumber(value) {
+  if (value == null || String(value).trim() === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function matchesMultiWordTerm(query, fastpath = {}) {
+  return (fastpath.match_terms || []).some((term) => {
+    const needle = normalizeText(term).trim();
+    return /\s/.test(needle) && hasFastpathTerm(query, needle);
+  });
+}
+
+function fastpathMinScore(filePath = FASTPATHS_FILE, env = process.env) {
+  const fromEnv = positiveNumber(env.MYOS_FASTPATH_MIN_SCORE);
+  if (fromEnv != null) return fromEnv;
+  try {
+    const fromPolicy = positiveNumber(readJsonCached(filePath)?.policy?.min_match_score);
+    if (fromPolicy != null) return fromPolicy;
+  } catch {
+    // Missing or unreadable file: built-in default.
+  }
+  return DEFAULT_FASTPATH_MIN_SCORE;
+}
+
+function matchFastpaths(query, maxMatches = 3, filePath = FASTPATHS_FILE, options = {}) {
+  const skipRetired = skipRetiredFastpaths();
+  const minScore = positiveNumber(options.minScore) ?? fastpathMinScore(filePath, options.env || process.env);
   return loadFastpaths(filePath)
+    .filter((fastpath) => !(skipRetired && fastpath && fastpath.status === "retired"))
     .map((fastpath) => ({ fastpath, score: scoreFastpath(query, fastpath) }))
-    .filter((entry) => entry.score > 0)
+    .filter((entry) => entry.score > 0
+      && (entry.score >= minScore || matchesMultiWordTerm(query, entry.fastpath)))
     .sort((a, b) => b.score - a.score)
     .slice(0, maxMatches);
+}
+
+function matchRecipes(query, options = {}) {
+  if (options.recipesFirst === false) return [];
+  const promptWords = String(query || "").trim().split(/\s+/).length;
+  const index = loadCapabilityIndex(options);
+  return index.capabilities
+    .filter((capability) => capability.type === "recipe")
+    .map((capability) => {
+      const phrase = [capability.phrases, capability.aliases, capability.use_when]
+        .flatMap((phrases) => Array.isArray(phrases) ? phrases : [])
+        .filter((phrase) => typeof phrase === "string")
+        .map((phrase) => phrase.trim())
+        .filter((phrase) => {
+          const phraseWords = phrase.split(/\s+/).length;
+          return phraseWords >= 2 && promptWords <= phraseWords + 8 && hasFastpathTerm(query, phrase);
+        })
+        .sort((a, b) => b.length - a.length)[0];
+      return phrase ? {
+        capabilityId: capability.id,
+        phrase,
+        score: 100,
+        sourcePath: toWorkspacePath(capability.source_path, capability.scan_dir || index.scan_dir),
+      } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.phrase.length - a.phrase.length)
+    .slice(0, 3);
+}
+
+function buildRecipeDispatchPlan(signals) {
+  return {
+    branch: "recipe",
+    intentType: signals.intentType,
+    actionType: signals.actionType,
+    stopAfterMatch: true,
+    allowBroadSearch: false,
+    projectSlug: null,
+    projectRecipeFirst: true,
+    serviceAgents: [],
+    searchScope: toWorkspacePath(signals.recipeMatches[0].sourcePath),
+    capabilityId: signals.recipeMatches[0].capabilityId,
+    fastpathMatches: signals.fastpathMatches,
+    projectMatches: signals.projectMatches,
+    route: {
+      lane: "recipe_dispatcher",
+      reason: "recipe_exact_match",
+      candidates: signals.recipeMatches,
+    },
+  };
 }
 
 function firstFastpathPath(fastpath = {}) {
@@ -257,6 +409,35 @@ function firstFastpathPath(fastpath = {}) {
     || fastpath.data_path
     || fastpath.route_hint
     || "";
+}
+
+function fastpathSearchScope(fastpath = {}) {
+  return toWorkspacePath(fastpath.project_path)
+    || toWorkspacePath(fastpath.reference_path)
+    || toWorkspacePath(fastpath.recipe_path)
+    || toWorkspacePath(fastpath.handler_path)
+    || toWorkspacePath(fastpath.data_path)
+    || toWorkspacePath(fastpath.skill_path)
+    || "";
+}
+
+// The guidance a taken fast path hands the model: where to go, how, and when
+// to stop. Bounded so a long stop rule cannot crowd out the route block.
+function fastpathGuidance(match) {
+  const fastpath = match?.fastpath || match || {};
+  const clip = (value, max) => {
+    const text = String(value || "").replace(/\s+/g, " ").trim();
+    return text.length > max ? `${text.slice(0, max - 3)}...` : text;
+  };
+  return {
+    intent: clip(fastpath.intent || "matched route", 160),
+    score: Number(match?.score || 0),
+    targetType: inferFastpathTargetType(fastpath),
+    targetId: clip(inferFastpathTargetId(fastpath), 240),
+    path: clip(firstFastpathPath(fastpath), 240),
+    cli: clip(fastpath.cli || fastpath.tool_hint || "", 400),
+    stopRule: clip(fastpath.stop_rule || "", 600),
+  };
 }
 
 function inferFastpathTargetType(fastpath = {}) {
@@ -335,8 +516,15 @@ function inferIntentType(query) {
   return "exploratory";
 }
 
-function inferActionType(query) {
+function inferActionType(query, { userPrompt = false } = {}) {
   const text = normalizeText(query);
+  // Prompt constraints are not shell syntax. Keep command safety inference on
+  // its existing path, even if a command contains quoted review-only language.
+  if (userPrompt && (
+    /(?:^|[.!;,]\s*)(?:read[ -]only(?:\s+(?:advice|review|audit|analysis))?|(?:review|audit|analysis|advice|diagnosis)[ -]only)(?:\s*[:;,.!?]|$)/i.test(text)
+    || /\b(?:keep|remain|stay)\s+(?:this\s+|strictly\s+)?read[ -]only\b/i.test(text)
+    || /\b(?:(?:do not|don't|don’t|never)\s+(?:make\s+any\s+changes|change\s+anything|modify\s+anything|edit\s+anything)|no\s+(?:writes|changes|edits)\s*(?:[.!;,]|$))/i.test(text)
+  )) return "read";
   const hasWrite = WRITE_HINTS.test(text);
   const hasRead = READ_HINTS.test(text) || DIRECT_LOOKUP_HINTS.test(text);
 
@@ -506,14 +694,29 @@ function selectDataSources(query, dataSourceOptions = {}) {
   return selectDataSourceIds(query, dataSourceOptions);
 }
 
+function isExplicitlyNamedProject(query, project) {
+  return [project.slug, project.name, project.path].filter(Boolean).some(value => !isGenericProjectTerm(value) &&
+    (hasBoundedPhrase(normalizeText(query), normalizeText(value)) || hasLooseBoundedPhrase(query, value)));
+}
+
 function chooseSourceOwner({ query, actionType, projectMatches, dataSources, route, intentType, dataSourceOptions = {} }) {
   const text = normalizeText(query);
   const primaryProject = projectMatches[0] || null;
-  const hasProject = Boolean(primaryProject);
-  const hasData = dataSources.length > 0;
+  // An explicit agent invocation ("check dispatch health with doctor") names its
+  // owner; a project that matched only on an alias ("health" -> personal) does
+  // not take it over. A project named by slug, name or path still owns it.
+  const invocationOutranksProject = route?.reason === "owner_recipe_invocation"
+    && primaryProject && !isExplicitlyNamedProject(query, primaryProject);
+  const hasProject = Boolean(primaryProject) && !invocationOutranksProject;
+  const authoring = isAuthoringRequest(text);
+  // Authoring requests keep their data sources as context but never become the data owner.
+  const hasData = dataSources.length > 0 && !authoring;
   const primaryCapability = route?.candidates?.[0] || null;
   const preferOverProject = getPreferOverProjectSources(dataSourceOptions);
   const hasPreferredDataSource = dataSources.some((source) => preferOverProject.has(source));
+
+  if (actionType === "read" && /\b(?:gmail|emmie)\b/.test(text)
+      && /\b(?:read|find|search|lookup|look up|latest|inbox|thread|email)\b/.test(text)) return "capability";
 
   if (STATUS_HINTS.test(text)) {
     return "fallback";
@@ -521,7 +724,7 @@ function chooseSourceOwner({ query, actionType, projectMatches, dataSources, rou
 
   // A data source can declare `preferOverProject` in config so directive
   // lookups route to the data lane before any project alias match.
-  if (hasPreferredDataSource && intentType === "directive") {
+  if (hasPreferredDataSource && !authoring && intentType === "directive") {
     return "data";
   }
 
@@ -536,7 +739,7 @@ function chooseSourceOwner({ query, actionType, projectMatches, dataSources, rou
     return "data";
   }
 
-  const dataOwnedSources = dataSources.filter((source) =>
+  const dataOwnedSources = authoring ? [] : dataSources.filter((source) =>
     !["websites"].includes(source) && !preferOverProject.has(source)
   );
   if (dataOwnedSources.length > 0 && dataOwnedSources.every((source) => source === "entities") && intentType !== "exploratory") {
@@ -557,13 +760,44 @@ function chooseSourceOwner({ query, actionType, projectMatches, dataSources, rou
 
 function collectDispatchSignals(query, options = {}) {
   const startedAt = Date.now();
+  const recipeMatches = matchRecipes(query, options);
   const dataSourceOptions = options.dataSourceOptions || {};
-  const fastpathMatches = matchFastpaths(query, 3);
-  const projects = loadProjectIndex();
-  let projectMatches = matchProjects(query, projects);
-  const route = selectExecutionLane(query, options);
+  let fastpathMatches = matchFastpaths(query, 3);
+  // A keyword mentioned inside a long implementation brief is not a request to
+  // execute that shortcut. Preserve exact recipe matching above.
+  if (query.length > 400) fastpathMatches = [];
+  // Exact recipes supply their own lane and never consume project/capability scores.
+  // Fastpaths still consume the lane and typed-evidence project authority below.
+  const recipeWins = Boolean(recipeMatches[0]);
+  const projects = recipeWins ? [] : loadProjectIndex();
+  let projectMatches = recipeWins ? [] : matchProjects(query, projects);
+  // Explicit owner evidence outranks a keyword shortcut into another project.
+  let explicitOwners = projectMatches.filter(project => isExplicitlyNamedProject(query, project));
+  const namedOwners = explicitOwners.filter(project => hasMultipleWords(project.name) &&
+    (hasBoundedPhrase(query, project.name) || hasLooseBoundedPhrase(query, project.name)));
+  if (namedOwners.length === 1 && explicitOwners.every(project => project === namedOwners[0] ||
+    hasBoundedPhrase(query, `${namedOwners[0].name} ${project.name}`))) explicitOwners = namedOwners;
+  const ambiguousOwnership = explicitOwners.length > 1;
+  if (ambiguousOwnership) { projectMatches = []; fastpathMatches = []; }
+  if (explicitOwners.length === 1) {
+    projectMatches = explicitOwners;
+    const ownerRoot = getProjectScopedPath(explicitOwners[0]);
+    fastpathMatches = fastpathMatches.filter(match => {
+      const target = toWorkspacePath(firstFastpathPath(match.fastpath));
+      return target && (target === ownerRoot || target.startsWith(ownerRoot + path.sep));
+    });
+  }
+  let route = recipeWins ? { lane: "recipe_dispatcher", reason: "recipe_exact_match", candidates: [] }
+    : ambiguousOwnership ? { lane: "worker_skill", reason: "multiple_explicit_owners", candidates: [] }
+    : selectExecutionLane(query, options);
+  // A project the request names explicitly owns it, so an agent invocation in
+  // the same request must not pair a recipe lane with that project's scope.
+  if (route.reason === "owner_recipe_invocation" && projectMatches[0]
+      && isExplicitlyNamedProject(query, projectMatches[0])) {
+    route = selectExecutionLane(query, { ...options, skipOwnerInvocation: true });
+  }
   const intentType = inferIntentType(query);
-  const actionType = inferActionType(query);
+  const actionType = inferActionType(query, { userPrompt: true });
   const isFollowUp = isShortFollowUp(query);
   const dataSources = selectDataSources(query, dataSourceOptions);
   const isRoutingComplaint = ROUTING_COMPLAINT_RE.test(normalizeText(query));
@@ -580,13 +814,21 @@ function collectDispatchSignals(query, options = {}) {
 
   return {
     query,
+    // The hook's working folder and event reach the parallelization planner so it
+    // can scope repository lanes (issue #8 F-26: every lane was dropped as
+    // no_repository_scope because cwd never arrived).
+    cwd: options.cwd || "",
+    hookEventName: options.hookEventName || "",
+    hookSurface: options.hookSurface || "",
     parallelizationStateFile: options.parallelizationStateFile || "",
+    callerProvider: options.callerProvider || options.hookSurface,
     env: options.env || process.env,
     dataSourceOptions,
     intentType,
     actionType,
     isFollowUp,
     isRoutingComplaint,
+    recipeMatches,
     fastpathMatches,
     fastpathEvidence: fastpathMatches.map(normalizeFastpathEvidence),
     projects,
@@ -617,6 +859,14 @@ function inferShadowExecutionLane(signals, owner) {
 }
 
 function buildTypedEvidenceDispatchPlan(signals) {
+  if (signals.recipeMatches?.[0]) {
+    return finalizeDispatchPlan(signals.query, {
+      ...buildRecipeDispatchPlan(signals),
+      authoritative: false,
+      executionLane: "recipe_dispatcher",
+      timingMs: signals.timingMs,
+    }, signals);
+  }
   const primaryProject = signals.projectMatches[0] || null;
   const owner = chooseSourceOwner({
     query: signals.query,
@@ -707,6 +957,11 @@ function buildTypedEvidenceDispatchPlan(signals) {
   return finalizeDispatchPlan(signals.query, plan, signals);
 }
 
+function hasMatchScope(plan = {}) {
+  return Boolean(String(plan.searchScope || "").trim())
+    || (Array.isArray(plan.dataSources) && plan.dataSources.length > 0);
+}
+
 function finalizeDispatchPlan(query, plan, signals) {
   const parallelizationPlan = buildParallelizationPlan(query, plan, signals);
   const planWithParallelization = {
@@ -718,6 +973,8 @@ function finalizeDispatchPlan(query, plan, signals) {
     ...planWithParallelization,
     ...inferGoalScale(query, planWithParallelization),
   };
+  // Invariant: never stop after a match that has no scope to stop in.
+  if (finalPlan.stopAfterMatch && !hasMatchScope(finalPlan)) finalPlan.stopAfterMatch = false;
 
   const env = signals?.env || process.env;
   const envOverride = String(env?.MYOS_PARALLELIZATION_AGGRESSION || "").trim().toLowerCase();
@@ -812,7 +1069,7 @@ function attachShadowDispatch(query, legacyPlan, signals, options = {}) {
       }
     : legacyPlan;
 
-  return {
+  const result = {
     ...selectedPlan,
     shadowDispatch: {
       version: stage.planVersion || "typed-evidence-shadow-v1",
@@ -829,6 +1086,36 @@ function attachShadowDispatch(query, legacyPlan, signals, options = {}) {
       },
     },
   };
+  Object.defineProperty(result, "_dispatchSignals", { value: signals, enumerable: false });
+  return result;
+}
+
+function resolveToolSafetyMetadata(command, options = {}) {
+  const env = options.env || process.env;
+  const actionType = inferActionType(command);
+  const goal = inferGoalScale(command, { actionType });
+  const text = normalizeText(command).replace(/\s+/g, " ").trim();
+  const blockedReasons = detectBlockedReasons(text, { ...options, actionType });
+  const { backgroundAgentsDisabled } = require("./env-context");
+  const { sidecarOffReason } = require("./sidecar-policy");
+  const { buildExecutionEnvelope } = require("./orchestration/execution-envelope");
+  if (backgroundAgentsDisabled(env)) blockedReasons.push("background_agents_disabled");
+  const offReason = sidecarOffReason(env, options.callerProvider || options.hookSurface);
+  if (offReason) blockedReasons.push(offReason);
+  const taskClass = options.taskClass || (actionType === "write" ? "default_automation" : actionType === "read" ? "cheap_routing" : null);
+  const executionEnvelope = buildExecutionEnvelope(text, { ...goal, actionType }, { env, blockedReasons, taskClass });
+  return { blockedBy: goal.blockedBy, parallelizationPlan: { blockedReasons, executionEnvelope } };
+}
+
+function resolveToolSafetyPlan(command, options = {}) {
+  // Protected-project writes depend on project ownership, not just blocker regexes.
+  // Preserve that rare legacy gate instead of silently dropping a safety label.
+  if (!options.projectSlug && inferActionType(command) === "write") {
+    const protectedProjects = loadProjectIndex().filter(project => ["allsorted", "goldenclaw"].includes(project.slug));
+    if (matchProjects(command, protectedProjects).length) return resolveDispatchPlan(command, options);
+  }
+  // Retain the intent contracts using only local classifiers, without routing or fanout.
+  return { branch: "tool_safety", ...resolveToolSafetyMetadata(command, options) };
 }
 
 function resolveDispatchPlan(query, options = {}) {
@@ -845,22 +1132,25 @@ function resolveDispatchPlan(query, options = {}) {
   } = signals;
   const finalizePlan = (plan) => finalizeDispatchPlan(query, plan, signals);
 
+  if (signals.recipeMatches[0]) {
+    return attachShadowDispatch(query, finalizePlan(buildRecipeDispatchPlan(signals)), signals, options);
+  }
+
   const primaryFastpath = fastpathMatches[0]?.fastpath || null;
   if (primaryFastpath) {
+    const fastpathScope = fastpathSearchScope(primaryFastpath);
     return attachShadowDispatch(query, finalizePlan({
       branch: "fastpath",
       intentType,
       actionType,
-      stopAfterMatch: true,
+      // Stop after match only with somewhere to stop: a scopeless stop told
+      // the model to quit looking without saying where the answer lives.
+      stopAfterMatch: Boolean(fastpathScope),
       allowBroadSearch: false,
       projectSlug: null,
       projectRecipeFirst: intentType === "directive",
       serviceAgents: [],
-      searchScope:
-        toWorkspacePath(primaryFastpath.project_path)
-        || toWorkspacePath(primaryFastpath.reference_path)
-        || toWorkspacePath(primaryFastpath.recipe_path)
-        || toWorkspacePath(primaryFastpath.handler_path),
+      searchScope: fastpathScope,
       fastpathMatches,
       projectMatches,
       route,
@@ -1215,7 +1505,7 @@ function buildDataSections(query, options = {}) {
     const text = readConfiguredTextSource(
       sourceId,
       source.maxChars || (source.mode === "pointer" ? 2500 : 3000),
-      dataSourceOptions,
+      { ...dataSourceOptions, query },
     );
     if (text) {
       const heading = source.mode === "pointer" ? "Data Pointer" : "Data Match";
@@ -1334,15 +1624,24 @@ module.exports = {
   compareDispatchPlans,
   formatDispatchShadowComparison,
   resolveDispatchPlan,
+  resolveToolSafetyPlan,
+  resolveToolSafetyMetadata,
   buildWorkspaceContextBundle,
   buildFastpathSections,
   inferFastpathTargetType,
   inferIntentType,
   inferActionType,
   inferGoalScale,
+  isAuthoringRequest,
   listProjectRecipes,
   loadFastpaths,
   matchFastpaths,
+  fastpathMinScore,
+  fastpathGuidance,
+  hasMatchScope,
+  DEFAULT_FASTPATH_MIN_SCORE,
+  scoreProject,
+  matchRecipes,
   matchProjects,
   normalizeProjectEntries,
   scoreFastpath,

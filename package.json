@@ -1,17 +1,36 @@
 {
   "name": "myos-dispatch",
-  "version": "3.7.0",
+  "version": "4.4.0-rc.3",
   "description": "Standalone MyOS Dispatch routing and execution core.",
+  "license": "SEE LICENSE IN LICENSE",
   "type": "commonjs",
   "main": "src/workspace-context.js",
   "bin": {
-    "myos-dispatch-hook": "bin/myos-dispatch-hook"
+    "myos-step": "bin/myos-step.js",
+    "myos-run": "bin/myos-run.js",
+    "myos-jev-doctor": "bin/myos-jev-doctor.js",
+    "myos-dispatch-hook": "bin/myos-dispatch-hook",
+    "myos-find": "bin/myos-find.js",
+    "myos-local-search": "bin/myos-local-search.js",
+    "myos-search-service": "bin/myos-search-service.js",
+    "myos-search": "bin/myos-search.js",
+    "myos-search-dispatch": "bin/myos-search-dispatch.js",
+    "myos-writer": "bin/myos-writer.js",
+    "myos-codex-policy": "bin/myos-codex-policy.js",
+    "myos-oauth-doctor": "bin/myos-oauth-doctor.js",
+    "myos-atelier-audience": "bin/myos-atelier-audience.js",
+    "myos-atelier-sync": "bin/myos-atelier-sync.js",
+    "myos-atelier-query": "bin/myos-atelier-query.js",
+    "myos-fanout-report": "bin/myos-fanout-report.js",
+    "myos-subscriptions": "bin/myos-subscriptions.js"
   },
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "test": "MYOS_BACKGROUND_BACKPRESSURE_ENABLED=0 node --test test/*.test.js",
+    "test:atelier-access": "npm test --prefix packages/atelier-access",
+    "evaluate-jev": "node scripts/evaluate-jev-shadow.js",
+    "test": "node scripts/run-tests.js",
     "audit": "node --test test/dispatch-fastpaths-audit.test.js",
     "evaluate-shadow": "node --test test/typed-evidence-shadow-policy.test.js test/typed-evidence-shadow-canary.test.js"
   },

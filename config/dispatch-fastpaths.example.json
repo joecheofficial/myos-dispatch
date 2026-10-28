@@ -1,4 +1,14 @@
 {
   "version": 1,
+  "policy": {
+    "max_active_fastpaths": 120,
+    "stable_slots": 80,
+    "probation_slots": 40,
+    "promotion_threshold_count": 3,
+    "promotion_window_days": 7,
+    "retirement_unused_days": 30,
+    "safe_auto_add": true,
+    "auto_delete": false
+  },
   "fastpaths": []
 }

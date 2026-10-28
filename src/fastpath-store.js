@@ -192,6 +192,12 @@ function validateDataRoute(entry, label, options = {}) {
   return { errors, warnings };
 }
 
+// Defaults when a fastpaths file carries no policy block. Raised from 30/20/10 so
+// real high-traffic sets are not rejected once retired entries stop matching.
+const DEFAULT_MAX_ACTIVE_FASTPATHS = 120;
+const DEFAULT_STABLE_SLOTS = 80;
+const DEFAULT_PROBATION_SLOTS = 40;
+
 function auditFastpathsDoc(fastpathsDoc, options = {}) {
   const errors = [];
   const warnings = [];
@@ -205,15 +211,16 @@ function auditFastpathsDoc(fastpathsDoc, options = {}) {
     return { ok: false, errors, warnings, counts: {} };
   }
 
-  const maxActive = Number(policy.max_active_fastpaths || 30);
-  const stableSlots = Number(policy.stable_slots || 20);
-  const probationSlots = Number(policy.probation_slots || 10);
+  const maxActive = Number(policy.max_active_fastpaths || DEFAULT_MAX_ACTIVE_FASTPATHS);
+  const stableSlots = Number(policy.stable_slots || DEFAULT_STABLE_SLOTS);
+  const probationSlots = Number(policy.probation_slots || DEFAULT_PROBATION_SLOTS);
   const promotionThreshold = Number(policy.promotion_threshold_count || 3);
   const seenIntents = new Set();
   let activeCount = 0;
   let stableCount = 0;
   let probationCount = 0;
   let retiredCount = 0;
+  let retiredWithoutMetadata = 0;
 
   for (const [idx, entry] of fastpaths.entries()) {
     const label = entry && entry.intent ? entry.intent : `entry[${idx}]`;
@@ -240,18 +247,22 @@ function auditFastpathsDoc(fastpathsDoc, options = {}) {
     if (!["stable", "probation", "retired"].includes(status)) {
       errors.push(`${label}: status must be stable, probation, or retired`);
     }
-    if (status === "retired") retiredCount += 1;
-    else activeCount += 1;
+    if (status === "retired") {
+      retiredCount += 1;
+      if (!entry.retired_at || !entry.retired_reason) retiredWithoutMetadata += 1;
+    } else {
+      activeCount += 1;
+    }
     if (status === "stable") stableCount += 1;
     if (status === "probation") probationCount += 1;
 
     if (!entry.added_at) warnings.push(`${label}: added_at missing`);
     if (status !== "retired" && !entry.last_seen_at) warnings.push(`${label}: last_seen_at missing`);
 
-    if (entry.capability_id && capabilityIds.size > 0 && !capabilityIds.has(entry.capability_id)) {
+    if (status !== "retired" && entry.capability_id && capabilityIds.size > 0 && !capabilityIds.has(entry.capability_id)) {
       errors.push(`${label}: capability_id not found in capabilities-index.json (${entry.capability_id})`);
     }
-    if (entry.verify_capability_id && capabilityIds.size > 0 && !capabilityIds.has(entry.verify_capability_id)) {
+    if (status !== "retired" && entry.verify_capability_id && capabilityIds.size > 0 && !capabilityIds.has(entry.verify_capability_id)) {
       errors.push(`${label}: verify_capability_id not found in capabilities-index.json (${entry.verify_capability_id})`);
     }
     if (entry.target_type && !TARGET_TYPES.has(entry.target_type)) {
@@ -298,7 +309,7 @@ function auditFastpathsDoc(fastpathsDoc, options = {}) {
     ok: errors.length === 0,
     errors,
     warnings,
-    counts: { activeCount, stableCount, probationCount, retiredCount, maxActive },
+    counts: { activeCount, stableCount, probationCount, retiredCount, retiredWithoutMetadata, maxActive },
   };
 }
 

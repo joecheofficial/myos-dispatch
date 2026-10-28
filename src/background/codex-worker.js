@@ -1,21 +1,25 @@
 const fs = require("node:fs");
+const {codexExecutionSettings}=require("../policy/codex-execution-policy");
 const os = require("node:os");
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 const { spawn, execFileSync } = require("node:child_process");
 const { loadCatalog, resolveProfileModel } = require("../model-catalog");
 const { resolveWorkspacePath } = require("../myos-compat");
-const { resolveCodexOauthModel } = require("../runtime/llm-call");
+const { CODEX_OAUTH_CHEAP_MODEL, resolveCodexOauthModel } = require("../runtime/llm-call");
 const {
   appendEvent,
   buildBaseState,
   detectPauseCondition,
   markCompleted,
+  markCompletionHeld,
   markFailed,
   markPaused,
   markStarted,
   readSessionState,
 } = require("./codex-worker-state");
+
+const { evaluateWorkerCompletion } = require("../orchestration/completion-evidence");
 
 const DEFAULT_WORKER_CWD = process.env.HOME || os.homedir();
 const MC_GRAPH_PATH = resolveWorkspacePath("mission-control", "graphify-out", "graph.json");
@@ -255,6 +259,7 @@ function normalizeStructuredReplyPayload(payload, fallbackReply = "") {
     return {
       reply: payload.reply,
       artifacts: payload.artifacts,
+      ...(payload.status ? { status: payload.status, verification: payload.verification, blockedBy: payload.blockedBy } : {}),
     };
   }
 
@@ -271,6 +276,7 @@ function normalizeStructuredReplyPayload(payload, fallbackReply = "") {
       return {
         reply: replyCandidate,
         artifacts,
+        ...(payload.status ? { status: payload.status, verification: payload.verification, blockedBy: payload.blockedBy } : {}),
       };
     }
   }
@@ -392,8 +398,9 @@ function buildWorkerPrompt({
     "- Do not spawn ad hoc background scouts or call myos-sidecar.js yourself. MyOS Dispatch owns fan-out; if more lanes are needed, name them in your JSON reply so the orchestrator can issue tracked sidecars.",
     "- Keep the reply concise and factual.",
     "- The final response must be JSON only with this exact structure:",
-    "{\"reply\":\"string\",\"artifacts\":[{\"path\":\"string\",\"caption\":\"string\",\"filename\":\"string\",\"mimeType\":\"string\",\"kind\":\"document|photo\"}]}",
+    "{\"reply\":\"string\",\"artifacts\":[{\"path\":\"string\",\"caption\":\"string\",\"filename\":\"string\",\"mimeType\":\"string\",\"kind\":\"document|photo\"}],\"status\":\"completed|blocked\",\"verification\":[{\"command\":\"exact executed command\",\"passed\":true,\"evidence\":\"observed result\"}],\"blockedBy\":[\"exact blocker\"]}",
     "- If no file should be returned, set artifacts to an empty array.",
+    "- For authorized write work at goal scale 3 or 4, require status (completed or blocked), verification [{command,passed,evidence}], and blockedBy [exact reasons]. Completed requires an actually executed successful verification command. Copy the exact command from this execution trace, including any shell wrapper. Recommendations and self-reported tests are not completion. Genuine blockers must be reported without bypassing them.",
     "",
     dispatchLines.length > 0 ? dispatchLines.join("\n") : "",
     "",
@@ -467,13 +474,15 @@ function resolveCodexWorkerModelSelection(options = {}) {
   try {
     const resolved = resolveProfileModel(loadCatalog("openai"), profileId);
     return {
-      model: resolveCodexOauthModel(resolved.model.model),
+      // API catalog defaults are not OAuth model identities. Migrate only
+      // these legacy profile defaults; explicit options above remain exact.
+      model: ({ "gpt-5-mini": "gpt-5.6-terra", "gpt-5.4-mini": "gpt-5.6-terra", "gpt-5.4": "gpt-6.1-sol", "gpt-5.5": "gpt-6.1-sol" })[resolved.model.model] || resolved.model.model,
       profileId,
       source: "routing_profile",
     };
   } catch {
     return {
-      model: "gpt-5.4-mini",
+      model: CODEX_OAUTH_CHEAP_MODEL,
       profileId,
       source: "fallback_default",
     };
@@ -567,6 +576,8 @@ function runCommand({ command, args, cwd, input, timeoutMs }) {
 }
 
 async function runCodexWorker(options = {}) {
+  const workerModelSelection = resolveCodexWorkerModelSelection(options);
+  const execution = codexExecutionSettings(workerModelSelection.model, options.effort || "medium");
   const chatId = String(options.chatId || "unknown");
   const baseOutboxDir = path.resolve(options.outboxDir || resolveWorkspacePath("agents", "worker", "data", "outbox"));
   const runOutboxDir = resolveRunOutboxDir(baseOutboxDir, chatId);
@@ -599,7 +610,6 @@ async function runCodexWorker(options = {}) {
     dispatchPlan: options.dispatchPlan || null,
     retryHint: options.retryHint || "",
   });
-  const workerModelSelection = resolveCodexWorkerModelSelection(options);
 
   const args = ["exec"];
   const isResume = Boolean(effectiveSessionId);
@@ -607,6 +617,7 @@ async function runCodexWorker(options = {}) {
     args.push("resume");
   }
   args.push("--json", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox");
+  args.push(...execution.args);
   if (!isResume && (options.cwd || DEFAULT_WORKER_CWD)) {
     args.push("-C", options.cwd || DEFAULT_WORKER_CWD);
   }
@@ -680,13 +691,24 @@ async function runCodexWorker(options = {}) {
       markFailed(taskState, failureMessage, parsed.sessionId || effectiveSessionId || null);
       throw new Error(failureMessage);
     }
-    const completedState = markCompleted(taskState, {
+    const completion = evaluateWorkerCompletion(payload, options.dispatchPlan || {}, stdout);
+    if (completion.status === "needs_review" && !options.completionRetryAttempt) {
+      markCompletionHeld(taskState, completion, parsed.sessionId || effectiveSessionId || null);
+      return runCodexWorker({ ...options, taskId: taskState.task_id,
+        sessionId: parsed.sessionId || effectiveSessionId || null, completionRetryAttempt: 1,
+        retryHint: "Your previous answer did not complete the authorized work. Continue the original scoped task and run verification. Return status completed only with verification command evidence from this run. If genuinely blocked, return status blocked with exact blockedBy reasons. Do not bypass any safety gate." });
+    }
+    const completedState = completion.status !== "completed"
+      ? markCompletionHeld(taskState, completion, parsed.sessionId || effectiveSessionId || null)
+      : markCompleted(taskState, {
       sessionId: parsed.sessionId || effectiveSessionId || null,
       artifacts,
       usage: parsed.usage,
     });
     return {
       taskId: completedState.task_id,
+      status: completion.status,
+      completion,
       sessionId: parsed.sessionId || effectiveSessionId || null,
       reply: payload.reply.trim(),
       artifacts,
@@ -694,6 +716,7 @@ async function runCodexWorker(options = {}) {
       model: workerModelSelection.model,
       modelProfile: workerModelSelection.profileId,
       modelSource: workerModelSelection.source,
+      executionPolicy:{ceilingModel:execution.ceilingModel,speed:execution.speed},
       code,
       signal,
       stdout,

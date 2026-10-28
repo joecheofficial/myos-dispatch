@@ -13,3 +13,7 @@ graphify-out/
 !data/models/
 !data/models/*.json
 package-lock.json
+config/data-sources.json
+config/atelier-portfolio.json
+config/atelier-grants.json
+config/atelier-governance.json

@@ -1,0 +1,33 @@
+{
+  "id": "agent/doctor/run-full-diagnostic",
+  "layer": "agent",
+  "owner": "doctor",
+  "title": "Run a full read-only diagnostic of the installed product",
+  "tags": [
+    "doctor",
+    "diagnostic",
+    "health",
+    "read-only"
+  ],
+  "phrases": [
+    "is everything working",
+    "why is my dashboard down",
+    "run a health check",
+    "what's broken",
+    "diagnose my install",
+    "run doctor",
+    "check system health"
+  ],
+  "actions": [
+    "search"
+  ],
+  "safety": {
+    "destructive": false,
+    "rule": "Read-only. Never restarts, kills, repairs, or modifies anything. Reports and recommends only."
+  },
+  "inputMode": "structured",
+  "requiredContext": [],
+  "outputMode": "text",
+  "fallbackPolicy": "deterministic_first",
+  "handler": "./run-full-diagnostic.js"
+}

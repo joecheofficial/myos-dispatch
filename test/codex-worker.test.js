@@ -150,7 +150,7 @@ test("resolveRunOutboxDir falls back to tmp when primary outbox is full", async 
   fs.rmSync(path.join(os.tmpdir(), "myos-worker-outbox"), { recursive: true, force: true });
 });
 
-test("resolveCodexWorkerModelSelection defaults straightforward work to gpt-5.4-mini", () => {
+test("resolveCodexWorkerModelSelection defaults straightforward work to gpt-5.6-terra", () => {
   const originalDefault = process.env.MYOS_MODEL_PROFILE_DEFAULT;
   const originalSmart = process.env.MYOS_MODEL_PROFILE_SMART;
   const originalWrite = process.env.MYOS_MODEL_PROFILE_WRITE;
@@ -169,7 +169,7 @@ test("resolveCodexWorkerModelSelection defaults straightforward work to gpt-5.4-
       },
     });
 
-    assert.equal(selection.model, "gpt-5.4-mini");
+    assert.equal(selection.model, "gpt-5.6-terra");
     assert.equal(selection.profileId, "bot_default");
     assert.equal(selection.source, "routing_profile");
   } finally {
@@ -184,7 +184,7 @@ test("resolveCodexWorkerModelSelection defaults straightforward work to gpt-5.4-
   }
 });
 
-test("resolveCodexWorkerModelSelection escalates exploratory work to gpt-5.4", () => {
+test("resolveCodexWorkerModelSelection selects Sol for exploratory work", () => {
   const originalDefault = process.env.MYOS_MODEL_PROFILE_DEFAULT;
   const originalSmart = process.env.MYOS_MODEL_PROFILE_SMART;
   const originalWrite = process.env.MYOS_MODEL_PROFILE_WRITE;
@@ -204,7 +204,7 @@ test("resolveCodexWorkerModelSelection escalates exploratory work to gpt-5.4", (
       },
     });
 
-    assert.equal(selection.model, "gpt-5.4");
+    assert.equal(selection.model, "gpt-6.1-sol");
     assert.equal(selection.profileId, "openai_heavy_reasoning");
     assert.equal(selection.source, "routing_profile");
   } finally {
@@ -217,4 +217,9 @@ test("resolveCodexWorkerModelSelection escalates exploratory work to gpt-5.4", (
     if (originalModel == null) delete process.env.MYOS_LOCAL_WORKER_MODEL;
     else process.env.MYOS_LOCAL_WORKER_MODEL = originalModel;
   }
+});
+
+test("worker final contract preserves completion evidence",()=>{
+ const payload={reply:"done",artifacts:[],status:"completed",verification:[{command:"npm test",passed:true,evidence:"1/1"}],blockedBy:[]};
+ assert.deepEqual(normalizeStructuredReplyPayload(payload,""),payload);
 });

@@ -1,12 +1,44 @@
 "use strict";
 
+const os = require("node:os");
+const path = require("node:path");
+const { readJsonCached } = require("../json-cache");
+
+// Intent Horizon tells the model to look for and implement upgrades nobody
+// asked for after a write task. That is an operator preference, not a safe
+// default for customer and public installs, so it is OFF unless opted in:
+//   MYOS_INTENT_HORIZON_ENABLED=1 (or 0 to force off), else
+//   ~/.myos-dispatch/config/orchestration-features.json
+//     { "intentHorizon": { "enabled": true } }
+// (path override: MYOS_ORCHESTRATION_FEATURES_CONFIG).
+function orchestrationFeaturesConfigPath(env = process.env) {
+  if (env.MYOS_ORCHESTRATION_FEATURES_CONFIG) return env.MYOS_ORCHESTRATION_FEATURES_CONFIG;
+  const home = env.HOME || process.env.HOME || os.homedir();
+  return path.join(home, ".myos-dispatch", "config", "orchestration-features.json");
+}
+
+function intentHorizonOptIn(env = process.env) {
+  const raw = env.MYOS_INTENT_HORIZON_ENABLED;
+  if (raw != null && String(raw).trim() !== "") {
+    return { enabled: !/^(?:0|false|off|no)$/i.test(String(raw).trim()), source: "env" };
+  }
+  try {
+    const config = readJsonCached(orchestrationFeaturesConfigPath(env));
+    if (config?.intentHorizon?.enabled === true) return { enabled: true, source: "config" };
+  } catch {
+    // No config file: default.
+  }
+  return { enabled: false, source: "default" };
+}
+
 function buildIntentHorizonPolicy(input = {}, options = {}) {
   const env = options.env || process.env;
   const goalScale = Number(input.goalScale || 0);
   const missingTaskClass = !String(input.taskClass || "").trim();
   const blockedBy = Array.isArray(input.blockedBy) ? [...new Set(input.blockedBy)] : [];
   const hardGated = blockedBy.length > 0;
-  const enabled = String(env.MYOS_INTENT_HORIZON_ENABLED ?? "1") !== "0"
+  const optIn = intentHorizonOptIn(env);
+  const enabled = optIn.enabled
     && input.trustClass === "interactive"
     && input.actionType === "write"
     && !missingTaskClass
@@ -18,7 +50,8 @@ function buildIntentHorizonPolicy(input = {}, options = {}) {
     version: "intent-horizon-v1",
     taskClass: missingTaskClass ? null : String(input.taskClass).trim(),
     enabled,
-    stopReason: hardGated ? "hard_gate" : missingTaskClass ? "missing_task_class" : null,
+    optIn: optIn.source,
+    stopReason: !optIn.enabled ? "not_opted_in" : hardGated ? "hard_gate" : missingTaskClass ? "missing_task_class" : null,
     blockedBy,
     budget: {
       maxContinuationAttempts: Number(input.maxContinuationAttempts || 8),
@@ -221,6 +254,8 @@ function classifyIntentHorizonHealthEvent(state = {}) {
 
 module.exports = {
   buildIntentHorizonPolicy,
+  intentHorizonOptIn,
+  orchestrationFeaturesConfigPath,
   classifyIntentHorizonHealthEvent,
   decideIntentHorizonContinuation,
   evaluateUpgradeCandidate,

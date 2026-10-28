@@ -23,6 +23,7 @@ const COMPLIANCE_LANES = Object.freeze([
   "interactive_oauth",
   "unattended_api",
   "unattended_local",
+  "unattended_codex",
 ]);
 
 const ROUTING_POLICY_CANDIDATES = Object.freeze([
@@ -321,8 +322,16 @@ function mergeRouteOverrides(baseRoute, overrideRoute) {
   return merged;
 }
 
+// A saved catalog entry that is unassigned, or that merely records the
+// subscription-registry choice, must not switch off the registry default
+// route (issue #8: saving the catalog left every text class without OAuth).
+function blocksRegistryDefault(assignment) {
+  return Boolean(assignment) && assignment.unassigned !== true && assignment.source !== "oauth-registry";
+}
+
 function resolveRouteEntry({ taskClass, intent, complianceLane }) {
   const lane = normalizeComplianceLane(complianceLane);
+
   const normalizedTaskClass = normalizeTaskClass(taskClass);
   const localPreference = resolveLocalRoutePreference(normalizedTaskClass, lane);
   const routeOverrides = readLaneState().routeOverrides || {};
@@ -359,6 +368,10 @@ function resolveRouteEntry({ taskClass, intent, complianceLane }) {
   return {
     routeKey: normalizedTaskClass,
     routingSource: normalizedIntent ? "taskClass_fallback" : "taskClass",
+    allowsLocalProvider: !normalizedIntent && !localPreference &&
+      !blocksRegistryDefault(readLocalAssignmentsFile()?.assignments?.[normalizedTaskClass]) &&
+      !readLocalAssignmentsFile()?.overrides?.[normalizedTaskClass] &&
+      !routeOverrides?.[normalizedTaskClass]?.[lane],
     route: (() => {
       const merged = mergeRouteOverrides(baseRoute, routeOverrides?.[normalizedTaskClass]?.[lane]);
       if (localPreference?.source !== "local_assignment") return merged;
@@ -389,7 +402,8 @@ function isFableCandidate(candidate = {}) {
     profile === "anthropic_elite" ||
     model === "claude-fable-5" ||
     model === "anthropic.claude-fable-5" ||
-    model.startsWith("claude-fable-")
+    model.startsWith("claude-fable-") ||
+    model.startsWith("anthropic.claude-fable-")
   );
 }
 
@@ -411,6 +425,22 @@ function prioritizeJsonCheapRoutingCandidates(candidates = []) {
 function resolveExecutionPlan({ taskClass, intent, complianceLane, executionPolicy, authMode, audio, pinnedProvider, providerPreference, model, profile, responseMode } = {}) {
   const normalizedTaskClass = normalizeTaskClass(taskClass);
   const lane = normalizeComplianceLane(complianceLane);
+
+  // Native user-owned Codex only, without generic fallback tables or aliases.
+  if (lane === "unattended_codex") {
+    const providers = [pinnedProvider, providerPreference].filter(value => value != null);
+    if (!model || providers.some(value => value !== "openai") ||
+        executionPolicy !== "internal_automation" || authMode !== "oauth") {
+      throw new Error("unattended_codex requires a pinned model, OpenAI, internal_automation and oauth");
+    }
+    return {
+      taskClass: normalizedTaskClass, intent: intent || null, complianceLane: lane,
+      routeKey: intent || normalizedTaskClass, routingSource: "explicit_override",
+      deterministicBypassReason: null, executionPolicy, authMode,
+      candidates: [{ type: "llm", provider: "openai", profile: profile || normalizedTaskClass,
+        model, authMode: "oauth" }],
+    };
+  }
 
   if (model || pinnedProvider || providerPreference) {
     const explicitProvider = normalizeProvider(pinnedProvider || providerPreference || "openai");
@@ -435,7 +465,7 @@ function resolveExecutionPlan({ taskClass, intent, complianceLane, executionPoli
     };
   }
 
-  const { routeKey, routingSource, route } = resolveRouteEntry({
+  const { routeKey, routingSource, route, allowsLocalProvider } = resolveRouteEntry({
     taskClass: normalizedTaskClass,
     intent,
     complianceLane: lane,
@@ -466,6 +496,7 @@ function resolveExecutionPlan({ taskClass, intent, complianceLane, executionPoli
     complianceLane: lane,
     routeKey,
     routingSource,
+    allowsLocalProvider: allowsLocalProvider === true,
     deterministicBypassReason,
     candidates: [
       ...deterministicCandidates,
@@ -476,9 +507,18 @@ function resolveExecutionPlan({ taskClass, intent, complianceLane, executionPoli
   };
 }
 
-function validateExecutionCandidate(plan, candidate, { authMode, audio } = {}) {
+function validateExecutionCandidate(plan, candidate, { authMode, audio, claudeOauthVerified = false } = {}) {
   if (!candidate) {
     throw new Error(`No MyOS candidates available for ${plan.routeKey}:${plan.complianceLane}`);
+  }
+
+  if (plan.complianceLane === "unattended_codex") {
+    if (authMode !== "oauth" || plan.executionPolicy !== "internal_automation" ||
+        candidate.type !== "llm" || candidate.provider !== "openai" ||
+        candidate.authMode !== "oauth" || !candidate.model || audio) {
+      throw new Error("unattended_codex permits only native OpenAI OAuth text execution");
+    }
+    return;
   }
 
   if (plan.complianceLane === "interactive_oauth" && authMode !== "oauth") {
@@ -508,6 +548,12 @@ function validateExecutionCandidate(plan, candidate, { authMode, audio } = {}) {
   }
 
   const rawProvider = String(candidate.provider || "").trim().toLowerCase();
+  if (rawProvider === "local") {
+    if (plan.taskClass !== "cheap_routing" || candidate.transportAuthMode !== "none" || !candidate.registration || candidate.authMode) {
+      throw new Error("Local execution requires a registered cheap_routing candidate with no transport credentials");
+    }
+    return;
+  }
   if (rawProvider === "claude" || rawProvider === "local-claude") {
     throw new Error("Legacy Claude providers are not allowed in active MyOS routing");
   }
@@ -524,7 +570,7 @@ function validateExecutionCandidate(plan, candidate, { authMode, audio } = {}) {
     );
   }
 
-  if (rawProvider === "anthropic" && authMode === "oauth") {
+  if (rawProvider === "anthropic" && authMode === "oauth" && !claudeOauthVerified) {
     throw new Error(
       "Anthropic OAuth execution is not implemented in MyOS yet; Fable advisory routing is policy-only until an OAuth adapter is verified."
     );

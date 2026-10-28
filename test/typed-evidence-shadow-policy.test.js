@@ -6,6 +6,25 @@ const path = require("node:path");
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
+// Pin only this test process. Mocked existsSync must not switch home roots,
+// and sibling checkpoint suites must retain their own temporary HOME isolation.
+// The legacy root is pinned too: it otherwise derives from HOME, which the
+// customer refresh shares across concurrently running test files, so another
+// suite creating $HOME/<legacy>/workspace mid-run moved the expected path.
+const LEGACY_HOME_ENV = ["OPEN", "CLAW", "_HOME_ROOT"].join("");
+const previousHomeRoot = process.env.MYOS_HOME_ROOT;
+const previousLegacyRoot = process.env[LEGACY_HOME_ENV];
+const isolatedHomeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "typed-evidence-policy-home-"));
+process.env.MYOS_HOME_ROOT = isolatedHomeRoot;
+process.env[LEGACY_HOME_ENV] = isolatedHomeRoot;
+test.after(() => {
+  if (previousHomeRoot === undefined) delete process.env.MYOS_HOME_ROOT;
+  else process.env.MYOS_HOME_ROOT = previousHomeRoot;
+  if (previousLegacyRoot === undefined) delete process.env[LEGACY_HOME_ENV];
+  else process.env[LEGACY_HOME_ENV] = previousLegacyRoot;
+  fs.rmSync(isolatedHomeRoot, { recursive: true, force: true });
+});
+
 const {
   decideTypedEvidenceShadowAuthority,
   evaluateTypedEvidenceReplayCases,
@@ -153,4 +172,29 @@ test("typed-evidence shadow V2 can self-promote after successful authoritative u
 
   assert.deepEqual(last.promoted && { from: last.promoted.from, to: last.promoted.to }, { from: "v2", to: "v3" });
   assert.equal(readTypedEvidenceShadowState({ stateFile }).activeStage, "v3");
+});
+
+
+test("replay corpus resolves explicit, env, workspace, default, then empty", (t) => {
+  const { resolveTypedEvidenceCorpusFile, loadTypedEvidenceReplayCorpus, DEFAULT_REPLAY_CORPUS_FILE } = require("../src/promotion/typed-evidence-shadow-policy");
+  const { resolveWorkspacePath, resolveHomePath } = require("../src/myos-compat");
+  const previous = process.env.MYOS_TYPED_EVIDENCE_CORPUS;
+  process.env.MYOS_TYPED_EVIDENCE_CORPUS = "/fake/env-corpus.json";
+  t.after(() => {
+    if (previous === undefined) delete process.env.MYOS_TYPED_EVIDENCE_CORPUS;
+    else process.env.MYOS_TYPED_EVIDENCE_CORPUS = previous;
+  });
+  const workspace = resolveWorkspacePath("agents", "shared", "replay-corpora", "typed-evidence-shadow-corpus.json");
+  const candidates = ["/fake/explicit.json", process.env.MYOS_TYPED_EVIDENCE_CORPUS, workspace, DEFAULT_REPLAY_CORPUS_FILE];
+  const existing = new Set(candidates);
+  const root = resolveHomePath();
+  t.mock.method(fs, "existsSync", (file) => existing.has(file) || file === root);
+  t.mock.method(fs, "readFileSync", (file) => JSON.stringify({ cases: [{ id: file }] }));
+  for (const expected of candidates) {
+    assert.equal(resolveTypedEvidenceCorpusFile(candidates[0]), expected);
+    assert.deepEqual(loadTypedEvidenceReplayCorpus(candidates[0]), [{ id: expected }]);
+    existing.delete(expected);
+  }
+  assert.equal(resolveTypedEvidenceCorpusFile(), null);
+  assert.deepEqual(loadTypedEvidenceReplayCorpus(), []);
 });

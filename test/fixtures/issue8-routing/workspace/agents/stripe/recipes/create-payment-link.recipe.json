@@ -1,0 +1,15 @@
+{
+  "id": "agent/stripe/create-payment-link",
+  "layer": "agent",
+  "owner": "stripe",
+  "title": "Create a Stripe payment link",
+  "tags": ["stripe", "payment", "link"],
+  "phrases": ["create a payment link", "make a stripe payment link"],
+  "actions": ["create"],
+  "safety": { "destructive": false, "rule": "Creates a live payment link; approval gates apply." },
+  "inputMode": "structured",
+  "requiredContext": [],
+  "outputMode": "text",
+  "fallbackPolicy": "worker_optional",
+  "handler": "./create-payment-link.js"
+}

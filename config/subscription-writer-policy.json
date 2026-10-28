@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "antigravityModels": {
+    "cheap_routing": "gemini-3.8-flash-low",
+    "default_automation": "gemini-4-argon-medium"
+  },
+  "codexModel": "gpt-6.1-sol"
+}

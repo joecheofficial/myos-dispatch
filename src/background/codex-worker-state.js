@@ -54,8 +54,36 @@ function writeSessionState(state) {
     ...state,
     updated_at: nowIso(),
   };
-  fs.writeFileSync(sessionFilePath(payload.task_id), JSON.stringify(payload, null, 2));
+  const destination = sessionFilePath(payload.task_id);
+  const temporary = `${destination}.${randomUUID()}.tmp`;
+  let fd;
+  try {
+    fd = fs.openSync(temporary, "wx", 0o600);
+    fs.writeFileSync(fd, JSON.stringify(payload, null, 2));
+    fs.fsyncSync(fd);
+    fs.closeSync(fd);
+    fd = undefined;
+    fs.renameSync(temporary, destination);
+    syncDirectory(SESSION_DIR);
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+    // Only remove this invocation's unpublished temporary file.
+    try {
+      fs.unlinkSync(temporary);
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
   return payload;
+}
+
+function syncDirectory(directory) {
+  const fd = fs.openSync(directory, "r");
+  try {
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
 }
 
 function appendEvent(event) {
@@ -65,7 +93,14 @@ function appendEvent(event) {
     at: event.at || nowIso(),
     ...event,
   };
-  fs.appendFileSync(EVENT_LOG_PATH, `${JSON.stringify(payload)}\n`);
+  const fd = fs.openSync(EVENT_LOG_PATH, "a", 0o600);
+  try {
+    fs.appendFileSync(fd, `${JSON.stringify(payload)}\n`);
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  syncDirectory(CODEX_STATE_ROOT);
   return payload;
 }
 
@@ -299,7 +334,16 @@ function listDuePausedSessions(now = new Date()) {
   return due.sort((a, b) => Date.parse(a.retry?.next_retry_at || 0) - Date.parse(b.retry?.next_retry_at || 0));
 }
 
+function markCompletionHeld(state, completion, sessionId) {
+  const next = writeSessionState({ ...state, status: completion.status, session_id: sessionId || state.session_id || null,
+    completion, manual_review_required: true, retry: { ...state.retry, next_retry_at: null } });
+  appendEvent({type: "session.completion_held", task_id: state.task_id, status: next.status,
+    reason: completion.reason, health_event: completion.healthEvent || null});
+  return next;
+}
+
 module.exports = {
+  markCompletionHeld,
   CODEX_STATE_ROOT,
   DEFAULT_RETRY_DELAY_MS,
   EVENT_LOG_PATH,

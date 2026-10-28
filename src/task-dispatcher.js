@@ -3,6 +3,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 const { spawn } = require("node:child_process");
+const { buildChildEnv } = require("./child-env");
 
 const { normalizeRecipeResult } = require("./recipe-utils");
 const { runCodexWorker } = require("./background/codex-worker");
@@ -475,7 +476,7 @@ function runProcess(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: options.cwd || process.cwd(),
-      env: { ...process.env, ...(options.env || {}) },
+      env: buildChildEnv(options.env),
       stdio: ["ignore", "pipe", "pipe"],
     });
 
@@ -759,7 +760,7 @@ async function dispatchTask(request = {}) {
     });
 
     const workerResult = {
-      status: "ok",
+      status: ["blocked", "needs_review"].includes(result.status) ? result.status : "ok",
       reply: result.reply,
       artifacts: result.artifacts,
       recipeId: "fallback/worker",
@@ -778,6 +779,7 @@ async function dispatchTask(request = {}) {
       sessionId: result.sessionId || null,
     };
     appendDispatcherEvent({
+      type: result.status === "needs_review" ? "verification_gap" : "worker",
       id: eventId,
       ts: new Date().toISOString(),
       durationMs: Date.now() - startedAt,
@@ -790,7 +792,8 @@ async function dispatchTask(request = {}) {
       candidates: candidateSummaries,
       goal: goalMetadata,
       outcome: {
-        type: "worker",
+        type: result.status === "needs_review" ? "verification_gap" : "worker",
+        completion: result.completion || null,
         dispatchPlan: adoptionRoute,
         recipeId: "fallback/worker",
         fallbackFromRecipeId: candidates[0]?.recipe?.id || null,
@@ -831,8 +834,10 @@ async function dispatchTaskWithBackground(request = {}, options = {}) {
   const backgroundController = startBackgroundTasks(parallelizationPlan, {
     enabled: options.backgroundAgentsEnabled !== false,
     command: options.backgroundWorkerCommand || options.workerCommand || "codex",
-    callerProvider: options.callerProvider
-      || (options.backgroundWorkerCommand ? undefined : (options.workerCommand || "codex")),
+    // A sidecar command says nothing about the root caller. The worker fallback
+    // below runs request.fallback.command; use it only when explicitly supplied.
+    callerProvider: options.callerProvider ?? options.workerCommand
+      ?? (request.fallback?.type === "worker" ? request.fallback.command : undefined),
     cwd: options.cwd || HOME,
     provider: options.provider,
     runCommand: options.backgroundRunCommand,

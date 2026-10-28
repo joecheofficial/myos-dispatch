@@ -7,6 +7,9 @@ const { spawnSync } = require("node:child_process");
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
+// Planner behavior tests use a synthetic credential; absence is covered in customer-runtime.test.js.
+process.env.OPENAI_API_KEY = "fixture-only";
+
 const { buildParallelizationPlan, compactParallelizationPlan, resolveMaxSidecars } = require("../src/parallelization-planner");
 const { getParallelizationStage, recordParallelizationRun } = require("../src/promotion/parallelization-version-policy");
 const {
@@ -47,7 +50,7 @@ test("parallelization planner records no-op decision for direct lightweight asks
   assert.equal(plan.joinPolicy, "none");
 });
 
-test("parallelization planner fans out short research complaints but not status pings", () => {
+test("parallelization planner keeps short research questions and status pings local", () => {
   const researchPlan = buildParallelizationPlan("what's going on with dispatch fanout", {
     branch: "fallback",
     intentType: "exploratory",
@@ -65,10 +68,9 @@ test("parallelization planner fans out short research complaints but not status 
     parallelizationStage: cleanStage(),
   });
 
-  assert.equal(researchPlan.mode, "read_only");
-  assert.equal(researchPlan.aggression, "deep");
-  assert.ok(researchPlan.backgroundTasks.length >= 4);
-  assert.ok(researchPlan.backgroundTasks.some((task) => task.id === "decompose-1"));
+  assert.equal(researchPlan.mode, "none");
+  assert.equal(researchPlan.aggression, "off");
+  assert.equal(researchPlan.backgroundTasks.length, 0);
   assert.equal(statusPlan.mode, "none");
   assert.equal(statusPlan.backgroundTasks.length, 0);
 });
@@ -109,7 +111,7 @@ test("parallelization planner supports a configurable 20-sidecar cap", () => {
     route: { lane: "worker_skill" },
     searchScope: "<workspace>/agents/shared",
   }, {
-    env: { MYOS_PARALLELIZATION_MAX_AGENTS: "24" },
+    env: { MYOS_PARALLELIZATION_MAX_AGENTS: "24", OPENAI_API_KEY: "fixture-only" },
     parallelizationStage: cleanStage(),
   });
 
@@ -130,7 +132,7 @@ test("parallelization planner fans out command creation with human-driven OAuth 
     route: { lane: "worker_skill" },
     searchScope: "<workspace>/agents/shared",
   }, {
-    env: { MYOS_PARALLELIZATION_MAX_AGENTS: "24" },
+    env: { MYOS_PARALLELIZATION_MAX_AGENTS: "24", OPENAI_API_KEY: "fixture-only" },
     parallelizationStage: cleanStage(),
   });
 
@@ -260,6 +262,7 @@ test("background runner executes V2 read-only tasks when execution is enabled", 
   const results = await runBackgroundTasks(plan, {
     enabled: true,
     command: "codex",
+    callerProvider: "codex",
     stateFile,
     async runCommand({ invocation }) {
       assert.equal(invocation.kind, "codex");
@@ -332,6 +335,7 @@ test("background runner rejects non-Codex workers before provider quarantine che
   const results = await runBackgroundTasks(plan, {
     enabled: true,
     command: "gemini",
+    callerProvider: "codex",
     stateFile,
     env: {
       MYOS_BACKGROUND_AGENTS_ENABLED: "1",
@@ -346,7 +350,7 @@ test("background runner rejects non-Codex workers before provider quarantine che
 
   assert.equal(results.length, plan.backgroundTasks.length);
   assert.equal(results.every((result) => result.status === "skipped"), true);
-  assert.match(results[0].summary, /quarantined|human OAuth support is not enabled/);
+  assert.match(results[0].summary, /quarantined|cross-provider mixing is disabled/);
 });
 
 test("background runner builds read-only Codex invocation and scrubs API-key env", async () => {
@@ -358,14 +362,14 @@ test("background runner builds read-only Codex invocation and scrubs API-key env
   };
   const codex = buildBackgroundWorkerInvocation({
     ...task,
-    model: "gpt-5.5",
-  }, { command: "codex", provider: "openai", cwd: "/tmp" });
+    model: "gpt-6.1-sol",
+  }, { command: "codex", callerProvider: "codex", provider: "openai", cwd: "/tmp" });
 
-  assert.deepEqual(codex.args.slice(0, 4), ["-a", "never", "exec", "--json"]);
+  assert.deepEqual(codex.args.slice(0, 4), ["exec", "-c", 'approval_policy="never"', "--json"]);
   assert.ok(codex.args.includes("--ephemeral"));
-  assert.ok(codex.args.includes("--ignore-user-config"));
+  assert.equal(codex.args.includes("--ignore-user-config"), false);
   assert.ok(codex.args.includes("read-only"));
-  assert.equal(codex.model, "gpt-5.4");
+  assert.equal(codex.model, "gpt-6.1-sol");
 
   const prompt = buildReadOnlyPrompt(task);
   assert.match(prompt, /OAuth\/auth lane work is human-driven/);
@@ -394,11 +398,13 @@ test("background runner builds read-only Codex invocation and scrubs API-key env
   }, {
     enabled: true,
     command: "codex",
+    callerProvider: "codex",
     stateFile: tempStateFile(),
     env: {
       MYOS_BACKGROUND_BACKPRESSURE_ENABLED: "0",
       OPENAI_API_KEY: "test-openai",
       CODEX_API_KEY: "test-codex",
+      MYOS_OAUTH_RECOVERY: "0",
       PATH: "/bin",
     },
     async runCommand({ env: childEnv, invocation }) {
@@ -443,6 +449,7 @@ test("background runner blocks nested fan-out from sidecar processes", async () 
   }, {
     enabled: true,
     command: "codex",
+    callerProvider: "codex",
     stateFile: tempStateFile(),
     env: {
       MYOS_BACKGROUND_BACKPRESSURE_ENABLED: "0",
@@ -519,6 +526,7 @@ test("background runner uses API-key env for autonomous/cron callers (MYOS_INITI
   }, {
     enabled: true,
     command: "codex",
+    callerProvider: "codex",
     stateFile: tempStateFile(),
     env: {
       MYOS_BACKGROUND_BACKPRESSURE_ENABLED: "0",
@@ -582,6 +590,7 @@ test("background runner refuses Gemini sidecars when API-key env is visible", as
   }, {
     enabled: true,
     command: "gemini",
+    callerProvider: "gemini",
     env: { MYOS_BACKGROUND_BACKPRESSURE_ENABLED: "0", GEMINI_API_KEY: "test" },
     async runCommand() {
       throw new Error("Gemini API-key sidecar should not execute");
@@ -630,6 +639,7 @@ test("assertNoAnthropicKeysInChildEnv throws on any Anthropic credential includi
 test("background runner strips all Anthropic keys from child env in both OAuth and API-key modes", async () => {
   const task = { id: "context-map", kind: "source_index_scan", prompt: "read only", writeScope: [] };
   const dirtyEnv = {
+    MYOS_OAUTH_RECOVERY: "0",
     MYOS_BACKGROUND_BACKPRESSURE_ENABLED: "0",
     OPENAI_API_KEY: "test-openai",
     ANTHROPIC_API_KEY: "test-anthropic",
@@ -648,6 +658,7 @@ test("background runner strips all Anthropic keys from child env in both OAuth a
     {
       enabled: true,
       command: "codex",
+      callerProvider: "codex",
       stateFile: tempStateFile(),
       env: { ...dirtyEnv },
       async runCommand({ env: childEnv }) {
@@ -668,6 +679,7 @@ test("background runner strips all Anthropic keys from child env in both OAuth a
     {
       enabled: true,
       command: "codex",
+      callerProvider: "codex",
       stateFile: tempStateFile(),
       env: { ...dirtyEnv, MYOS_INITIATOR: "unattended" },
       async runCommand({ env: childEnv }) {
@@ -766,6 +778,7 @@ test("background runner does not block on optional-only plans", async () => {
   const controller = startBackgroundTasks(plan, {
     enabled: true,
     command: "codex",
+    callerProvider: "codex",
     stateFile: tempStateFile(),
     async runCommand() {
       await gate;
@@ -814,7 +827,7 @@ test("background runner refuses cross-provider mixing when a caller provider is 
     command: "codex",
     callerProvider: "claude",
     stateFile: tempStateFile(),
-    env: { MYOS_BACKGROUND_BACKPRESSURE_ENABLED: "0", PATH: "/bin" },
+    env: { MYOS_BACKGROUND_BACKPRESSURE_ENABLED: "0", MYOS_OAUTH_RECOVERY: "0", PATH: "/bin" },
     async runCommand() {
       throw new Error("cross-provider sidecar must not execute");
     },
@@ -922,6 +935,7 @@ test("background runner enforces MYOS_BACKGROUND_AGENTS_ENABLED=0 even when call
   const results = await runBackgroundTasks(plan, {
     enabled: true,
     command: "codex",
+    callerProvider: "codex",
     env: { MYOS_BACKGROUND_AGENTS_ENABLED: "0" },
     async runCommand() {
       spawned += 1;

@@ -8,6 +8,8 @@ const CATALOG_PATHS = {
   openrouter: path.join(WORKSPACE_ROOT, "data", "models", "openrouter-model-catalog.json"),
   google: path.join(WORKSPACE_ROOT, "data", "models", "google-model-catalog.json"),
   anthropic: path.join(WORKSPACE_ROOT, "data", "models", "anthropic-model-catalog.json"),
+  meta: path.join(WORKSPACE_ROOT, "data", "models", "meta-model-catalog.json"),
+  cursor: path.join(WORKSPACE_ROOT, "data", "models", "cursor-model-catalog.json"),
 };
 
 function normalizeProvider(provider) {
@@ -18,6 +20,8 @@ function normalizeProvider(provider) {
   if (raw === "openai") return "openai";
   if (raw === "openrouter") return "openrouter";
   if (raw === "google" || raw === "gemini") return "google";
+  if (raw === "meta" || raw === "muse") return "meta";
+  if (raw === "cursor") return "cursor";
   throw new Error(`Unsupported provider: ${provider}`);
 }
 

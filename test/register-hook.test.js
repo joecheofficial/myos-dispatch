@@ -70,13 +70,12 @@ test("(a) file absent -> minimal valid file created with our hook", () => {
   assert.ok(parsed.hooks.UserPromptSubmit);
 });
 
-test("(b) empty file -> same as absent", () => {
+test("(b) empty existing file is refused without overwrite", () => {
   const { settings } = sandbox();
   fs.writeFileSync(settings, "", "utf8");
   const r = add(settings);
-  assert.strictEqual(r.status, 0, r.stderr);
-  const parsed = JSON.parse(read(settings));
-  assert.strictEqual(countOurHooks(parsed), 1);
+  assert.strictEqual(r.status, 1, r.stderr);
+  assert.strictEqual(read(settings), "");
 });
 
 test("(c) malformed JSON -> REFUSES, exit 1, file byte-identical", () => {
@@ -176,7 +175,7 @@ test("(i) model/theme/permissions/env keys all preserved", () => {
   assert.strictEqual(parsed.theme, "light");
   assert.deepStrictEqual(parsed.permissions, { allow: ["Bash(git status)"], deny: [] });
   assert.strictEqual(parsed.env.FOO, "bar", "unrelated env key preserved");
-  assert.strictEqual(parsed.env.MYOS_HOME_ROOT, "/home/testroot", "our env key set");
+  assert.strictEqual(parsed.env.MYOS_HOME_ROOT, "/old", "registration must not repoint an existing environment");
   assert.strictEqual(countOurHooks(parsed), 1);
 
   // And removal restores env without dropping FOO.
@@ -340,4 +339,278 @@ test("tighter marker: our real command matches, logging-wrapper does not", () =>
     !isOurHookEntry({ command: "/usr/local/bin/my-wrapper-for-myos-dispatch-hook-logging.sh --surface=claude" }),
     "hyphenated wrapper name must NOT match"
   );
+});
+
+test("Codex registers supported events without host env config and preserves pretool on reinstall", () => {
+  const { settings } = sandbox();
+  const original = { model: "keep", teams: { mine: true }, hooks: { Stop: [{ hooks: [{ type: "command", command: "foreign-hook" }] }] } };
+  fs.writeFileSync(settings, JSON.stringify(original));
+  let result = add(settings, ["--surface", "codex", "--with-pretool"]);
+  assert.strictEqual(result.status, 0, result.stderr);
+  const first = JSON.parse(read(settings));
+  assert.ok(first.hooks.SessionStart, "Codex SessionStart is required");
+  assert.strictEqual(first.env, undefined, "hooks.json is not host env configuration");
+  assert.strictEqual(first.hooks.PreToolUse.at(-1).matcher, undefined);
+  assert.strictEqual(first.model, "keep");
+  assert.deepStrictEqual(first.teams, original.teams);
+  assert.deepStrictEqual(first.hooks.Stop, original.hooks.Stop);
+  for (const event of ["SessionStart", "UserPromptSubmit", "PreToolUse"]) assert.match(first.hooks[event].at(-1).hooks[0].command, /--surface=codex/);
+  const bytes = read(settings);
+  const backups = fs.readdirSync(path.dirname(settings));
+  result = add(settings, ["--surface", "codex"]);
+  assert.strictEqual(result.status, 0, result.stderr);
+  assert.strictEqual(read(settings), bytes);
+  assert.deepStrictEqual(fs.readdirSync(path.dirname(settings)), backups);
+});
+
+test("registration transaction rolls back exact prior bytes, refuses concurrent changes", () => {
+  const { home, settings } = sandbox();
+  const transaction = path.join(home, "transaction.json");
+  const original = JSON.stringify({ model: "custom", env: { MYOS_HOME_ROOT: "old", KEEP: "yes" } });
+  fs.writeFileSync(settings, original);
+  const result = add(settings, ["--transaction", transaction]);
+  assert.strictEqual(result.status, 0, result.stderr);
+  assert.notStrictEqual(read(settings), original);
+  const rollback = runReg(["--settings", settings, "--rollback", transaction]);
+  assert.strictEqual(rollback.status, 0, rollback.stderr);
+  assert.strictEqual(read(settings), original);
+  assert.strictEqual(add(settings, ["--transaction", transaction]).status, 0);
+  fs.writeFileSync(settings, "{\"concurrent\":true}");
+  assert.notStrictEqual(runReg(["--settings", settings, "--rollback", transaction]).status, 0);
+  assert.strictEqual(read(settings), "{\"concurrent\":true}");
+});
+
+for (const scenario of ["foreign-update", "write-failure"]) {
+  test(`optional transaction ${scenario} preserves the correct rollback boundary`, () => {
+    const { home, settings } = sandbox();
+    try {
+      const transaction = path.join(home, "transaction.json");
+      const original = '{ "model": "keep" }\n';
+      fs.writeFileSync(settings, original);
+      assert.strictEqual(add(settings, ["--transaction", transaction]).status, 0);
+      const titleArgs = ["--settings", settings, "--optional-hook", "title", "--hook", "/opt/dispatch/myos-title-hook", "--transaction", transaction];
+      assert.strictEqual(runReg(titleArgs).status, 0);
+      const afterTitle = read(settings);
+      const priorRecord = read(transaction);
+      const rabbitArgs = [SCRIPT, "--settings", settings, "--optional-hook", "rabbit-hole", "--hook", "/opt/dispatch/myos-rabbithole-hook", "--node", NODE, "--transaction", transaction];
+      let result;
+      if (scenario === "foreign-update") {
+        fs.writeFileSync(settings, '{"foreign":true}');
+        result = spawnSync(NODE, rabbitArgs, { encoding: "utf8" });
+        assert.notStrictEqual(result.status, 0);
+        assert.match(result.stderr, /refusing transaction update/);
+        assert.strictEqual(read(transaction), priorRecord, "must not adopt foreign bytes as owned state");
+      } else {
+        const preload = path.join(home, "fail-write.cjs");
+        fs.writeFileSync(preload, `const fs = require('node:fs'); const rename = fs.renameSync; fs.renameSync = (from, to) => { if (to === ${JSON.stringify(settings)}) throw new Error('injected optional write failure'); return rename(from, to); };\n`);
+        result = spawnSync(NODE, ["--require", preload, ...rabbitArgs], { encoding: "utf8" });
+        assert.notStrictEqual(result.status, 0);
+        assert.match(result.stderr, /injected optional write failure/);
+        assert.strictEqual(read(settings), afterTitle);
+      }
+      const rollback = runReg(["--settings", settings, "--rollback", transaction]);
+      if (scenario === "foreign-update") {
+        assert.notStrictEqual(rollback.status, 0);
+        assert.strictEqual(read(settings), '{"foreign":true}');
+      } else {
+        assert.strictEqual(rollback.status, 0, rollback.stderr);
+        assert.strictEqual(read(settings), original);
+      }
+    } finally { fs.rmSync(home, { recursive: true, force: true }); }
+  });
+}
+
+test("shell title dry-run preserves rc bytes and creates no transaction", () => {
+  const { home } = sandbox();
+  try {
+    const rc = path.join(home, ".zshrc");
+    const record = path.join(home, "rc-transaction.json");
+    fs.writeFileSync(rc, "# keep rc bytes");
+    const result = runReg(["--settings", rc, "--shell-title-source", "/opt/dispatch/title.zsh", "--transaction", record, "--dry-run"]);
+    assert.strictEqual(result.status, 0, result.stderr);
+    assert.strictEqual(read(rc), "# keep rc bytes");
+    assert.strictEqual(fs.existsSync(record), false);
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});
+
+test("foreign empty hook groups and their metadata survive a merge", () => {
+  const { settings } = sandbox();
+  const group = { matcher: "special", custom: { keep: true }, hooks: [] };
+  fs.writeFileSync(settings, JSON.stringify({ hooks: { Stop: [group] } }));
+  assert.strictEqual(add(settings).status, 0);
+  assert.deepStrictEqual(JSON.parse(read(settings)).hooks.Stop, [group]);
+});
+
+test("Codex includes a Windows command override with literal arguments", () => {
+  const { settings } = sandbox();
+  const result = add(settings, ["--surface", "codex"]);
+  assert.strictEqual(result.status, 0, result.stderr);
+  const hook = JSON.parse(read(settings)).hooks.UserPromptSubmit[0].hooks[0];
+  assert.match(hook.commandWindows || "", /^powershell\.exe -NoProfile -NonInteractive -EncodedCommand /);
+  const script = Buffer.from(hook.commandWindows.split(" ").at(-1), "base64").toString("utf16le");
+  assert.ok(script.includes("--surface=codex"));
+  assert.ok(script.includes("--run-hook"));
+  assert.ok(script.includes("/home/testroot"));
+});
+
+test("registered Codex command invokes the real hook with literal paths and configured home", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "hook literal $dollar `tick`-"));
+  const settings = path.join(home, "hooks.json");
+  const hookPath = path.resolve(__dirname, "../bin/myos-dispatch-hook");
+  const result = runReg(["--settings", settings, "--hook", hookPath, "--home", home, "--surface", "codex", "--allow-ephemeral-hook"]);
+  assert.strictEqual(result.status, 0, result.stderr);
+  const command = JSON.parse(read(settings)).hooks.UserPromptSubmit[0].hooks[0].command;
+  const executed = spawnSync("sh", ["-c", command], { input: JSON.stringify({ prompt: "hello", hook_event_name: "UserPromptSubmit", cwd: home }), encoding: "utf8", env: { HOME: home, PATH: process.env.PATH, MYOS_BACKGROUND_AGENTS_ENABLED: "0", MYOS_AUTO_FANOUT: "0", MYOS_BACKGROUND_BACKPRESSURE_ENABLED: "0" } });
+  assert.strictEqual(executed.status, 0, executed.stderr);
+  assert.ok(JSON.parse(executed.stdout).hookSpecificOutput.additionalContext);
+});
+
+test("atomic registration preserves private settings permissions", () => {
+  if (process.platform === "win32") return;
+  const { settings } = sandbox();
+  fs.writeFileSync(settings, "{}", { mode: 0o600 });
+  assert.strictEqual(add(settings).status, 0);
+  assert.strictEqual(fs.statSync(settings).mode & 0o777, 0o600);
+});
+
+test("two registrations preserve customer settings and foreign hook bytes", () => {
+  const { home, settings } = sandbox();
+  try {
+    const foreign = '{ "matcher" : "Edit", "hooks" : [{"type":"command", "command":"foreign-hook", "timeout":1e2}] }';
+    const env = '"env" : {"CUSTOM":"keep", "ESCAPED":"\\u0061"}';
+    const permissions = '"permissions" : { "allow" : ["Bash(git status)"], "deny":[] }';
+    const original = `{\n\t${env},\n\t${permissions},\n\t"hooks" : { "Stop":[], "UserPromptSubmit" : [${foreign}] }\n}\n`;
+    fs.writeFileSync(settings, original);
+    let first;
+    for (let i = 0; i < 2; i += 1) {
+      const result = add(settings);
+      assert.strictEqual(result.status, 0, result.stderr);
+      const bytes = read(settings);
+      const parsed = JSON.parse(bytes);
+      assert.strictEqual(parsed.env.MYOS_HOME_ROOT, undefined);
+      assert.deepStrictEqual(parsed.hooks.Stop, []);
+      assert.strictEqual(countOurHooks(parsed), 1);
+      for (const fragment of [foreign, env, permissions]) assert.ok(bytes.includes(fragment), `changed customer bytes: ${fragment}`);
+      const ownedBytes = "," + JSON.stringify(parsed.hooks.UserPromptSubmit.at(-1));
+      assert.strictEqual(bytes.replace(ownedBytes, ""), original, "all bytes outside the added entry must survive");
+      if (i === 0) first = bytes;
+      else assert.strictEqual(bytes, first, "second registration must be byte-identical");
+    }
+    const removed = remove(settings);
+    assert.strictEqual(removed.status, 0, removed.stderr);
+    assert.deepStrictEqual(JSON.parse(read(settings)), JSON.parse(original));
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});
+
+test("fresh registration never adds a global home, including dry-run", () => {
+  const { home, settings } = sandbox();
+  try {
+    fs.writeFileSync(settings, '{}\n');
+    const preview = add(settings, ["--dry-run"]);
+    assert.strictEqual(preview.status, 0, preview.stderr);
+    assert.match(preview.stdout, /Global MYOS_HOME_ROOT after merge: absent/);
+    assert.strictEqual(read(settings), '{}\n');
+    assert.strictEqual(add(settings).status, 0);
+    assert.strictEqual(JSON.parse(read(settings)).env, undefined);
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});
+
+test("remove cleans a legacy global home without registration arguments and keeps exact backup", () => {
+  const { home, settings } = sandbox();
+  try {
+    const original = '{"env":{"MYOS_HOME_ROOT":"/legacy-root","KEEP":"yes"},"hooks":{"Stop":[]}}';
+    fs.writeFileSync(settings, original);
+    const result = spawnSync(NODE, [SCRIPT, "--settings", settings, "--remove"], { encoding: "utf8" });
+    assert.strictEqual(result.status, 0, result.stderr);
+    assert.deepStrictEqual(JSON.parse(read(settings)), { env: { KEEP: "yes" }, hooks: { Stop: [] } });
+    const backups = fs.readdirSync(path.dirname(settings)).filter(name => name.startsWith("settings.json.bak-"));
+    assert.strictEqual(backups.length, 1);
+    assert.strictEqual(read(path.join(path.dirname(settings), backups[0])), original);
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});
+
+test("registration replaces only owned entries in mixed groups and retains customer edits on rerun", () => {
+  const { home, settings } = sandbox();
+  try {
+    const foreign = { type: "command", command: "my-wrapper-for-myos-dispatch-hook-logging.sh --surface=claude", timeout: 43 };
+    const original = { env: {}, permissions: { allow: [] }, hooks: {
+      UserPromptSubmit: [{ matcher: "custom", metadata: "keep", hooks: [
+        { type: "command", command: 'node "/old/myos-dispatch-hook" --surface=claude' }, foreign,
+      ] }],
+      PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: 'node "/old/myos-dispatch-hook" --surface=claude' }] }],
+      Stop: [],
+    } };
+    fs.writeFileSync(settings, JSON.stringify(original, null, "\t"));
+    assert.strictEqual(add(settings).status, 0);
+    const customized = JSON.parse(read(settings));
+    customized.env.CUSTOM = "after first registration";
+    customized.permissions.allow.push("Read");
+    fs.writeFileSync(settings, JSON.stringify(customized, null, "\t"));
+    const bytes = read(settings);
+    assert.strictEqual(add(settings).status, 0);
+    assert.strictEqual(read(settings), bytes);
+    const after = JSON.parse(bytes);
+    assert.strictEqual(countOurHooks(after), 2);
+    assert.deepStrictEqual(after.hooks.UserPromptSubmit[0], { matcher: "custom", metadata: "keep", hooks: [foreign] });
+    assert.deepStrictEqual(after.hooks.Stop, []);
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});
+
+test("foreign bytes survive when removing an owned group shifts a mixed group", () => {
+  const { home, settings } = sandbox();
+  try {
+    const owned = JSON.stringify({ type: "command", command: 'node "/old/myos-dispatch-hook" --surface=claude' });
+    const foreign = '{ "type" : "command", "command":"foreign", "timeout":1e2 }';
+    fs.writeFileSync(settings, `{"hooks":{"UserPromptSubmit":[{"hooks":[${owned}]},{ "hooks" : [${owned},${foreign}] }]}}`);
+    const result = add(settings);
+    assert.strictEqual(result.status, 0, result.stderr);
+    assert.ok(read(settings).includes(foreign), "shifted mixed group must retain foreign hook text");
+    assert.strictEqual(countOurHooks(JSON.parse(read(settings))), 1);
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});
+
+// Issue #8 item 9: an upgrade from an older hand-registered Dispatch hook
+// appended a second UserPromptSubmit entry, so Dispatch ran twice per prompt.
+test("(issue8) upgrade replaces legacy Dispatch hook forms instead of appending", () => {
+  const { settings } = sandbox();
+  const foreign = "/usr/local/bin/foreign-ups.sh";
+  const wrapper = "/usr/local/bin/my-wrapper-for-myos-dispatch-hook-logging.sh --surface=claude";
+  const legacy = [
+    "node /Users/someone/old-dispatch/bin/myos-dispatch-hook", // no --surface flag
+    "\"/usr/local/bin/node\" \"/Users/someone/myos-dispatch/bin/myos-dispatch-hook\" --context=lean --surface=claude", // flag before --surface
+    "node /Users/someone/myos-dispatch/bin/myos-dispatch-hook.js",
+    "myos-dispatch-hook", // npm bin on PATH
+  ];
+  fs.writeFileSync(settings, JSON.stringify({ hooks: {
+    UserPromptSubmit: [
+      { hooks: [{ type: "command", command: legacy[0] }] },
+      { hooks: [{ type: "command", command: foreign }, { type: "command", command: legacy[1] }] },
+      { hooks: [{ type: "command", command: legacy[2] }, { type: "command", command: legacy[3] }] },
+      { hooks: [{ type: "command", command: wrapper }] },
+    ],
+  } }, null, 2));
+  const r = add(settings);
+  assert.strictEqual(r.status, 0, r.stderr);
+  const parsed = JSON.parse(read(settings));
+  const cmds = parsed.hooks.UserPromptSubmit.flatMap((g) => g.hooks.map((h) => h.command));
+  for (const old of legacy) assert.ok(!cmds.includes(old), `legacy entry removed: ${old}`);
+  assert.ok(cmds.includes(foreign), "foreign hook preserved");
+  assert.ok(cmds.includes(wrapper), "foreign wrapper containing the marker substring preserved");
+  assert.strictEqual(cmds.filter((c) => c.includes(HOOK)).length, 1, "exactly one current Dispatch hook");
+  // Re-running is a no-op on the hook set.
+  assert.strictEqual(add(settings).status, 0);
+  const again = JSON.parse(read(settings)).hooks.UserPromptSubmit.flatMap((g) => g.hooks.map((h) => h.command));
+  assert.deepStrictEqual(again, cmds);
+});
+
+test("(issue8) private agents/shared hooks are never treated as Dispatch-owned", () => {
+  const { isOurHookEntry } = require("../scripts/register-hook.js");
+  assert.strictEqual(isOurHookEntry({ command: "node /Users/x/.myos/workspace/agents/shared/myos-dispatch-hook.js --surface=claude" }), false);
+  assert.strictEqual(isOurHookEntry({ command: "node /opt/myos-dispatch/bin/myos-dispatch-hook --surface=claude" }), true);
+  assert.strictEqual(isOurHookEntry({ command: "node /opt/myos-dispatch/bin/myos-dispatch-hook-legacy --surface=claude" }), false);
+  // A hook that only names the Dispatch hook as an argument is foreign.
+  assert.strictEqual(isOurHookEntry({ command: "node audit.js --target myos-dispatch-hook" }), false);
+  assert.strictEqual(isOurHookEntry({ command: "env MYOS_HOME_ROOT=/x node /opt/old/bin/myos-dispatch-hook" }), true);
+  // Windows legacy registration without --surface.
+  assert.strictEqual(isOurHookEntry({ command: '"C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\joe\\myos-dispatch\\bin\\myos-dispatch-hook"' }), true);
 });

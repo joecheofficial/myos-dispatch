@@ -1,0 +1,166 @@
+{
+  "schema_version": 1,
+  "generator_version": "organizer-fixture",
+  "lanes": {},
+  "capabilities": [
+    {
+      "id": "capability:ultimate-web-fetch",
+      "type": "project",
+      "execution_lane": "worker_skill",
+      "source_path": "agents/webfetch",
+      "description": "Unified web fetching, scraping, screenshot, PDF, extraction, and authorized media download CLI.",
+      "aliases": [
+        "ultimate-web-fetch",
+        "start",
+        "preflight",
+        "status",
+        "check",
+        "webfetch"
+      ],
+      "use_when": [
+        "Unified web fetching, scraping, screenshot, PDF, extraction, and authorized media download CLI."
+      ],
+      "avoid_when": [],
+      "priority": 60,
+      "version": "1.2.0"
+    },
+    {
+      "id": "capability:allsorted-doctor",
+      "type": "project",
+      "execution_lane": "worker_skill",
+      "source_path": "agents/doctor",
+      "description": "Read-only diagnostic agent for the installed product",
+      "aliases": [
+        "allsorted-doctor",
+        "start",
+        "test",
+        "doctor"
+      ],
+      "use_when": [
+        "Read-only diagnostic agent for the installed product"
+      ],
+      "avoid_when": [],
+      "priority": 60,
+      "version": "1.4.6"
+    },
+    {
+      "id": "recipe:agent-doctor-run-full-diagnostic",
+      "type": "recipe",
+      "execution_lane": "recipe_dispatcher",
+      "source_path": "agents/doctor/recipes/run-full-diagnostic.recipe.json",
+      "description": "Run a full read-only diagnostic of the installed product",
+      "aliases": [
+        "Run a full read-only diagnostic of the installed product",
+        "is everything working",
+        "why is my dashboard down",
+        "run a health check",
+        "what's broken",
+        "diagnose my install",
+        "run doctor",
+        "check system health",
+        "doctor",
+        "diagnostic",
+        "health",
+        "read-only"
+      ],
+      "use_when": [
+        "Run a full read-only diagnostic of the installed product"
+      ],
+      "avoid_when": [],
+      "priority": 90,
+      "version": "1"
+    },
+    {
+      "id": "recipe:agent-doctor-status",
+      "type": "recipe",
+      "execution_lane": "recipe_dispatcher",
+      "source_path": "agents/doctor/recipes/status.recipe.json",
+      "description": "Check self-diagnosis configuration status",
+      "aliases": [
+        "Check self-diagnosis configuration status",
+        "is doctor configured",
+        "check doctor status",
+        "doctor configuration check",
+        "is my self diagnosis set up",
+        "what would a health check actually look at",
+        "do I need credentials to run diagnostics",
+        "is my install pointed at the right directory",
+        "doctor",
+        "diagnostics",
+        "status",
+        "configuration",
+        "setup"
+      ],
+      "use_when": [
+        "Check self-diagnosis configuration status"
+      ],
+      "avoid_when": [],
+      "priority": 90,
+      "version": "1"
+    },
+    {
+      "id": "recipe:agent-webfetch-fetch-page",
+      "type": "recipe",
+      "execution_lane": "recipe_dispatcher",
+      "source_path": "agents/webfetch/recipes/fetch-page.recipe.json",
+      "description": "Fetch and read a web page",
+      "aliases": [
+        "Fetch and read a web page",
+        "what does this site say",
+        "read this page for me",
+        "get the content from this URL",
+        "summarize the article at this link",
+        "fetch this page as markdown",
+        "extract the main information from this website",
+        "web",
+        "fetch",
+        "research",
+        "content"
+      ],
+      "use_when": [
+        "Fetch and read a web page"
+      ],
+      "avoid_when": [],
+      "priority": 90,
+      "version": "1"
+    },
+    {
+      "id": "recipe:agent/stripe/create-payment-link",
+      "type": "recipe",
+      "execution_lane": "recipe_dispatcher",
+      "source_path": "agents/stripe/recipes/create-payment-link.recipe.json",
+      "description": "Create a Stripe payment link",
+      "aliases": [
+        "Create a Stripe payment link",
+        "agent/stripe/create-payment-link",
+        "create a payment link",
+        "make a stripe payment link"
+      ],
+      "use_when": [
+        "Create a Stripe payment link"
+      ],
+      "avoid_when": [],
+      "priority": 90,
+      "version": "1"
+    },
+    {
+      "id": "recipe:agent/git-manager/start-work",
+      "type": "recipe",
+      "execution_lane": "recipe_dispatcher",
+      "source_path": "agents/git-manager/recipes/start-work.recipe.json",
+      "description": "Start a work session in a fresh worktree",
+      "aliases": [
+        "Start a work session in a fresh worktree",
+        "agent/git-manager/start-work",
+        "check in with git manager",
+        "start work on a branch"
+      ],
+      "use_when": [
+        "Start a work session in a fresh worktree"
+      ],
+      "avoid_when": [],
+      "priority": 90,
+      "version": "1"
+    }
+  ]
+}

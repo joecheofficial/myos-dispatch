@@ -1,10 +1,26 @@
 "use strict";
 
+// These suites exercise Intent Horizon behavior once an install has opted in.
+// It is off by default for customer and public installs (see intent-horizon.js).
+process.env.MYOS_INTENT_HORIZON_ENABLED = "1";
+
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
+const { isolateHookHome, preserveEnv } = require("./helpers/isolated-home");
+
+test.beforeEach((t) => {
+  isolateHookHome(t);
+  preserveEnv(t, ["MYOS_BACKGROUND_AGENTS_ENABLED"]);
+  // Exercise planning only. isolateHookHome disables actual automatic fan-out.
+  process.env.MYOS_BACKGROUND_AGENTS_ENABLED = "1";
+});
+
+// Exercise credentialed hook planning without relying on a local provider login.
+process.env.OPENAI_API_KEY = "fixture-only";
+process.env.ANTHROPIC_API_KEY = "fixture-only";
 
 const {
   compactRoute,
@@ -14,6 +30,32 @@ const {
   readHookEventName,
   readPromptText,
 } = require("../bin/myos-dispatch-hook");
+
+// The Claude surface delegates command rewriting to `rtk hook claude`. Put a
+// deterministic stand-in first on PATH so these tests exercise the hook's own
+// safety filtering without depending on rtk being installed (or its version).
+function useFakeRtk(t) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "fake-rtk-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const script = path.join(directory, "fake-rtk.js");
+  fs.writeFileSync(script, `
+let input = "";
+process.stdin.on("data", (chunk) => { input += chunk; });
+process.stdin.on("end", () => {
+  if (process.argv[2] !== "hook" || process.argv[3] !== "claude") process.exit(2);
+  const command = JSON.parse(input).tool_input?.command || "";
+  if (!command || command.startsWith("rtk ")) return;
+  process.stdout.write(JSON.stringify({ hookSpecificOutput: {
+    hookEventName: "PreToolUse", permissionDecisionReason: "RTK auto-rewrite",
+    updatedInput: { command: \`rtk \${command}\` },
+  } }));
+});
+`);
+  const launcher = path.join(directory, "rtk");
+  fs.writeFileSync(launcher, `#!/bin/sh\nexec '${process.execPath.replace(/'/g, "'\\''")}' '${script}' "$@"\n`, { mode: 0o755 });
+  preserveEnv(t, ["PATH"]);
+  process.env.PATH = `${directory}${path.delimiter}${process.env.PATH || ""}`;
+}
 
 test("reads Claude/Codex prompt and tool payload shapes", () => {
   assert.equal(readHookEventName({ prompt: "fix dispatch" }), "UserPromptSubmit");
@@ -27,18 +69,18 @@ test("normalizes Codex snake_case hook event names", () => {
   assert.equal(readHookEventName({ hook_event_name: "pre_tool_use", tool_input: { command: "ls" } }), "PreToolUse");
 });
 
-test("UserPromptSubmit (Codex surface) emits full route with fanout mandate and native-thread instruction", () => {
+test("UserPromptSubmit (Codex surface) emits bounded lanes with native-thread instruction", () => {
   const output = handleHookPayload({
     hook_event_name: "user_prompt_submit",
     cwd: process.cwd(),
     prompt: "Implement the new report pipeline, verify it end-to-end, and update the docs",
-  }, "codex", { contextMode: "full", rewrite: false });
+  }, "codex", { contextMode: "full", rewrite: false, plan:require("./helpers/scoped-hook-plan")("Implement the new report pipeline, verify it end-to-end, and update the docs","codex") });
 
   const context = output?.hookSpecificOutput?.additionalContext || "";
   assert.match(context, /\[MyOS Dispatch route\]/);
   assert.match(context, /Mandatory behavior:/);
-  assert.match(context, /Fan out FIRST/);
-  assert.match(context, /breadth over depth/i);
+  assert.match(context, /bounded independent lanes/);
+  assert.doesNotMatch(context, /Fan out FIRST|widen the fanout|breadth over depth/i);
   assert.match(context, /native multi-agent threads/);
   assert.match(context, /Lane assignments:/);
   assert.match(context, /myos_code_mapper|myos_lane_lead/);
@@ -153,7 +195,8 @@ test("UserPromptSubmit blocks whitespace-padded H ping", () => {
   assert.equal(output.hookSpecificOutput, undefined);
 });
 
-test("PreToolUse (Claude surface) routes Bash commands and preserves RTK rewrite", () => {
+test("PreToolUse (Claude surface) routes Bash commands and preserves RTK rewrite", (t) => {
+  useFakeRtk(t);
   const output = handleHookPayload({
     hook_event_name: "PreToolUse",
     cwd: process.cwd(),
@@ -163,12 +206,11 @@ test("PreToolUse (Claude surface) routes Bash commands and preserves RTK rewrite
 
   const hook = output?.hookSpecificOutput || {};
   assert.equal(hook.hookEventName, "PreToolUse");
-  assert.match(hook.additionalContext || "", /Target: bash_command/);
-  assert.match(hook.additionalContext || "", /Execution lane:/);
+  assert.equal(hook.additionalContext, undefined);
   assert.equal(hook.updatedInput?.command, "rtk git status");
 });
 
-test("PreToolUse (Codex surface) emits compact context and never rewrites", () => {
+test("PreToolUse (Codex surface) is silent for ordinary reads and never rewrites", () => {
   const output = handleHookPayload({
     hook_event_name: "PreToolUse",
     cwd: process.cwd(),
@@ -177,15 +219,15 @@ test("PreToolUse (Codex surface) emits compact context and never rewrites", () =
   }, "codex", { contextMode: "compact", rewrite: false });
 
   const hook = output?.hookSpecificOutput || {};
-  assert.equal(hook.hookEventName, "PreToolUse");
-  assert.match(hook.additionalContext || "", /^\[MyOS Dispatch\] surface=codex/);
+  assert.equal(output, null);
   assert.doesNotMatch(hook.additionalContext || "", /Mandatory behavior:/);
   assert.equal(hook.updatedInput, undefined);
   assert.equal(hook.permissionDecision, undefined);
   assert.equal(hook.permissionDecisionReason, undefined);
 });
 
-test("PreToolUse (Claude surface) rejects RTK grep rewrites when grep reads stdin or is in a pipe", () => {
+test("PreToolUse (Claude surface) rejects RTK grep rewrites when grep reads stdin or is in a pipe", (t) => {
+  useFakeRtk(t);
   function getRewrite(cmd) {
     const output = handleHookPayload(
       {
@@ -225,9 +267,7 @@ test("PreToolUse (Claude surface) rejects RTK grep rewrites when grep reads stdi
     "claude",
     { contextMode: "full", rewrite: true }
   );
-  assert.ok(malformedOutput);
-  assert.equal(malformedOutput.hookSpecificOutput?.hookEventName, "PreToolUse");
-  assert.equal(malformedOutput.hookSpecificOutput?.updatedInput, undefined);
+  assert.equal(malformedOutput, null);
 });
 
 test("compactRoute extracts matched fastpaths up to max 5, prioritizing capability_id over intent", () => {
@@ -316,6 +356,7 @@ test("UserPromptSubmit and PreToolUse route logs carry the Intent Fidelity contr
     assert.equal(preToolRecord.intentFidelity?.version, "intent-fidelity-v1");
     assert.equal(preToolRecord.intentFidelity?.enabled, true);
   } finally {
+    fs.rmSync(tmpLogDir, { recursive: true, force: true });
     if (origLogDir !== undefined) {
       process.env.MYOS_DISPATCH_HOOK_LOG_DIR = origLogDir;
     } else {
@@ -324,7 +365,10 @@ test("UserPromptSubmit and PreToolUse route logs carry the Intent Fidelity contr
   }
 });
 
-test("formatDispatchContext injected context text is byte-identical whether fastpaths are present or omitted", () => {
+// Customer report (4.4.0-rc.3): the hook took the fast path but never told the
+// model which fast path, so "stop after match" had nothing to stop on. A taken
+// fast path now prints its intent, target, cli and stop rule.
+test("formatDispatchContext prints the taken fast path's guidance", () => {
   const basePlan = {
     branch: "fastpath",
     intentType: "directive",
@@ -355,7 +399,10 @@ test("formatDispatchContext injected context text is byte-identical whether fast
     plan: planWithFastpaths,
   });
 
-  assert.equal(ctxWith, ctxWithout);
+  assert.doesNotMatch(ctxWithout, /Fast path/);
+  assert.match(ctxWith, /^Fast path: matched route \(score 0\)$/m);
+  assert.match(ctxWith, /^Fast path target: capability cap-1$/m);
+  assert.equal(ctxWith.replace(/^Fast path.*\n/gm, ""), ctxWithout);
 });
 
 test("appendRouteLog records fastpaths on UserPromptSubmit and PreToolUse callsites", () => {
@@ -404,10 +451,22 @@ test("appendRouteLog records fastpaths on UserPromptSubmit and PreToolUse callsi
       assert.ok(preToolRecord.fastpaths.length <= 5);
     }
   } finally {
+    fs.rmSync(tmpLogDir, { recursive: true, force: true });
     if (origLogDir !== undefined) {
       process.env.MYOS_DISPATCH_HOOK_LOG_DIR = origLogDir;
     } else {
       delete process.env.MYOS_DISPATCH_HOOK_LOG_DIR;
     }
   }
+});
+
+
+test("PreToolUse omits helper availability noise while preserving real safety blocks", () => {
+  const { toolSafetyLabels } = require("../bin/myos-dispatch-hook");
+  const route = { blockedBy: [], parallelization: { blockedReasons: ["sidecars off: no openai credential"] } };
+  assert.deepEqual(toolSafetyLabels(route), []);
+  const blocks = ["auth_sensitive", "destructive_action", "user_visible_send", "approval_sensitive_operation", "protected_surface_write"];
+  assert.deepEqual(toolSafetyLabels({ ...route, blockedBy: blocks }), blocks);
+  assert.deepEqual(route.parallelization.blockedReasons, ["sidecars off: no openai credential"]);
+  assert.deepEqual(toolSafetyLabels({ ...route, blockedBy: ["sidecars off: no openai credential"] }), ["sidecars off: no openai credential"]);
 });
