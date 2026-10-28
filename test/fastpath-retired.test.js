@@ -7,6 +7,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const { preserveEnv } = require("./helpers/isolated-home");
+const { auditFastpathsDoc } = require("../src/fastpath-store");
 const { matchFastpaths } = require("../src/workspace-context");
 
 function writeFastpaths(entries, extra = {}) {
@@ -61,4 +62,23 @@ test("audit prints a WARN summary for retired entries without retired_at/retired
   });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stderr, /WARN: 1 of 2 retired fastpaths have no retired_at\/retired_reason/);
+});
+
+test("audit ignores stale capability ids on retired fastpaths", () => {
+  const audit = auditFastpathsDoc({
+    fastpaths: [{
+      intent: "retired route",
+      match_terms: ["retired route"],
+      capability_id: "skill:removed",
+      reference_path: "TOOLS.md",
+      status: "retired",
+      added_at: "2026-05-15",
+      retired_at: "2026-06-01",
+      retired_reason: "capability removed",
+    }],
+  }, {
+    capabilityIds: new Set(["skill:current"]),
+  });
+
+  assert.equal(audit.ok, true, audit.errors.join("\n"));
 });
