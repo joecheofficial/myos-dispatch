@@ -459,3 +459,14 @@ test("appendRouteLog records fastpaths on UserPromptSubmit and PreToolUse callsi
     }
   }
 });
+
+
+test("PreToolUse omits helper availability noise while preserving real safety blocks", () => {
+  const { toolSafetyLabels } = require("../bin/myos-dispatch-hook");
+  const route = { blockedBy: [], parallelization: { blockedReasons: ["sidecars off: no openai credential"] } };
+  assert.deepEqual(toolSafetyLabels(route), []);
+  const blocks = ["auth_sensitive", "destructive_action", "user_visible_send", "approval_sensitive_operation", "protected_surface_write"];
+  assert.deepEqual(toolSafetyLabels({ ...route, blockedBy: blocks }), blocks);
+  assert.deepEqual(route.parallelization.blockedReasons, ["sidecars off: no openai credential"]);
+  assert.deepEqual(toolSafetyLabels({ ...route, blockedBy: ["sidecars off: no openai credential"] }), ["sidecars off: no openai credential"]);
+});

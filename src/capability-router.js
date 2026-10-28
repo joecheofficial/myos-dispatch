@@ -35,7 +35,7 @@ const GENERIC_TOKENS = new Set([
   'up', 'we', 'with', 'you', 'your',
 ]);
 // Cross-domain tags are useful metadata but cannot identify a capability.
-const GENERIC_CAPABILITY_ALIASES = new Set(["api", "media", "myos", "service", "tool", "agent", "memory", "database", "launch", "files", "storage", "status"]);
+const GENERIC_CAPABILITY_ALIASES = new Set(["api", "media", "myos", "service", "tool", "agent", "memory", "database", "launch", "files", "storage", "status", "chat", "transactional"]);
 // Organizer-built indexes alias a project capability with its package.json script
 // names. Every Node project has "start", "test", "check" or "status", so one of
 // those words in a prompt is no evidence for any particular project (issue #8

@@ -1498,7 +1498,10 @@ function handleHookPayload(payload, surface = readSurface(), options) {
 }
 
 function toolSafetyLabels(route) {
-  return [...new Set([...(route?.blockedBy || []), ...(route?.parallelization?.blockedReasons || [])])]
+  // Helper availability belongs to the prompt route, not every shell check.
+  // Keep actual authorization blocks, including any explicitly blocked helper.
+  return [...new Set([...(route?.blockedBy || []),
+    ...(route?.parallelization?.blockedReasons || []).filter((reason) => !String(reason).startsWith("sidecars off:"))])]
     .filter((reason) => reason !== "background_agents_disabled");
 }
 
