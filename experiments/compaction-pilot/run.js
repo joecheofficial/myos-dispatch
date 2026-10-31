@@ -9,7 +9,7 @@ const { codexExecutionSettings } = require('../../src/policy/codex-execution-pol
 const { buildCodexOauthEnv } = require('../../src/background/background-agent-runner');
 const { isUnattendedContext, backgroundAgentsDisabled } = require('../../src/env-context');
 const { makeFixtures, probePrompt } = require('./fixtures');
-const { scoreAnswer, telemetry, exposureValid, nativeExposure } = require('./metrics');
+const { scoreAnswer, telemetry, exposureValid, nativeExposure, turnFailed } = require('./metrics');
 
 const MODEL = 'gpt-6.1-sol';
 const ARMS = { default: null, '250k': 250000, '150k': 150000 };
@@ -126,7 +126,7 @@ async function runCase(options) {
     if (i >= fixture.files.length) result.probes.push(scoreAnswer(receipt.answer, fixture.expected));
     write(path.join(runDir, 'result.json'), result);
     console.log(JSON.stringify({ event: 'turn_end', name, arm, turn: i, elapsedMs: receipt.elapsedMs, compactions: result.telemetry?.compactions.length, peakInput: result.telemetry?.peakInput, score: result.probes.at(-1) }));
-    if (receipt.code !== 0 || !receipt.completed || receipt.failures.length || receipt.quotaOrAuthFailure || !session) { result.stopped = 'turn_failed'; break; }
+    if (turnFailed(receipt)) { result.stopped = 'turn_failed'; break; }
     if (!receipt.exposureValid || !receipt.nativeExposureValid) { result.stopped = 'invalid_exposure'; break; }
     if (!result.telemetry?.usage || result.telemetry.counterReset || !result.telemetry.contexts.length || result.telemetry.contexts.some(c => c.model !== MODEL || c.sandbox !== 'read-only')) { result.stopped = 'invalid_telemetry'; break; }
     if (result.probes.at(-1)?.wrong.some(k => ['release', 'resend'].includes(k))) { result.stopped = 'critical_retention_failure'; break; }

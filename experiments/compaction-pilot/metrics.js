@@ -39,4 +39,8 @@ function nativeExposure(records, text) {
   });
 }
 
-module.exports = { scoreAnswer, telemetry, exposureValid, nativeExposure };
+function turnFailed(receipt) {
+  return Boolean(receipt.timedOut || receipt.code !== 0 || !receipt.completed || receipt.failures.length || receipt.quotaOrAuthFailure || !receipt.session);
+}
+
+module.exports = { scoreAnswer, telemetry, exposureValid, nativeExposure, turnFailed };
