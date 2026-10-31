@@ -10,7 +10,7 @@ const { runCodexWorker } = require("./background/codex-worker");
 const { appendDispatcherEvent } = require("./dispatcher-memory");
 const { matchProjects } = require("./workspace-context");
 const { inferGoalScale } = require("./goal-scale");
-const { resolveWorkspaceRoot } = require("./myos-compat");
+const { canonicalHomeRoot, resolveWorkspaceRoot } = require("./myos-compat");
 const { runDataLookup } = require("./data-lookup");
 const {
   startBackgroundTasks,
@@ -95,7 +95,26 @@ function buildRecipeRoots() {
     }
   }
 
+  // An install's own local recipes (<home>/local/recipes) are indexed by the
+  // Organizer and routed by the capability router, so Jev must see them too
+  // (All Sorted support report e8bc2c56). Added last, never replaces a
+  // workspace recipe id, and only when the folder belongs to this user.
+  const local = localRecipesRoot();
+  if (local) roots.add(local);
+
   return [...roots];
+}
+
+function localRecipesRoot() {
+  const dir = path.join(path.resolve(canonicalHomeRoot()), "local", "recipes");
+  try {
+    const stat = fs.statSync(dir);
+    if (!stat.isDirectory()) return null;
+    if (typeof process.getuid === "function" && stat.uid !== process.getuid()) return null;
+    return dir;
+  } catch {
+    return null;
+  }
 }
 
 function loadRecipeManifest(filePath) {
@@ -169,6 +188,7 @@ function refreshRecipeRegistry(options = {}) {
   const useCustomRoots = Array.isArray(options.roots) && options.roots.length > 0;
   const roots = useCustomRoots ? options.roots : buildRecipeRoots();
   const files = roots.flatMap((root) => listRecipeFiles(root));
+  const localRoot = useCustomRoots ? null : localRecipesRoot();
   const recipes = [];
   const byId = new Map();
 
@@ -176,6 +196,7 @@ function refreshRecipeRegistry(options = {}) {
     try {
       const manifest = loadRecipeManifest(filePath);
       if (!manifest.id || !manifest.layer || !manifest.handler) continue;
+      if (localRoot && byId.has(manifest.id) && filePath.startsWith(localRoot + path.sep)) continue;
       recipes.push(manifest);
       byId.set(manifest.id, manifest);
     } catch (error) {
