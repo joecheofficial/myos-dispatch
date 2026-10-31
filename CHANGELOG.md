@@ -2,6 +2,14 @@
 
 All notable changes to MyOS Dispatch are documented here.
 
+## v4.4.0-rc.5 - 2026-10-31
+
+All Sorted customer line: v4.4.0-rc.4 plus the support report fixes below. It does not include later main-branch provider and writer routing work.
+
+- A provider reply that the account "does not support this model", or that the model "does not exist", is classified as an unsupported model, so the next model is tried and the refused one is quarantined. A missing local model catalog stays terminal: no retry and no quarantine.
+- Codex and Claude hooks read the same data sources. Without an explicit `MYOS_DATA_SOURCES_CONFIG`, the Dispatch home's `config/data-sources.json` (from `MYOS_HOME_ROOT` or the resolved home) comes before the checkout's own file. An explicit override, including `none`, still wins.
+- Jev sees the install's own local recipes (`<Dispatch home>/local/recipes`, from `MYOS_HOME_ROOT`, else `~/.myos`; added last, never replacing a workspace recipe id, and only when the folder belongs to this user), which the Organizer indexes and the capability router already routes.
+
 ## v4.4.0-rc.4 - 2026-10-27
 
 All Sorted customer line: v4.4.0-rc.3-allsorted-8.56 plus the owner-invocation umbrella fix (8.61) and the fixes below. It does not include later main-branch provider and writer routing work.
