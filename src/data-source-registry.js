@@ -2,7 +2,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
-const { resolveHomePath, resolveWorkspacePath } = require("./myos-compat");
+const { canonicalHomeRoot, resolveHomePath, resolveWorkspacePath } = require("./myos-compat");
 
 const DEFAULT_CONFIG_FILE = path.join(__dirname, "..", "config", "data-sources.example.json");
 const LOCAL_CONFIG_FILE = path.join(__dirname, "..", "config", "data-sources.json");
@@ -17,13 +17,28 @@ function readConfigFile(filePath) {
   }
 }
 
+function homeDataSourcesConfig(env) {
+  // Only the canonical Dispatch home (MYOS_HOME_ROOT, else ~/.myos): a legacy
+  // home's copy was never read before and must not start winning now.
+  const home = env?.MYOS_HOME_ROOT || canonicalHomeRoot();
+  const candidate = path.join(path.resolve(home), "config", "data-sources.json");
+  if (path.resolve(candidate) === path.resolve(LOCAL_CONFIG_FILE)) return null;
+  return fs.existsSync(candidate) ? candidate : null;
+}
+
 function loadDataSourcesConfig(options = {}) {
   if (options.config && typeof options.config === "object") return options.config;
 
   const override = options.env?.MYOS_DATA_SOURCES_CONFIG || process.env.MYOS_DATA_SOURCES_CONFIG;
+  // Without an explicit override, the Dispatch home's config/data-sources.json
+  // comes before the checkout's own file. Claude Code hooks get the home file
+  // through MYOS_DATA_SOURCES_CONFIG, Codex hooks only get MYOS_HOME_ROOT; both
+  // surfaces must read the same sources (All Sorted support report e8bc2c56).
+  const homeConfig = override ? null : homeDataSourcesConfig(options.env);
   const localConfig = override === "none" ? null : (override || LOCAL_CONFIG_FILE);
   const candidates = [
     options.configPath,
+    homeConfig,
     localConfig,
     DEFAULT_CONFIG_FILE,
   ].filter(Boolean);

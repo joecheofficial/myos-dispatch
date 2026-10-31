@@ -139,7 +139,12 @@ function recordFailure(state, { provider, model, stderr = "", now = Date.now(), 
   if (cleanupFailed || signal) kind = "interrupted";
   else if (/\b(?:401|403)\b|not authenticated|not logged in|login required|authentication failed/i.test(text)) kind = "auth";
   else if (/\b429\b|quota|rate.?limit|usage limit|credits|billing/i.test(text)) kind = "quota";
-  else if (/(model.{0,160}(?:not supported|unsupported|not found|unavailable)|unsupported.{0,60}model|model_not_found|issue with the selected model|may not exist or you may not have access)/i.test(text)) kind = "unsupported_model";
+  // An explicit provider refusal wins over any other line in the output.
+  else if (/(\bthe model [\w.:\/-]+ does not exist\b|does(?: not|n't) support (?:this|the requested|the selected) model\b|model_not_found|issue with the selected model|may not exist or you may not have access)/i.test(text)) kind = "unsupported_model";
+  // A missing local model catalog is a setup problem on this machine, not a
+  // model the provider refused: it stays terminal (no retry, no quarantine).
+  else if (/\b(?:local\s+)?model catalog(?: file)? (?:was )?(?:not found|missing|is missing|is unavailable|unavailable)|models_cache\.json.{0,40}(?:not found|missing|no such file)/i.test(text)) kind = "unknown";
+  else if (/(model.{0,160}(?:not supported|unsupported|not found|unavailable)|unsupported.{0,60}model)/i.test(text)) kind = "unsupported_model";
   const retryAllowed = kind === "unsupported_model";
   return {
     ...state, revision: state.revision + 1,
