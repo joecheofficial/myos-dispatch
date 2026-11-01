@@ -132,3 +132,177 @@ test("a local recipe never replaces a workspace recipe with the same id", (t) =>
     cleanEnv({ MYOS_WORKSPACE: path.join(install, "workspace"), MYOS_HOME_ROOT: install }));
   assert.equal(out.t, "Shared status");
 });
+
+// Ticket item 5 (support #17): the classifier fix is only half the contract. The
+// real background runner must move to the next model on that wording, and must
+// stop (one call, no quarantine) when this machine's model catalog is missing.
+async function runUnpinnedReadOnly(t, firstStderr) {
+  const dir = tempDir(t, "oauth-ticket5-");
+  const file = path.join(dir, "state.json");
+  const { readState, updateState } = require("../src/runtime/oauth-state");
+  const { mergeDiscovery } = require("../src/runtime/oauth-registry");
+  const { runBackgroundTask } = require("../src/background/background-agent-runner");
+  updateState(file, () => ({ ...mergeDiscovery(null, ["gpt-5.6-luna", "gpt-5.6-terra"].map(model => ({
+    provider: "codex", model, visible: true, auth: "subscription", observedAt: new Date().toISOString(),
+  }))), scannedAt: new Date().toISOString() }));
+  const calls = [];
+  const result = await runBackgroundTask({ id: "ticket5", prompt: "test", mode: "read_only", taskClass: "cheap_routing", timeoutMs: 10000 }, {
+    command: "codex", callerProvider: "codex",
+    env: { MYOS_OAUTH_LOCAL_PROVIDER_CONFIG: "/nonexistent/myos-test-provider.json", MYOS_OAUTH_REGISTRY: file, MYOS_BACKGROUND_BACKPRESSURE_ENABLED: "0" },
+    orchestratorContext: { orchestrator: "myos-dispatch", runId: "test", token: "test", parentTaskId: "root" },
+    runCommand: async ({ invocation }) => {
+      calls.push(invocation.model);
+      return calls.length === 1 ? { code: 1, stderr: firstStderr } : { code: 0, stdout: "done" };
+    },
+  });
+  return { result, calls, state: readState(file) };
+}
+
+test("the runner retries the next model when the provider does not support this model", async (t) => {
+  const { result, calls, state } = await runUnpinnedReadOnly(t, "ERROR: The provider does not support this model.");
+  assert.deepEqual(calls, ["gpt-5.6-luna", "gpt-5.6-terra"]);
+  assert.equal(result.status, "completed");
+  assert.equal(state.models.find(m => m.model === "gpt-5.6-luna").failureKind, "unsupported_model");
+});
+
+test("the runner stops on a missing local model catalog: one call, no quarantine", async (t) => {
+  for (const stderr of ["Model catalog not found for provider: openai", "Error: the model catalog does not exist",
+    "failed to read models_cache.json: No such file or directory"]) {
+    const { result, calls, state } = await runUnpinnedReadOnly(t, stderr);
+    assert.deepEqual(calls, ["gpt-5.6-luna"], stderr);
+    assert.notEqual(result.status, "completed", stderr);
+    const luna = state.models.find(m => m.model === "gpt-5.6-luna");
+    assert.equal(luna.failureKind, "unknown", stderr);
+    assert.ok(!luna.quarantineUntil, stderr);
+  }
+});
+
+test("a provider refusal next to a missing-catalog line is still a refusal", () => {
+  const { mergeDiscovery, recordFailure } = require("../src/runtime/oauth-registry");
+  const state = mergeDiscovery(null, [{ provider: "codex", model: "gpt-x", visible: true, auth: "subscription", observedAt: now }]);
+  const failed = recordFailure(state, { provider: "codex", model: "gpt-x",
+    stderr: "warn: model catalog not found\nERROR: The provider does not support this model." });
+  assert.equal(failed.lastFailure.kind, "unsupported_model");
+  assert.equal(failed.lastFailure.retryAllowed, true);
+});
+
+// Ticket item 7 (support #17): a per-surface check. It rebuilds each hook's
+// environment from its saved registration and resolves with that checkout.
+function surfaceFixture(t, { claudeEnv = {}, codexHome = null, withCodex = true } = {}) {
+  const dir = tempDir(t, "ds-surfaces-");
+  const hook = path.join(ROOT, "bin", "myos-dispatch-hook");
+  const claudeSettings = path.join(dir, "claude-settings.json");
+  const codexHooks = path.join(dir, "codex-hooks.json");
+  fs.writeFileSync(claudeSettings, JSON.stringify({ env: claudeEnv, hooks: {
+    UserPromptSubmit: [{ hooks: [{ type: "command", command: `"${process.execPath}" "${hook}" --surface=claude` }] }],
+    PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: `"${process.execPath}" "${hook}" --surface=claude` }] }],
+  } }));
+  const codexCommand = codexHome
+    ? `"${process.execPath}" "${path.join(ROOT, "scripts", "register-hook.js")}" --run-hook "${hook}" --surface=codex --home "${codexHome}"`
+    : `"${process.execPath}" "${hook}" --surface=codex`;
+  fs.writeFileSync(codexHooks, JSON.stringify(withCodex ? { hooks: { UserPromptSubmit: [{ hooks: [{ type: "command", command: codexCommand }] }] } } : {}));
+  return { dir, claudeSettings, codexHooks };
+}
+
+function writeSources(file, ids) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ version: 1, dataSources: ids.map((id) => ({ id, mode: "content", path: "/nonexistent" })) }));
+}
+
+function runCheck(fixture) {
+  const result = spawnSync(process.execPath, [path.join(ROOT, "scripts", "check-data-sources-config.js"), "--json",
+    "--claude-settings", fixture.claudeSettings, "--codex-hooks", fixture.codexHooks], { cwd: fixture.dir, env: cleanEnv({ HOME: fixture.dir }), encoding: "utf8" });
+  return { code: result.status, report: JSON.parse(result.stdout) };
+}
+
+test("data-sources check fails when the Claude and Codex hooks read different files", (t) => {
+  const probe = surfaceFixture(t);
+  const home = path.join(probe.dir, "install");
+  const claudeFile = path.join(probe.dir, "elsewhere", "data-sources.json");
+  writeSources(path.join(home, "config", "data-sources.json"), ["home-source"]);
+  writeSources(claudeFile, ["claude-only-source"]);
+  const fixture = surfaceFixture(t, { claudeEnv: { MYOS_DATA_SOURCES_CONFIG: claudeFile }, codexHome: home });
+  const { code, report } = runCheck(fixture);
+  assert.equal(code, 1, JSON.stringify(report));
+  assert.equal(report.status, "FAIL");
+  const [claude, codex] = report.surfaces;
+  assert.equal(claude.file, claudeFile);
+  assert.equal(claude.origin, "MYOS_DATA_SOURCES_CONFIG");
+  assert.equal(codex.file, path.join(home, "config", "data-sources.json"));
+  assert.equal(codex.origin, "home");
+  // Contents are never printed, only paths, origins and a hash.
+  assert.ok(!JSON.stringify(report).includes("home-source"));
+});
+
+test("data-sources check passes when both hooks resolve the same file (All Sorted wiring)", (t) => {
+  const probe = surfaceFixture(t);
+  const home = path.join(probe.dir, "install");
+  const file = path.join(home, "config", "data-sources.json");
+  writeSources(file, ["install-source"]);
+  const fixture = surfaceFixture(t, { claudeEnv: { MYOS_DATA_SOURCES_CONFIG: file }, codexHome: home });
+  const { code, report } = runCheck(fixture);
+  assert.equal(code, 0, JSON.stringify(report));
+  assert.equal(report.status, "PASS");
+  assert.equal(report.surfaces[0].file, file);
+  assert.equal(report.surfaces[1].file, file);
+});
+
+test("data-sources check skips when only one surface has a Dispatch hook", (t) => {
+  const { code, report } = runCheck(surfaceFixture(t, { withCodex: false }));
+  assert.equal(code, 0);
+  assert.equal(report.status, "SKIPPED");
+});
+
+test("resolveDataSourcesConfig reports the file and origin loadDataSourcesConfig uses", (t) => {
+  const home = tempDir(t, "ds-resolve-");
+  const file = path.join(home, "config", "data-sources.json");
+  writeSources(file, ["resolved-home-source"]);
+  const script = "const r=require('./src/data-source-registry');const x=r.resolveDataSourcesConfig();console.log(JSON.stringify({file:x.file,origin:x.origin,same:JSON.stringify(x.config)===JSON.stringify(r.loadDataSourcesConfig())}))";
+  assert.deepEqual(runNode(script, cleanEnv({ MYOS_HOME_ROOT: home })), { file, origin: "home", same: true });
+  // An override that cannot be read never falls back to the checkout's file.
+  const missing = runNode(script, cleanEnv({ MYOS_HOME_ROOT: home, MYOS_DATA_SOURCES_CONFIG: path.join(home, "missing.json") }));
+  assert.equal(missing.origin, "example");
+});
+
+test("real provider refusal wording: quoted ids, broad wording beside a catalog warning, no mid-phrase match", () => {
+  const { mergeDiscovery, recordFailure } = require("../src/runtime/oauth-registry");
+  const state = mergeDiscovery(null, [{ provider: "codex", model: "gpt-x", visible: true, auth: "subscription", observedAt: now }]);
+  const kind = (stderr) => recordFailure(state, { provider: "codex", model: "gpt-x", stderr }).lastFailure.kind;
+  assert.equal(kind("The model `gpt-x` does not exist or you do not have access to it."), "unsupported_model");
+  assert.equal(kind("the model 'gpt-x' does not exist"), "unsupported_model");
+  assert.equal(kind("WARN failed to load models_cache.json: No such file or directory\nERROR: The gpt-5.6-terra model is not supported when using Codex with a ChatGPT account."), "unsupported_model");
+  assert.equal(kind("does not support this model for ChatGPT accounts"), "unsupported_model");
+  assert.notEqual(kind("This plugin does not support this model feature"), "unsupported_model");
+  assert.notEqual(kind("This tool does not support the selected model's tools"), "unsupported_model");
+  assert.equal(kind("Error: this account doesn't support the requested model (gpt-x)"), "unsupported_model");
+});
+
+test("data-sources check reports a corrupt registration as an error, not a skip", (t) => {
+  const fixture = surfaceFixture(t, { codexHome: "/nonexistent-home" });
+  fs.writeFileSync(fixture.codexHooks, "{ not json");
+  const { code, report } = runCheck(fixture);
+  assert.equal(code, 1);
+  assert.equal(report.status, "FAIL");
+  assert.match(report.surfaces[1].error, /cannot read/);
+});
+
+test("data-sources check fails when one config resolves <myos-home> sources to different homes", (t) => {
+  const probe = surfaceFixture(t);
+  const file = path.join(probe.dir, "shared", "data-sources.json");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ version: 1, dataSources: [{ id: "home-notes", mode: "content", path: "<myos-home>/notes" }] }));
+  const claudeHome = path.join(probe.dir, "claude-home");
+  const codexHome = path.join(probe.dir, "codex-home");
+  for (const dir of [claudeHome, codexHome]) fs.mkdirSync(path.join(dir, "notes"), { recursive: true });
+  // The Codex wrapper is written without --home here; MYOS_DATA_SOURCES_CONFIG and
+  // MYOS_HOME_ROOT come from an env prefix, the other registration shape.
+  const fixture = surfaceFixture(t, { claudeEnv: { MYOS_DATA_SOURCES_CONFIG: file, MYOS_HOME_ROOT: claudeHome } });
+  const hook = path.join(ROOT, "bin", "myos-dispatch-hook");
+  fs.writeFileSync(fixture.codexHooks, JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ type: "command",
+    command: `env MYOS_HOME_ROOT="${codexHome}" MYOS_DATA_SOURCES_CONFIG="${file}" "${process.execPath}" "${hook}" --surface=codex` }] }] } }));
+  const { code, report } = runCheck(fixture);
+  assert.equal(code, 1, JSON.stringify(report));
+  assert.equal(report.status, "FAIL");
+  assert.equal(report.surfaces[0].file, report.surfaces[1].file);
+  assert.match(report.detail, /resolve to different places/);
+});
