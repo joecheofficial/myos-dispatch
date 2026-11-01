@@ -133,7 +133,13 @@ function selectModels(state, { provider, taskClass, now = Date.now(), policy } =
 // Provider wording that refuses the selected model ("does not support this
 // model", "the model x does not exist", Claude's "issue with the selected
 // model"). A refusal allows one retry with the next model.
-const PROVIDER_REFUSAL_RE = /(\bthe model (?!catalog\b)[\w.:\/-]+ does not exist\b|does(?: not|n't) support (?:this|the requested|the selected) model\b|model_not_found|issue with the selected model|may not exist or you may not have access)/i;
+// OpenAI quotes the id ("The model `gpt-x` does not exist or you do not have
+// access to it."), so optional quotes or backticks surround it.
+const PROVIDER_REFUSAL_RE = /(\bthe model (?![`'"]?catalog\b)[`'"]?[\w.:\/-]+[`'"]? does not exist\b|does(?: not|n't) support (?:this|the requested|the selected) model(?=\s*(?:$|[.,;:!?)\]"'`]|(?:for|with|on|in|when|under|via)\b))|model_not_found|issue with the selected model|may not exist or you may not have access)/i;
+// Broader refusal wording ("The gpt-x model is not supported when using Codex
+// with a ChatGPT account"), checked last because it is loose.
+const BROAD_REFUSAL_RE = /(model.{0,160}(?:not supported|unsupported|not found|unavailable)|unsupported.{0,60}model)/i;
+const isRefusal = (value) => PROVIDER_REFUSAL_RE.test(value) || BROAD_REFUSAL_RE.test(value);
 // This machine's model catalog (Dispatch model-catalog.local.json, Codex
 // models_cache.json) is missing or unreadable.
 const LOCAL_CATALOG_MISSING_SOURCE = String.raw`\b(?:local\s+)?model[- ]catalog(?:\.local\.json)?(?: file)?(?: for provider:? [\w.-]+)?(?: [^\s:]+)? (?:was |is )?(?:not found|missing|unavailable|does not exist)|(?:model-catalog\.local|models_cache)\.json.{0,40}(?:not found|missing|no such file|does not exist|ENOENT)`;
@@ -150,10 +156,10 @@ function recordFailure(state, { provider, model, stderr = "", now = Date.now(), 
   // model the provider refused: it stays terminal (no retry, no quarantine).
   // It is checked first so "the model catalog does not exist" is never read as
   // a refusal; a real refusal elsewhere in the same output still wins.
-  else if (LOCAL_CATALOG_MISSING_RE.test(text) && !PROVIDER_REFUSAL_RE.test(text.replace(LOCAL_CATALOG_MISSING_GLOBAL_RE, " "))) kind = "unknown";
+  else if (LOCAL_CATALOG_MISSING_RE.test(text) && !isRefusal(text.replace(LOCAL_CATALOG_MISSING_GLOBAL_RE, " "))) kind = "unknown";
   // An explicit provider refusal wins over any other line in the output.
   else if (PROVIDER_REFUSAL_RE.test(text)) kind = "unsupported_model";
-  else if (/(model.{0,160}(?:not supported|unsupported|not found|unavailable)|unsupported.{0,60}model)/i.test(text)) kind = "unsupported_model";
+  else if (BROAD_REFUSAL_RE.test(text)) kind = "unsupported_model";
   const retryAllowed = kind === "unsupported_model";
   return {
     ...state, revision: state.revision + 1,

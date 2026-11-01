@@ -263,3 +263,44 @@ test("resolveDataSourcesConfig reports the file and origin loadDataSourcesConfig
   const missing = runNode(script, cleanEnv({ MYOS_HOME_ROOT: home, MYOS_DATA_SOURCES_CONFIG: path.join(home, "missing.json") }));
   assert.equal(missing.origin, "example");
 });
+
+test("real provider refusal wording: quoted ids, broad wording beside a catalog warning, no mid-phrase match", () => {
+  const { mergeDiscovery, recordFailure } = require("../src/runtime/oauth-registry");
+  const state = mergeDiscovery(null, [{ provider: "codex", model: "gpt-x", visible: true, auth: "subscription", observedAt: now }]);
+  const kind = (stderr) => recordFailure(state, { provider: "codex", model: "gpt-x", stderr }).lastFailure.kind;
+  assert.equal(kind("The model `gpt-x` does not exist or you do not have access to it."), "unsupported_model");
+  assert.equal(kind("the model 'gpt-x' does not exist"), "unsupported_model");
+  assert.equal(kind("WARN failed to load models_cache.json: No such file or directory\nERROR: The gpt-5.6-terra model is not supported when using Codex with a ChatGPT account."), "unsupported_model");
+  assert.equal(kind("does not support this model for ChatGPT accounts"), "unsupported_model");
+  assert.notEqual(kind("This plugin does not support this model feature"), "unsupported_model");
+});
+
+test("data-sources check reports a corrupt registration as an error, not a skip", (t) => {
+  const fixture = surfaceFixture(t, { codexHome: "/nonexistent-home" });
+  fs.writeFileSync(fixture.codexHooks, "{ not json");
+  const { code, report } = runCheck(fixture);
+  assert.equal(code, 1);
+  assert.equal(report.status, "FAIL");
+  assert.match(report.surfaces[1].error, /cannot read/);
+});
+
+test("data-sources check fails when one config resolves <myos-home> sources to different homes", (t) => {
+  const probe = surfaceFixture(t);
+  const file = path.join(probe.dir, "shared", "data-sources.json");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ version: 1, dataSources: [{ id: "home-notes", mode: "content", path: "<myos-home>/notes" }] }));
+  const claudeHome = path.join(probe.dir, "claude-home");
+  const codexHome = path.join(probe.dir, "codex-home");
+  for (const dir of [claudeHome, codexHome]) fs.mkdirSync(path.join(dir, "notes"), { recursive: true });
+  // The Codex wrapper is written without --home here; MYOS_DATA_SOURCES_CONFIG and
+  // MYOS_HOME_ROOT come from an env prefix, the other registration shape.
+  const fixture = surfaceFixture(t, { claudeEnv: { MYOS_DATA_SOURCES_CONFIG: file, MYOS_HOME_ROOT: claudeHome } });
+  const hook = path.join(ROOT, "bin", "myos-dispatch-hook");
+  fs.writeFileSync(fixture.codexHooks, JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ type: "command",
+    command: `env MYOS_HOME_ROOT="${codexHome}" MYOS_DATA_SOURCES_CONFIG="${file}" "${process.execPath}" "${hook}" --surface=codex` }] }] } }));
+  const { code, report } = runCheck(fixture);
+  assert.equal(code, 1, JSON.stringify(report));
+  assert.equal(report.status, "FAIL");
+  assert.equal(report.surfaces[0].file, report.surfaces[1].file);
+  assert.match(report.detail, /resolve to different places/);
+});
