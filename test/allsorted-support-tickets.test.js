@@ -132,3 +132,56 @@ test("a local recipe never replaces a workspace recipe with the same id", (t) =>
     cleanEnv({ MYOS_WORKSPACE: path.join(install, "workspace"), MYOS_HOME_ROOT: install }));
   assert.equal(out.t, "Shared status");
 });
+
+// Ticket item 5 (support #17): the classifier fix is only half the contract. The
+// real background runner must move to the next model on that wording, and must
+// stop (one call, no quarantine) when this machine's model catalog is missing.
+async function runUnpinnedReadOnly(t, firstStderr) {
+  const dir = tempDir(t, "oauth-ticket5-");
+  const file = path.join(dir, "state.json");
+  const { readState, updateState } = require("../src/runtime/oauth-state");
+  const { mergeDiscovery } = require("../src/runtime/oauth-registry");
+  const { runBackgroundTask } = require("../src/background/background-agent-runner");
+  updateState(file, () => ({ ...mergeDiscovery(null, ["gpt-5.6-luna", "gpt-5.6-terra"].map(model => ({
+    provider: "codex", model, visible: true, auth: "subscription", observedAt: new Date().toISOString(),
+  }))), scannedAt: new Date().toISOString() }));
+  const calls = [];
+  const result = await runBackgroundTask({ id: "ticket5", prompt: "test", mode: "read_only", taskClass: "cheap_routing", timeoutMs: 10000 }, {
+    command: "codex", callerProvider: "codex",
+    env: { MYOS_OAUTH_LOCAL_PROVIDER_CONFIG: "/nonexistent/myos-test-provider.json", MYOS_OAUTH_REGISTRY: file, MYOS_BACKGROUND_BACKPRESSURE_ENABLED: "0" },
+    orchestratorContext: { orchestrator: "myos-dispatch", runId: "test", token: "test", parentTaskId: "root" },
+    runCommand: async ({ invocation }) => {
+      calls.push(invocation.model);
+      return calls.length === 1 ? { code: 1, stderr: firstStderr } : { code: 0, stdout: "done" };
+    },
+  });
+  return { result, calls, state: readState(file) };
+}
+
+test("the runner retries the next model when the provider does not support this model", async (t) => {
+  const { result, calls, state } = await runUnpinnedReadOnly(t, "ERROR: The provider does not support this model.");
+  assert.deepEqual(calls, ["gpt-5.6-luna", "gpt-5.6-terra"]);
+  assert.equal(result.status, "completed");
+  assert.equal(state.models.find(m => m.model === "gpt-5.6-luna").failureKind, "unsupported_model");
+});
+
+test("the runner stops on a missing local model catalog: one call, no quarantine", async (t) => {
+  for (const stderr of ["Model catalog not found for provider: openai", "Error: the model catalog does not exist",
+    "failed to read models_cache.json: No such file or directory"]) {
+    const { result, calls, state } = await runUnpinnedReadOnly(t, stderr);
+    assert.deepEqual(calls, ["gpt-5.6-luna"], stderr);
+    assert.notEqual(result.status, "completed", stderr);
+    const luna = state.models.find(m => m.model === "gpt-5.6-luna");
+    assert.equal(luna.failureKind, "unknown", stderr);
+    assert.ok(!luna.quarantineUntil, stderr);
+  }
+});
+
+test("a provider refusal next to a missing-catalog line is still a refusal", () => {
+  const { mergeDiscovery, recordFailure } = require("../src/runtime/oauth-registry");
+  const state = mergeDiscovery(null, [{ provider: "codex", model: "gpt-x", visible: true, auth: "subscription", observedAt: now }]);
+  const failed = recordFailure(state, { provider: "codex", model: "gpt-x",
+    stderr: "warn: model catalog not found\nERROR: The provider does not support this model." });
+  assert.equal(failed.lastFailure.kind, "unsupported_model");
+  assert.equal(failed.lastFailure.retryAllowed, true);
+});
