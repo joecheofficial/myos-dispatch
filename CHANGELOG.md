@@ -2,6 +2,14 @@
 
 All notable changes to MyOS Dispatch are documented here.
 
+## v4.4.0-rc.6 - 2026-11-01
+
+All Sorted customer line: v4.4.0-rc.5 plus the support #17/#18 fixes below. It does not include later main-branch provider and writer routing work.
+
+- Owner-invocation routing tests carry their own read-only Doctor manifests. The "yields to a worker capability" test no longer passes for the wrong reason in a clean home, and a new test runs the router with `MYOS_HOME_ROOT` on an install whose workspace has conflicting, mutating Doctor manifests (the customer refresh environment): the manifests beside the explicit index still win.
+- A missing local model catalog ("Model catalog not found", "the model catalog does not exist", a missing `models_cache.json`) is never read as a model refusal: one call, no retry, no quarantine. A real refusal in the same output still retries the next model, including OpenAI's quoted wording (``The model `x` does not exist``) and "is not supported when using Codex". "does not support this model feature" or "the selected model's tools" is not a refusal.
+- Data sources resolve through one function, `resolveDataSourcesConfig`, which also reports the chosen file and why (option, `MYOS_DATA_SOURCES_CONFIG`, home, checkout, example). New `scripts/check-data-sources-config.js` rebuilds the Claude hook and Codex hook environments from their saved registrations and fails when they read different data, or when one config resolves its sources to different places. It prints paths, origins and hashes only.
+
 ## v4.4.0-rc.5 - 2026-10-31
 
 All Sorted customer line: v4.4.0-rc.4 plus the support report fixes below. It does not include later main-branch provider and writer routing work.
