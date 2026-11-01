@@ -377,9 +377,18 @@ test('regression: owner invocation yields to a worker capability that clearly ou
     description: 'run the doctor', aliases: ['run the doctor', 'the doctor tv series', 'doctor episodes'], use_when: ['run the doctor'], priority: 100 });
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'issue8-index-'));
   try {
+    // The copied index must still find the fixture's read-only Doctor manifests
+    // (support #17/#18 item 4). Without them no recipe is read-only, owner
+    // invocation never engages, and this assertion passed for the wrong reason
+    // in a clean home while depending on whatever recipes this machine has.
+    fs.cpSync(path.join(FIXTURE, 'workspace/agents'), path.join(tmp, 'agents'), { recursive: true });
     fs.writeFileSync(path.join(tmp, 'capabilities-index.json'), JSON.stringify(index));
+    const control = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
+    fs.writeFileSync(path.join(tmp, 'control-index.json'), JSON.stringify(control));
+    assert.equal(selectExecutionLane('run the doctor', { indexPath: path.join(tmp, 'control-index.json') }).reason, 'owner_recipe_invocation');
     const route = selectExecutionLane('run the doctor', { indexPath: path.join(tmp, 'capabilities-index.json') });
     assert.notEqual(route.reason, 'owner_recipe_invocation', `${route.lane} ${route.reason}`);
+    assert.equal(route.lane, 'worker_skill', `${route.lane} ${route.reason}`);
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });
 
@@ -399,6 +408,33 @@ test('regression: owner invocation reads manifests beside an explicit index in a
   const route = JSON.parse(result.stdout);
   assert.equal(route.reason, 'owner_recipe_invocation', `${route.lane} ${route.reason}`);
   assert.ok(route.candidates.every(entry => /doctor/.test(entry.capability.id)));
+});
+
+// The customer refresh runs the suite with MYOS_HOME_ROOT set to the install
+// (support #17/#18 item 4). That install's workspace can carry its own, locally
+// patched Doctor recipes at the same source paths. The fixture's manifests
+// beside the explicit index must still win, so the route never depends on the
+// installed copy.
+test('regression: owner invocation ignores an install workspace with conflicting manifests', (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'issue8-install-home-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const installRecipes = path.join(tmp, 'install', 'workspace', 'agents', 'doctor', 'recipes');
+  fs.mkdirSync(installRecipes, { recursive: true });
+  const fixtureRecipes = path.join(FIXTURE, 'workspace', 'agents', 'doctor', 'recipes');
+  for (const name of fs.readdirSync(fixtureRecipes).filter(file => file.endsWith('.recipe.json'))) {
+    const manifest = JSON.parse(fs.readFileSync(path.join(fixtureRecipes, name), 'utf8'));
+    fs.writeFileSync(path.join(installRecipes, name), JSON.stringify({ ...manifest, readOnly: false, tags: [],
+      safety: { destructive: true, rule: 'changes the install' }, actions: ['delete'] }));
+  }
+  const indexPath = path.join(FIXTURE, 'workspace/capabilities-index.json');
+  const script = `const { selectExecutionLane } = require(${JSON.stringify(path.resolve(__dirname, '../src/capability-router'))});
+    process.stdout.write(JSON.stringify(selectExecutionLane('run the doctor', { indexPath: ${JSON.stringify(indexPath)} })));`;
+  const result = spawnSync(process.execPath, ['-e', script], {
+    env: { PATH: process.env.PATH, HOME: path.join(tmp, 'home'), MYOS_HOME_ROOT: path.join(tmp, 'install') }, cwd: tmp, encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const route = JSON.parse(result.stdout);
+  assert.equal(route.reason, 'owner_recipe_invocation', `${route.lane} ${route.reason}`);
 });
 
 // Live-index shape (Joe's machine, 2026-10-22): the owner's own umbrella agent
