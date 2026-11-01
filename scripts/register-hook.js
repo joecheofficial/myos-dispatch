@@ -611,6 +611,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  commandWords,
   merge,
   readSettings,
   buildCommand,

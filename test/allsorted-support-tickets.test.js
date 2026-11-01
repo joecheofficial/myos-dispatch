@@ -185,3 +185,81 @@ test("a provider refusal next to a missing-catalog line is still a refusal", () 
   assert.equal(failed.lastFailure.kind, "unsupported_model");
   assert.equal(failed.lastFailure.retryAllowed, true);
 });
+
+// Ticket item 7 (support #17): a per-surface check. It rebuilds each hook's
+// environment from its saved registration and resolves with that checkout.
+function surfaceFixture(t, { claudeEnv = {}, codexHome = null, withCodex = true } = {}) {
+  const dir = tempDir(t, "ds-surfaces-");
+  const hook = path.join(ROOT, "bin", "myos-dispatch-hook");
+  const claudeSettings = path.join(dir, "claude-settings.json");
+  const codexHooks = path.join(dir, "codex-hooks.json");
+  fs.writeFileSync(claudeSettings, JSON.stringify({ env: claudeEnv, hooks: {
+    UserPromptSubmit: [{ hooks: [{ type: "command", command: `"${process.execPath}" "${hook}" --surface=claude` }] }],
+    PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: `"${process.execPath}" "${hook}" --surface=claude` }] }],
+  } }));
+  const codexCommand = codexHome
+    ? `"${process.execPath}" "${path.join(ROOT, "scripts", "register-hook.js")}" --run-hook "${hook}" --surface=codex --home "${codexHome}"`
+    : `"${process.execPath}" "${hook}" --surface=codex`;
+  fs.writeFileSync(codexHooks, JSON.stringify(withCodex ? { hooks: { UserPromptSubmit: [{ hooks: [{ type: "command", command: codexCommand }] }] } } : {}));
+  return { dir, claudeSettings, codexHooks };
+}
+
+function writeSources(file, ids) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ version: 1, dataSources: ids.map((id) => ({ id, mode: "content", path: "/nonexistent" })) }));
+}
+
+function runCheck(fixture) {
+  const result = spawnSync(process.execPath, [path.join(ROOT, "scripts", "check-data-sources-config.js"), "--json",
+    "--claude-settings", fixture.claudeSettings, "--codex-hooks", fixture.codexHooks], { cwd: fixture.dir, env: cleanEnv({ HOME: fixture.dir }), encoding: "utf8" });
+  return { code: result.status, report: JSON.parse(result.stdout) };
+}
+
+test("data-sources check fails when the Claude and Codex hooks read different files", (t) => {
+  const probe = surfaceFixture(t);
+  const home = path.join(probe.dir, "install");
+  const claudeFile = path.join(probe.dir, "elsewhere", "data-sources.json");
+  writeSources(path.join(home, "config", "data-sources.json"), ["home-source"]);
+  writeSources(claudeFile, ["claude-only-source"]);
+  const fixture = surfaceFixture(t, { claudeEnv: { MYOS_DATA_SOURCES_CONFIG: claudeFile }, codexHome: home });
+  const { code, report } = runCheck(fixture);
+  assert.equal(code, 1, JSON.stringify(report));
+  assert.equal(report.status, "FAIL");
+  const [claude, codex] = report.surfaces;
+  assert.equal(claude.file, claudeFile);
+  assert.equal(claude.origin, "MYOS_DATA_SOURCES_CONFIG");
+  assert.equal(codex.file, path.join(home, "config", "data-sources.json"));
+  assert.equal(codex.origin, "home");
+  // Contents are never printed, only paths, origins and a hash.
+  assert.ok(!JSON.stringify(report).includes("home-source"));
+});
+
+test("data-sources check passes when both hooks resolve the same file (All Sorted wiring)", (t) => {
+  const probe = surfaceFixture(t);
+  const home = path.join(probe.dir, "install");
+  const file = path.join(home, "config", "data-sources.json");
+  writeSources(file, ["install-source"]);
+  const fixture = surfaceFixture(t, { claudeEnv: { MYOS_DATA_SOURCES_CONFIG: file }, codexHome: home });
+  const { code, report } = runCheck(fixture);
+  assert.equal(code, 0, JSON.stringify(report));
+  assert.equal(report.status, "PASS");
+  assert.equal(report.surfaces[0].file, file);
+  assert.equal(report.surfaces[1].file, file);
+});
+
+test("data-sources check skips when only one surface has a Dispatch hook", (t) => {
+  const { code, report } = runCheck(surfaceFixture(t, { withCodex: false }));
+  assert.equal(code, 0);
+  assert.equal(report.status, "SKIPPED");
+});
+
+test("resolveDataSourcesConfig reports the file and origin loadDataSourcesConfig uses", (t) => {
+  const home = tempDir(t, "ds-resolve-");
+  const file = path.join(home, "config", "data-sources.json");
+  writeSources(file, ["resolved-home-source"]);
+  const script = "const r=require('./src/data-source-registry');const x=r.resolveDataSourcesConfig();console.log(JSON.stringify({file:x.file,origin:x.origin,same:JSON.stringify(x.config)===JSON.stringify(r.loadDataSourcesConfig())}))";
+  assert.deepEqual(runNode(script, cleanEnv({ MYOS_HOME_ROOT: home })), { file, origin: "home", same: true });
+  // An override that cannot be read never falls back to the checkout's file.
+  const missing = runNode(script, cleanEnv({ MYOS_HOME_ROOT: home, MYOS_DATA_SOURCES_CONFIG: path.join(home, "missing.json") }));
+  assert.equal(missing.origin, "example");
+});
