@@ -138,7 +138,7 @@ function selectModels(state, { provider, taskClass, now = Date.now(), policy } =
 // model"). A refusal allows one retry with the next model.
 // OpenAI quotes the id ("The model `gpt-x` does not exist or you do not have
 // access to it."), so optional quotes or backticks surround it.
-const PROVIDER_REFUSAL_RE = /(\bthe model (?![`'"]?catalog\b)[`'"]?[\w.:\/-]+[`'"]? does not exist\b|does(?: not|n't) support (?:this|the requested|the selected) model(?=\s*(?:$|[.,;:!?)\]"'`]|(?:for|with|on|in|when|under|via)\b))|model_not_found|issue with the selected model|may not exist or you may not have access)/i;
+const PROVIDER_REFUSAL_RE = /(\bthe model (?![`'"]?catalog\b)[`'"]?[\w.:\/-]+[`'"]? does not exist\b|does(?: not|n't) support (?:this|the requested|the selected) model(?=\s*(?:$|[.,;:!?()\]"`]|(?:for|with|on|in|when|under|via)\b))|model_not_found|issue with the selected model|may not exist or you may not have access)/i;
 // Broader refusal wording ("The gpt-x model is not supported when using Codex
 // with a ChatGPT account"), checked last because it is loose.
 const BROAD_REFUSAL_RE = /(model.{0,160}(?:not supported|unsupported|not found|unavailable)|unsupported.{0,60}model)/i;

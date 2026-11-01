@@ -273,6 +273,8 @@ test("real provider refusal wording: quoted ids, broad wording beside a catalog 
   assert.equal(kind("WARN failed to load models_cache.json: No such file or directory\nERROR: The gpt-5.6-terra model is not supported when using Codex with a ChatGPT account."), "unsupported_model");
   assert.equal(kind("does not support this model for ChatGPT accounts"), "unsupported_model");
   assert.notEqual(kind("This plugin does not support this model feature"), "unsupported_model");
+  assert.notEqual(kind("This tool does not support the selected model's tools"), "unsupported_model");
+  assert.equal(kind("Error: this account doesn't support the requested model (gpt-x)"), "unsupported_model");
 });
 
 test("data-sources check reports a corrupt registration as an error, not a skip", (t) => {
