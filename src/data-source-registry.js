@@ -1,6 +1,7 @@
 "use strict";
 
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const { canonicalHomeRoot, resolveHomePath, resolveWorkspacePath } = require("./myos-compat");
 
@@ -17,38 +18,42 @@ function readConfigFile(filePath) {
   }
 }
 
-function homeDataSourcesConfig(env) {
-  // Only the canonical Dispatch home (MYOS_HOME_ROOT, else ~/.myos): a legacy
-  // home's copy was never read before and must not start winning now.
-  const home = env?.MYOS_HOME_ROOT || canonicalHomeRoot();
-  const candidate = path.join(path.resolve(home), "config", "data-sources.json");
-  if (path.resolve(candidate) === path.resolve(LOCAL_CONFIG_FILE)) return null;
-  return fs.existsSync(candidate) ? candidate : null;
+// One resolver for every surface. The Claude Code hook and the Codex hook
+// (register-hook.js --run-hook) see different environments: Claude settings may
+// carry MYOS_DATA_SOURCES_CONFIG, the Codex wrapper only sets MYOS_HOME_ROOT.
+// Order, first readable file wins:
+//   1. options.configPath (callers and tests)
+//   2. MYOS_DATA_SOURCES_CONFIG; when it is set (or "none"), 3 and 4 are skipped
+//   3. <Dispatch home>/config/data-sources.json, home = MYOS_HOME_ROOT, else
+//      ~/.myos (a legacy home's copy was never read and must not start winning)
+//   4. this checkout's config/data-sources.json
+//   5. config/data-sources.example.json
+// `inherit: false` resolves for an environment other than this process's (the
+// per-surface check in scripts/check-data-sources-config.js).
+function resolveDataSourcesConfig(options = {}) {
+  const inherit = options.inherit !== false;
+  const read = (key) => options.env?.[key] || (inherit ? process.env[key] : undefined) || "";
+  const override = read("MYOS_DATA_SOURCES_CONFIG");
+  const homeRoot = read("MYOS_HOME_ROOT")
+    || (inherit ? canonicalHomeRoot() : path.join(read("HOME") || os.homedir(), ".myos"));
+  const homeFile = path.join(path.resolve(homeRoot), "config", "data-sources.json");
+  const candidates = [
+    options.configPath ? { file: options.configPath, origin: "option" } : null,
+    override && override !== "none" ? { file: override, origin: "MYOS_DATA_SOURCES_CONFIG" } : null,
+    !override && path.resolve(homeFile) !== path.resolve(LOCAL_CONFIG_FILE) ? { file: homeFile, origin: "home" } : null,
+    override ? null : { file: LOCAL_CONFIG_FILE, origin: "checkout" },
+    { file: DEFAULT_CONFIG_FILE, origin: "example" },
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    const config = readConfigFile(candidate.file);
+    if (config) return { file: path.resolve(candidate.file), origin: candidate.origin, config, homeRoot: path.resolve(homeRoot), override: override || null };
+  }
+  return { file: null, origin: "empty", config: { version: 1, dataSources: [] }, homeRoot: path.resolve(homeRoot), override: override || null };
 }
 
 function loadDataSourcesConfig(options = {}) {
   if (options.config && typeof options.config === "object") return options.config;
-
-  const override = options.env?.MYOS_DATA_SOURCES_CONFIG || process.env.MYOS_DATA_SOURCES_CONFIG;
-  // Without an explicit override, the Dispatch home's config/data-sources.json
-  // comes before the checkout's own file. Claude Code hooks get the home file
-  // through MYOS_DATA_SOURCES_CONFIG, Codex hooks only get MYOS_HOME_ROOT; both
-  // surfaces must read the same sources (All Sorted support report e8bc2c56).
-  const homeConfig = override ? null : homeDataSourcesConfig(options.env);
-  const localConfig = override === "none" ? null : (override || LOCAL_CONFIG_FILE);
-  const candidates = [
-    options.configPath,
-    homeConfig,
-    localConfig,
-    DEFAULT_CONFIG_FILE,
-  ].filter(Boolean);
-
-  for (const candidate of candidates) {
-    const parsed = readConfigFile(candidate);
-    if (parsed) return parsed;
-  }
-
-  return { version: 1, dataSources: [] };
+  return resolveDataSourcesConfig(options).config;
 }
 
 function resolveConfiguredPath(entry = {}) {
@@ -222,6 +227,7 @@ module.exports = {
   getDataSourceFastpathTemplate,
   getPreferOverProjectSources,
   loadDataSourcesConfig,
+  resolveDataSourcesConfig,
   matchesWorkerFollowup,
   readConfiguredTextSource,
   resolveConfiguredPath,
