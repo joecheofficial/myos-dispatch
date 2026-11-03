@@ -66,7 +66,10 @@ const PLURAL_SCOPE = "modules|installs|services|apps|repos|repositories|projects
 const PHRASE_END = "(?=\\s*(?:$|[.,;:!?\\n)]|(?:to|in|into|from|with|for|on|onto|using|and|then|so|over|across|by|end)\\b))";
 const SCOPE_VERBS = "build|rebuild|rewrite|overhaul|refactor|migrate|port|convert|redesign|upgrade";
 const AUTHORING_VERBS = "write|create|develop";
-const INSTRUCTION_PREFIX_RE = /(?:^|[.!?;:,\n]\s*|\b(?:please|can you|could you|would you|will you|i want you to|i need you to|go ahead and|let'?s|then|and|ok|okay|now|so|just|you|we'?ll|we will|we'?re going to|we are going to|we need to|you need to|you should|you can)\s+|(?:^|\s)(?:@[a-z0-9_-]+|claude|codex|ultragoal|ralph)[,:]?\s+)$/;
+// "You ..." addresses the assistant only at the start of a clause: "you keep
+// going until it's done" is an instruction, "when you keep going until
+// everything is done you burn my tokens" is a complaint.
+const INSTRUCTION_PREFIX_RE = /(?:^|[.!?;:,\n]\s*|(?:^|[.!?;:,\n]\s*)you(?: need to| should| can)?\s+|\b(?:please|can you|could you|would you|will you|i want you to|i need you to|go ahead and|let'?s|then|and|ok|okay|now|so|just|we'?ll|we will|we'?re going to|we are going to|we need to)\s+|(?:^|\s)(?:@[a-z0-9_-]+|claude|codex|ultragoal|ralph)[,:]?\s+)$/;
 const UNTIL_RE = /\b(?:(?:keep|continue|carry on|grind|iterate)\b(?:\s+(?:going|working|at it|iterating|grinding|pushing|away|on (?:this|it|that|(?:the|our|my|this) [a-z0-9-]+(?: [a-z0-9-]+){0,2}))){0,2}|work\s+(?:on (?:this|it|that|(?:the|our|my|this) [a-z0-9-]+(?: [a-z0-9-]+){0,2})|away|through (?:this|it|them))|(?:don'?t|do not|never)\s+stop\b[^.?!\n]{0,20}?)\s+(?:until|till|before)\s+([^.?!\n]{0,60})/;
 // The completion or scope object must be what the "until" clause is about.
 const COMPLETION_RE = new RegExp([
@@ -89,7 +92,7 @@ const DIRECT_INSTRUCTION_PREFIX_RE = /(?:^|[.!?;:,\n]\s*|\b(?:please|can you|cou
 // "While I sleep" counts only with a real work verb in the same clause:
 // "finish the migration while I sleep", not "plan meals while I'm away".
 const AWAY_RE = /\bwhile i(?:'m| am)? (?:asleep|sleeping|sleep|away)\b/;
-const AWAY_WORK_RE = /(?:^|\s)(?:build|migrate|port|convert|rewrite|refactor|implement|finish|ship|overhaul|rebuild|redesign|upgrade|keep going|continue|work on|grind|iterate|tackle|complete)\b/;
+const AWAY_WORK_RE = /\b(?:build|migrate|port|convert|rewrite|refactor|implement|finish|ship|overhaul|rebuild|redesign|upgrade|keep going|continue|work on|grind|iterate|tackle|complete)\b/;
 const SCOPE_SIGNALS = [
   ["long_running", /\blong[- ]running\s+(?:job|task|goal|work|migration|build|project|effort|session)\b|\bmulti[- ]?(?:hour|day|session)\s+(?:[a-z-]+\s+){0,2}?(?:job|task|goal|effort|project|migration|build|refactor|run)\b/],
   ["multi_step_goal", /\bmulti[- ]step\s+(?:goal|plan|project|migration|build|effort)\b/],
@@ -171,8 +174,15 @@ function usable(text, match) {
   return Boolean(match) && !excluded(text, match.index);
 }
 
+// The 40 characters before a position. A cut window starts with a NUL so "^"
+// in the prefix patterns only ever means the real start of the prompt.
+function windowBefore(text, index) {
+  const start = Math.max(0, index - 40);
+  return `${start > 0 ? "\u0000" : ""}${text.slice(start, index)}`;
+}
+
 function atInstruction(text, match) {
-  return usable(text, match) && INSTRUCTION_PREFIX_RE.test(text.slice(Math.max(0, match.index - 40), match.index));
+  return usable(text, match) && INSTRUCTION_PREFIX_RE.test(windowBefore(text, match.index));
 }
 
 function findSignals(text, table, accept = usable) {
@@ -181,6 +191,20 @@ function findSignals(text, table, accept = usable) {
     if (!found.includes(name) && accept(text, pattern.exec(text))) found.push(name);
   }
   return found;
+}
+
+// "Finish the migration while I sleep" / "While I sleep, finish the migration":
+// a real work verb in the same sentence, given to the assistant (same position
+// check as the other standalone signals). "Ronnie will finish the migration
+// while I'm away" is someone else's work.
+function awayWorkInstructed(text, index) {
+  const sentence = sentenceAt(text, index);
+  const pattern = new RegExp(AWAY_WORK_RE.source, "g");
+  for (let match = pattern.exec(sentence.text); match; match = pattern.exec(sentence.text)) {
+    const at = { index: sentence.start + match.index };
+    if (atInstruction(text, at)) return true;
+  }
+  return false;
 }
 
 // Returns { matched, signals, strength } for a prompt. Pure and cheap.
@@ -201,9 +225,9 @@ function detectLongRunningIntent(text) {
     else time.push("until_without_goal");
   }
   const dedicated = DEDICATED_HOURS_RE.exec(normalized);
-  if (usable(normalized, dedicated) && DIRECT_INSTRUCTION_PREFIX_RE.test(normalized.slice(Math.max(0, dedicated.index - 40), dedicated.index))) standalone.push("dedicated_hours");
+  if (usable(normalized, dedicated) && DIRECT_INSTRUCTION_PREFIX_RE.test(windowBefore(normalized, dedicated.index))) standalone.push("dedicated_hours");
   const away = AWAY_RE.exec(normalized);
-  if (usable(normalized, away) && AWAY_WORK_RE.test(clauseAt(normalized, away.index))) standalone.push("while_away");
+  if (usable(normalized, away) && awayWorkInstructed(normalized, away.index)) standalone.push("while_away");
 
   const scope = findSignals(normalized, SCOPE_SIGNALS, (value, match) => usable(value, match) &&
     (!match[0].match(/^(?:all|the remaining|remaining|every|each|through|backlog|batch|queue|list|pile)\b/) || IMPERATIVE_RE.test(clauseAt(value, match.index))));

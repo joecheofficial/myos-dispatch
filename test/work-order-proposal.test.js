@@ -93,6 +93,9 @@ const LONG_RUNNING = [
   "Ok so keep going until it's done",
   "Please continue working on the auth refactor until it's done",
   "Investigate all 11 failing tests",
+  "While I sleep, finish the migration",
+  "you keep going until the tests pass, I'm out",
+  "Ok. You need to keep going until every module is migrated",
 ];
 
 const ORDINARY = [
@@ -283,6 +286,16 @@ const ORDINARY = [
   // Other quick tasks.
   "Continue editing until the paragraph is done",
   "Rebuild the entire database index",
+  // Complaints about the assistant, and other people's work while the user is away.
+  "If you keep going until everything is green it costs too much, cap the spend",
+  "When you keep going until everything is done you burn my tokens",
+  "I hate it when you keep going until everything is done without checking in",
+  "The problem is that you continue until it's done even when I said stop",
+  "Illy is going to finish the site while I'm away so check in with her Monday",
+  "Ronnie will finish the migration while I'm away, what should I tell him?",
+  "My team will finish the migration while I'm away. Draft my out of office",
+  "The contractors will build the deck while I'm away",
+  "I'm going to finish the deck while I'm away on vacation, remind me Friday",
 ];
 
 function tempDir(prefix) {
