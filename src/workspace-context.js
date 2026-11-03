@@ -2,7 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 const { readJsonCached } = require("./json-cache");
-const { isRelationshipQuestion, loadCapabilityIndex, shortlistCapabilities, selectExecutionLane, stripRelationshipRecall } = require("./capability-router");
+const { isRelationshipQuestion, loadCapabilityIndex, relationshipQuestionRequestsWrite, shortlistCapabilities, selectExecutionLane } = require("./capability-router");
 const { inferGoalScale } = require("./goal-scale");
 const { buildParallelizationPlan, detectBlockedReasons } = require("./parallelization-planner");
 const { homeDir, resolveProjectsRoot, resolveWorkspacePath, resolveWorkspaceRoot } = require("./myos-compat");
@@ -531,14 +531,6 @@ function inferIntentType(query) {
   return "exploratory";
 }
 
-// A relationship question without its recall phrases and without the
-// capitalised names inside a sentence (a sentence's first word is kept, so
-// "Send Mark the notes" still reads as a send).
-function relationshipRequestText(query) {
-  return stripRelationshipRecall(query)
-    .replace(/(?<!(?:^|[.!?])\s*)(?<![\p{L}\p{N}_])\p{Lu}[\p{L}\p{N}'-]*/gu, " ");
-}
-
 function inferActionType(query, { userPrompt = false } = {}) {
   const text = normalizeText(query);
   // Prompt constraints are not shell syntax. Keep command safety inference on
@@ -550,8 +542,9 @@ function inferActionType(query, { userPrompt = false } = {}) {
   )) return "read";
   // "Who is Mark Chen, when did I last message him?" reads history. Its write
   // words are the contact's name ("Mark") and the recalled contact
-  // ("message"), not a request. Any other write word still makes it a write.
-  if (userPrompt && isRelationshipQuestion(query) && !WRITE_HINTS.test(normalizeText(relationshipRequestText(query)))) return "read";
+  // ("message"), not a request. Any other request word ("add", "invite",
+  // "schedule") leaves it to the normal rules below.
+  if (userPrompt && isRelationshipQuestion(query) && !relationshipQuestionRequestsWrite(query)) return "read";
   const hasWrite = WRITE_HINTS.test(text);
   const hasRead = READ_HINTS.test(text) || DIRECT_LOOKUP_HINTS.test(text);
 
