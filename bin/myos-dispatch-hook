@@ -1356,11 +1356,18 @@ function handleUserPromptSubmit(payload, surface, options = {}) {
   // Long-running goals: propose (never submit) an Orchestrator work order when
   // the install has one with durable work orders. Unchanged output otherwise.
   let workOrderProposal = null;
-  if ((options.contextMode || "full") !== "none") {
-    try { workOrderProposal = proposeWorkOrder(text); } catch { workOrderProposal = null; }
+  let proposalText = "";
+  const contextMode = options.contextMode || "full";
+  if (contextMode !== "none") {
+    try {
+      workOrderProposal = proposeWorkOrder(text);
+      proposalText = workOrderProposal ? formatWorkOrderContext(workOrderProposal, { contextMode }) : "";
+    } catch {
+      workOrderProposal = null;
+      proposalText = "";
+    }
   }
-  if (workOrderProposal) {
-    const proposalText = formatWorkOrderContext(workOrderProposal);
+  if (proposalText) {
     routeContextText = routeContextText ? `${routeContextText}\n\n${proposalText}` : proposalText;
   }
 
@@ -1405,7 +1412,7 @@ function handleUserPromptSubmit(payload, surface, options = {}) {
     lanesAutoDispatched: autoDispatchedTasks.length,
     agentCallsObserved,
     ...(routeObj.fastpaths ? { fastpaths: routeObj.fastpaths } : {}),
-    ...(workOrderProposal ? { workOrderProposed: { signals: workOrderProposal.signals, steps: workOrderProposal.workOrder.steps.length } } : {}),
+    ...(proposalText ? { workOrderProposed: { signals: workOrderProposal.signals, steps: workOrderProposal.workOrder.steps.length } } : {}),
   });
 
   // MYOS_DISPATCH_HOOK_CONTEXT=none leaves the route text empty; add nothing then.
