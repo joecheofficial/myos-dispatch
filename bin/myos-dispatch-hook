@@ -28,6 +28,7 @@ const { preferredHomeRoot, resolveLogsRoot } = require(path.join(WORKSPACE_ROOT,
 const {
   buildGoalPolicy,
 } = require(path.join(WORKSPACE_ROOT, "src/orchestration/execution-envelope"));
+const { formatWorkOrderContext, proposeWorkOrder, writeProposalFile } = require(path.join(WORKSPACE_ROOT, "src/orchestration/work-order-proposal"));
 
 const EVENT_LABELS = {
   SessionStart: "session_start",
@@ -1362,6 +1363,27 @@ function handleUserPromptSubmit(payload, surface, options = {}) {
     saveRouteContextState(rawSessionId, state);
   }
 
+  // Long-running goals: propose (never submit) an Orchestrator work order when
+  // the install has one with durable work orders. Unchanged output otherwise.
+  let workOrderProposal = null;
+  let proposalText = "";
+  const contextMode = options.contextMode || "full";
+  if (contextMode !== "none") {
+    try {
+      workOrderProposal = proposeWorkOrder(text);
+      if (workOrderProposal) {
+        const file = writeProposalFile(workOrderProposal, { dir: path.join(preferredHomeRoot(), "state", "work-order-proposals") });
+        proposalText = formatWorkOrderContext(workOrderProposal, { contextMode, file });
+      }
+    } catch {
+      workOrderProposal = null;
+      proposalText = "";
+    }
+  }
+  if (proposalText) {
+    routeContextText = routeContextText ? `${routeContextText}\n\n${proposalText}` : proposalText;
+  }
+
   if (sidecarResultsText) {
     routeContextText = routeContextText
       ? `${routeContextText}\n\n${sidecarResultsText}`
@@ -1403,6 +1425,7 @@ function handleUserPromptSubmit(payload, surface, options = {}) {
     lanesAutoDispatched: autoDispatchedTasks.length,
     agentCallsObserved,
     ...(routeObj.fastpaths ? { fastpaths: routeObj.fastpaths } : {}),
+    ...(proposalText ? { workOrderProposed: { signals: workOrderProposal.signals, steps: workOrderProposal.workOrder.steps.length } } : {}),
   });
 
   return outputHookContext("UserPromptSubmit", routeContextText);
