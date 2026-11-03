@@ -90,8 +90,18 @@ const RELATIONSHIP_RECALL_SOURCE = [
 ].join("|");
 const RELATIONSHIP_RECALL_RE = new RegExp(RELATIONSHIP_RECALL_SOURCE, "i");
 const WHO_LEAD_RE = /^\s*(?:(?:hey|ok|okay|so)[,\s]+)?who(?:'s|\s+is|\s+was)\s+\S/i;
-// Case-sensitive on purpose: a capitalised word after the contact is a name.
-const PERSON_OBJECT_RE = /(?:^|[^\p{L}\p{N}_])(?:to|with|from|[Tt]alk(?:ed)?|[Ss]p(?:eak|oke)|[Cc]hat(?:ted)?|[Mm]essag(?:e|ed)|[Ee]mail(?:ed)?|[Tt]ext(?:ed)?|[Mm]eet|[Mm]et)\s+(?:him\b|her\b|them\b|\p{Lu})/u;
+// The person is the direct object of the contact: "talk to her", "spoke with
+// Ana", "message Ben". Case-sensitive on purpose: a capitalised word there is
+// a name. "talk about it with Codex" is not a person object.
+const CONTACT_VERB_CASED = "[Tt]alk(?:ed)?|[Ss]p(?:eak|oke|oken)|[Cc]hat(?:ted)?|[Mm]essag(?:e|ed)|[Ee]mail(?:ed)?|[Tt]ext(?:ed)?|[Mm]eet|[Mm]et";
+const PERSON_OBJECT_LEAD = `(?:^|[^\\p{L}\\p{N}_])(?:${CONTACT_VERB_CASED})(?:\\s+(?:to|with))?\\s+`;
+const PERSON_OBJECT_RE = new RegExp(`${PERSON_OBJECT_LEAD}(?:(?:him|her|them)(?![\\p{L}\\p{N}_])|\\p{Lu})`, "u");
+// A name: up to four capitalised words. Used only to blank the name out.
+const NAME_RUN = "\\p{Lu}[\\p{L}\\p{N}'-]*(?:[ \\t]+\\p{Lu}[\\p{L}\\p{N}'-]*){0,3}";
+const NAMED_PERSON_RE = new RegExp(`(?<=${PERSON_OBJECT_LEAD})${NAME_RUN}|(?<=^\\s*(?:(?:[Hh]ey|[Oo]k|[Oo]kay|[Ss]o)[,\\s]+)?[Ww]ho(?:'s|\\s+is|\\s+was)\\s+)${NAME_RUN}`, "gu");
+// Words that ask for something to be done. A name run never swallows them
+// after its first word ("message Ana Send her the notes").
+const REQUEST_WORD_RE = /^(?:add|update|save|mark|put|attach|send|forward|message|dm|notify|share|create|record|store|log|set|change|fix|repair|replace|redirect|deploy|commit|push|publish|implement|edit|upload|remove|delete|move|rename|improve|upgrade|finish|invite|schedule|book|reply|draft|write|tag|email|text|call)$/i;
 // Capabilities that answer "who is this person and what is our history": a
 // relationship graph, contact resolution (whois / ontology), then a CRM.
 const RELATIONSHIP_CAPABILITY_TIERS = [
@@ -110,10 +120,26 @@ function isRelationshipQuestion(text) {
   return WHO_LEAD_RE.test(original) || PERSON_OBJECT_RE.test(original);
 }
 
-// The request with its recall phrases removed ("when did I last message"), so
-// a write check sees only what the user asks to be done.
-function stripRelationshipRecall(text) {
-  return normalizeApostrophes(text).replace(new RegExp(RELATIONSHIP_RECALL_SOURCE, "gi"), " ");
+// A relationship question with the person's name and the recall phrase
+// ("when did I last message") blanked out, so a write check sees only what the
+// user asks to be done: "who is Mark Chen, when did I last message him" has
+// none, "... then add her to the CRM" still does.
+function relationshipRequestText(text) {
+  return normalizeApostrophes(text)
+    .replace(NAMED_PERSON_RE, (run) => {
+      const words = run.split(/([ \t]+)/);
+      let cut = words.length;
+      for (let i = 2; i < words.length; i += 2) {
+        if (REQUEST_WORD_RE.test(words[i])) { cut = i; break; }
+      }
+      return " ".repeat(words.slice(0, cut).join("").length) + words.slice(cut).join("");
+    })
+    .replace(new RegExp(RELATIONSHIP_RECALL_SOURCE, "gi"), " ");
+}
+
+// True when a relationship question also asks for something to be done.
+function relationshipQuestionRequestsWrite(text) {
+  return normalizeText(relationshipRequestText(text)).split(/[^\p{L}\p{N}_]+/u).some((word) => REQUEST_WORD_RE.test(word));
 }
 
 // Tier bonus for a capability that can answer a relationship question, or null.
@@ -528,7 +554,8 @@ module.exports = {
   inferExecutionSignals,
   isRelationshipQuestion,
   loadCapabilityIndex,
-  stripRelationshipRecall,
+  relationshipQuestionRequestsWrite,
+  relationshipRequestText,
   recipeOwner,
   scoreCapability,
   scoreCapabilityMatch,

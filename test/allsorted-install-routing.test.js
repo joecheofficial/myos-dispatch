@@ -263,9 +263,26 @@ test("write requests that mention the last contact stay writes", () => {
     "Please deploy the portal fix; last time we called the webhook it failed",
     "fix the bug, last time I called the endpoint it 500ed",
     "Send Mark the notes, when did we last talk to him",
+    "When did I last talk to Ana? Also Send her the notes",
+    "When did I last talk to Ana, then Deploy the portal",
+    "when did I last message Ana, Fix the Portal Header",
+    "message Ana Send her the notes, when did we last talk",
   ]) {
     assert.equal(inferActionType(query, { userPrompt: true }), "write", query);
   }
+  // Request words outside the write list are never downgraded to a read.
+  for (const query of [
+    "When did I last talk to Ana? Invite her to the cohort",
+    "When did we last meet with Ana? Schedule a call with her next week",
+  ]) {
+    assert.notEqual(inferActionType(query, { userPrompt: true }), "read", query);
+  }
+  assert.equal(inferActionType("when did I last message Mark", { userPrompt: true }), "read");
+});
+
+test("a product after 'talk about ... with' is not a person", () => {
+  assert.equal(isRelationshipQuestion("what did we talk about with Codex yesterday regarding the hook"), false);
+  assert.equal(isRelationshipQuestion("When did we last talk about moving from Vercel to Netlify?"), false);
 });
 
 test("a capability the relationship question names keeps the route", () => {
