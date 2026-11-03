@@ -2,10 +2,11 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 const { readJsonCached } = require("./json-cache");
-const { loadCapabilityIndex, shortlistCapabilities, selectExecutionLane } = require("./capability-router");
+const { isRelationshipQuestion, loadCapabilityIndex, shortlistCapabilities, selectExecutionLane } = require("./capability-router");
 const { inferGoalScale } = require("./goal-scale");
 const { buildParallelizationPlan, detectBlockedReasons } = require("./parallelization-planner");
-const { homeDir, resolveWorkspacePath, resolveWorkspaceRoot } = require("./myos-compat");
+const { homeDir, resolveProjectsRoot, resolveWorkspacePath, resolveWorkspaceRoot } = require("./myos-compat");
+const { compileBoundedPhrase } = require("./phrase-boundary");
 const {
   getDataSearchScope: getConfiguredDataSearchScope,
   getDataSource,
@@ -23,7 +24,10 @@ const {
 
 const HOME = homeDir();
 const WORKSPACE = resolveWorkspaceRoot();
-const PROJECTS_INDEX = resolveWorkspacePath("projects/_index.json");
+// All Sorted installs keep the Organizer's registry at <home>/projects, not
+// <home>/workspace/projects; resolveProjectsRoot picks whichever holds the index.
+const PROJECTS_ROOT = resolveProjectsRoot(WORKSPACE);
+const PROJECTS_INDEX = path.join(PROJECTS_ROOT, "_index.json");
 const FASTPATHS_FILE = resolveWorkspacePath("DISPATCH-FASTPATHS.json");
 
 const DIRECTIVE_VERBS = /\b(make|create|generate|build|draft|render|produce|write|get|find|retrieve|look up|locate|open|extract|pull|send|forward|message|dm|notify|share|check|inspect|review|show|give me|list|tell me|give|download|add|update|save|mark|count|upgrade|fix|repair|implement|finish)\b/;
@@ -32,6 +36,7 @@ const EXPLORATORY_HINTS = /\b(help me understand|explain|what's going on|what is
 const FOLLOW_UP_HINTS = /\b(also|this|that|it|they|them|these|those|here|there|same|again|too|correct|yes|no|for this|for that|subdomain|rsvp)\b/;
 const READ_HINTS = /\b(what|what is|what's|what are|where is|where's|which|who is|who's|how many|show|find|get|look up|count|list|tell me|give me|retrieve|check)\b/;
 const WRITE_HINTS = /\b(add|update|save|mark|put|attach|send|forward|message|dm|notify|share|create|record|store|log|set|change|fix|repair|replace|redirect|deploy|commit|push|publish|implement|edit|upload|remove|delete|move|rename|prove|improve|upgrade|finish)\b/;
+const RELATIONSHIP_WRITE_CLAUSE_RE = /(?:^|[.!?;:]\s*|,\s*|\b(?:and|then|also)\s+)(?:please\s+)?(?:send|message|email|text|dm|reply|forward|add|update|save|mark|create|log|record|set|change|draft|write|tag|remove|delete|schedule|book|invite)\b/;
 const PROJECT_OPERATION_HINTS = /\b(giveaway(?:s)? page|mentorship page|promo code|promo link|payment link|onboarding|calendar|invite|rsvp|signups?|cohort|participant|participants?)\b/;
 // A request to produce something new ("build a launch for Lumen", "create an email
 // sequence for Lumen") may USE a project's data source, but it is not a lookup of
@@ -65,6 +70,16 @@ function readOptional(filePath, maxChars = 8000) {
   }
 }
 
+// Registry entries that no longer describe a live project. The Organizer marks a
+// project whose folder is gone "missing" (reconcile-index); "retired" and
+// "archive(d)" are the hand-set equivalents. They stay in the index for history
+// but must never own a request.
+const NON_ROUTABLE_PROJECT_STATUSES = new Set(["missing", "retired", "archive", "archived"]);
+
+function isRoutableProject(project) {
+  return !NON_ROUTABLE_PROJECT_STATUSES.has(String(project?.status || "").trim().toLowerCase());
+}
+
 function normalizeProjectEntries(projectsValue) {
   return Object.entries(projectsValue || {}).map(([slug, value]) => ({ slug, ...value }));
 }
@@ -83,14 +98,14 @@ function hasBoundedPhrase(text, phrase) {
   const normalizedPhrase = normalizeText(phrase).trim();
   if (!normalizedPhrase) return false;
   const escaped = escapeRegex(normalizedPhrase).replace(/\s+/g, "\\s+");
-  return new RegExp(`\\b${escaped}\\b`, "i").test(normalizeText(text));
+  return compileBoundedPhrase(escaped, "i").test(normalizeText(text));
 }
 
 function hasLooseBoundedPhrase(text, phrase) {
   const normalizedPhrase = normalizeLooseText(phrase).trim();
   if (!normalizedPhrase) return false;
   const escaped = escapeRegex(normalizedPhrase).replace(/\s+/g, "\\s+");
-  return new RegExp(`\\b${escaped}\\b`, "i").test(normalizeLooseText(text));
+  return compileBoundedPhrase(escaped, "i").test(normalizeLooseText(text));
 }
 
 function hasMultipleWords(value) {
@@ -117,20 +132,10 @@ const DIRECTIVE_OBJECT_RE_PREFIX = "\\b(?:check|run|use|open|fix|update|audit|re
 
 function countPhraseHits(haystack, needle) {
   const escaped = escapeRegex(needle).replace(/\s+/g, "\\s+");
-  const found = [];
-  const re = new RegExp(`\\b${escaped}\\b`, "gi");
-  let match;
-  while ((match = re.exec(haystack)) !== null) {
-    found.push(match.index);
-    if (match[0].length === 0) re.lastIndex += 1;
-  }
+  const found = compileBoundedPhrase(escaped, "i").indices(haystack);
   if (found.length === 0) {
     const loose = normalizeLooseText(haystack);
-    const looseRe = new RegExp(`\\b${escapeRegex(normalizeLooseText(needle)).replace(/\s+/g, "\\s+")}\\b`, "gi");
-    while ((match = looseRe.exec(loose)) !== null) {
-      found.push(match.index);
-      if (match[0].length === 0) looseRe.lastIndex += 1;
-    }
+    found.push(...compileBoundedPhrase(escapeRegex(normalizeLooseText(needle)).replace(/\s+/g, "\\s+"), "i").indices(loose));
   }
   return found;
 }
@@ -172,7 +177,7 @@ function scoreProject(query, project) {
     const firstSentence = haystack.split(/[.!?\n]/)[0] || "";
     const slug = normalizeText(project.slug).trim();
     const directiveObject = slug
-      && new RegExp(`${DIRECTIVE_OBJECT_RE_PREFIX}${escapeRegex(slug)}\\b`, "i").test(firstSentence);
+      && compileBoundedPhrase(`${DIRECTIVE_OBJECT_RE_PREFIX}${escapeRegex(slug)}`, "i").test(firstSentence);
     if (!directiveObject) return 0;
   }
 
@@ -181,6 +186,7 @@ function scoreProject(query, project) {
 
 function matchProjects(query, projects, maxMatches = 3) {
   return [...(projects || [])]
+    .filter(isRoutableProject)
     .map((project) => ({ project, score: scoreProject(query, project) }))
     .filter((entry) => entry.score >= 6)
     .sort((a, b) => b.score - a.score)
@@ -233,7 +239,7 @@ function searchProjectFiles(query, maxHits = 6) {
         "--glob",
         "**/vercel.json",
         pattern,
-        path.join(WORKSPACE, "projects"),
+        PROJECTS_ROOT,
       ],
       { encoding: "utf8" }
     ).trim();
@@ -278,7 +284,7 @@ function hasFastpathTerm(text, term) {
   let pattern = fastpathRegexCache.get(normalizedTerm);
   if (!pattern) {
     const escaped = escapeRegex(normalizedTerm).replace(/\s+/g, "\\s+");
-    pattern = new RegExp(`\\b${escaped}\\b`, "i");
+    pattern = compileBoundedPhrase(escaped, "i");
     fastpathRegexCache.set(normalizedTerm, pattern);
   }
   return pattern.test(normalizedText);
@@ -525,6 +531,10 @@ function inferActionType(query, { userPrompt = false } = {}) {
     || /\b(?:keep|remain|stay)\s+(?:this\s+|strictly\s+)?read[ -]only\b/i.test(text)
     || /\b(?:(?:do not|don't|don’t|never)\s+(?:make\s+any\s+changes|change\s+anything|modify\s+anything|edit\s+anything)|no\s+(?:writes|changes|edits)\s*(?:[.!;,]|$))/i.test(text)
   )) return "read";
+  // "Who is Mark, when did I last message him?" reads history: the contact's
+  // name or a contact verb is not a write. An explicit write clause
+  // ("... and add her to the CRM") still is.
+  if (userPrompt && isRelationshipQuestion(text) && !RELATIONSHIP_WRITE_CLAUSE_RE.test(text)) return "read";
   const hasWrite = WRITE_HINTS.test(text);
   const hasRead = READ_HINTS.test(text) || DIRECT_LOOKUP_HINTS.test(text);
 
@@ -539,7 +549,7 @@ function getProjectRoot(project) {
   if (!project || !project.path) return "";
   return project.path.startsWith("~")
     ? project.path.replace(/^~(?=\/)/, HOME)
-    : path.join(WORKSPACE, "projects", project.path);
+    : path.join(PROJECTS_ROOT, project.path);
 }
 
 function getProjectScopedPath(project) {
@@ -591,7 +601,8 @@ function isShortFollowUp(query) {
 
 function buildFollowUpProjectMatch(lastDispatchHint, projects) {
   if (!lastDispatchHint?.projectSlug) return [];
-  const matched = (projects || []).find((project) => project.slug === lastDispatchHint.projectSlug);
+  const matched = (projects || []).find((project) => project.slug === lastDispatchHint.projectSlug
+    && isRoutableProject(project));
   return matched ? [matched] : [];
 }
 
@@ -1643,6 +1654,7 @@ module.exports = {
   scoreProject,
   matchRecipes,
   matchProjects,
+  isRoutableProject,
   normalizeProjectEntries,
   scoreFastpath,
   getDataSearchScope,

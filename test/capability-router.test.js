@@ -370,3 +370,24 @@ test("status alone cannot select unrelated status recipes",()=>{
  assert.equal(selectExecutionLane("check the typed evidence dispatch shadow comparison status",{indexPath}).lane,"worker_skill");
  assert.equal(selectExecutionLane("backup status",{indexPath}).lane,"recipe_dispatcher");
 });
+
+test("generic git questions do not select the Git Manager; naming it still does", () => {
+  const indexPath = writeIndex({ capabilities: [
+    { id: "agent:git-manager", type: "agent", execution_lane: "worker_skill",
+      aliases: ["git-manager", "git manager", "git"], use_when: ["git"],
+      description: "Git check-in and worktrees", priority: 50 },
+  ] });
+  for (const query of [
+    "explain git rebase to me",
+    "what does git stash do?",
+    "why did git say detached HEAD?",
+  ]) {
+    assert.deepEqual(shortlistCapabilities(query, "worker_skill", 5, { indexPath }), [], query);
+  }
+  for (const query of [
+    "start a git manager task for the portal",
+    "ask git-manager to finish my claim",
+  ]) {
+    assert.equal(shortlistCapabilities(query, "worker_skill", 5, { indexPath })[0]?.capability.id, "agent:git-manager", query);
+  }
+});

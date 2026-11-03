@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { canonicalHomeRoot, resolveHomePath, resolveWorkspacePath } = require("./myos-compat");
+const { compileBoundedPhrase } = require("./phrase-boundary");
 
 const DEFAULT_CONFIG_FILE = path.join(__dirname, "..", "config", "data-sources.example.json");
 const LOCAL_CONFIG_FILE = path.join(__dirname, "..", "config", "data-sources.json");
@@ -115,7 +116,7 @@ function matchesTerm(text, term) {
   const needle = String(term || "").trim().toLowerCase();
   if (!needle) return false;
   const escaped = escapeRegex(needle).replace(/\s+/g, "\\s+");
-  return new RegExp(`\\b${escaped}\\b`, "i").test(text);
+  return compileBoundedPhrase(escaped, "i").test(text);
 }
 
 function matchesAnyTerm(text, terms = []) {
