@@ -28,7 +28,7 @@ const { preferredHomeRoot, resolveLogsRoot } = require(path.join(WORKSPACE_ROOT,
 const {
   buildGoalPolicy,
 } = require(path.join(WORKSPACE_ROOT, "src/orchestration/execution-envelope"));
-const { formatWorkOrderContext, proposeWorkOrder } = require(path.join(WORKSPACE_ROOT, "src/orchestration/work-order-proposal"));
+const { formatWorkOrderContext, proposeWorkOrder, writeProposalFile } = require(path.join(WORKSPACE_ROOT, "src/orchestration/work-order-proposal"));
 
 const EVENT_LABELS = {
   SessionStart: "session_start",
@@ -1371,7 +1371,10 @@ function handleUserPromptSubmit(payload, surface, options = {}) {
   if (contextMode !== "none") {
     try {
       workOrderProposal = proposeWorkOrder(text);
-      proposalText = workOrderProposal ? formatWorkOrderContext(workOrderProposal, { contextMode }) : "";
+      if (workOrderProposal) {
+        const file = writeProposalFile(workOrderProposal, { dir: path.join(preferredHomeRoot(), "state", "work-order-proposals") });
+        proposalText = formatWorkOrderContext(workOrderProposal, { contextMode, file });
+      }
     } catch {
       workOrderProposal = null;
       proposalText = "";

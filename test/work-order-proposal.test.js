@@ -16,6 +16,7 @@ const {
   formatWorkOrderContext,
   proposeWorkOrder,
   resolveOrchestratorRoot,
+  writeProposalFile,
 } = require("../src/orchestration/work-order-proposal");
 
 const HOOK = path.resolve(__dirname, "../bin/myos-dispatch-hook");
@@ -68,7 +69,6 @@ const LONG_RUNNING = [
   "Work through the backlog of 200 support tickets",
   "Go through all 500 contacts in the CRM and enrich each one",
   "Spend the night migrating the database",
-  "I'm off to bed. Finish the migration and ship it by morning",
   "Build the whole CRM from scratch",
   "Keep working on the portal migration until every page renders",
   "Take your time and rewrite the entire frontend",
@@ -76,6 +76,23 @@ const LONG_RUNNING = [
   "Process all 300 invoices in the inbox",
   "Upgrade all the brew packages overnight",
   "Refactor all the services, this might take a while",
+  // Final review round: sentences, clauses and addressees.
+  "You said it was done but it isn't. Keep going until every module is migrated",
+  "I asked Codex yesterday and it gave up. Work on this overnight: migrate the portal",
+  "Joe wrote the spec in PLAN.md. Keep going until all phases are done",
+  "The client says the site is slow. Rebuild the whole site",
+  "Rewrite the quote engine, keep going until all tests pass",
+  "Migrate all 40 modules, then write a release note",
+  "Keep going until every module is migrated, then draft a summary email for Ed",
+  "You keep going until it's done, I'm off to bed",
+  "Codex, keep going until every module is migrated",
+  "Codex: keep going until it's done",
+  "@codex keep going until it's done",
+  "Ultragoal keep going until all modules are migrated",
+  "Can you please keep going until it's done",
+  "Ok so keep going until it's done",
+  "Please continue working on the auth refactor until it's done",
+  "Investigate all 11 failing tests",
 ];
 
 const ORDINARY = [
@@ -236,6 +253,36 @@ const ORDINARY = [
   "Finish the report by morning",
   "Keep it up until Friday",
   "continue until the end of the chapter",
+  // Counts of time, people or everyday things are not work items; the directive must share the count's clause.
+  "Plan the remaining 14 days of the trip",
+  "Plan all 10 days of the Japan itinerary",
+  "Use the remaining 20 minutes to review the slides, then start the deck",
+  "Organize all 30 photos from the trip into albums",
+  "Research all 20 hotels on this list and pick the best",
+  "Clean up the list of 12 tasks for tomorrow",
+  "Plan the next 10 days of meals",
+  "Process all 15 receipts from my wallet",
+  "Start a 30 minute timer and clean up all 12 tabs",
+  "Plan a party for all 40 guests",
+  "Research the remaining 25 minutes of the podcast",
+  "Summarize all 50 unread emails",
+  "Process the batch of 12 refunds",
+  "Go through all 10 slides and fix typos",
+  "Implement the full spec in PLAN.md, all 12 phases",
+  // Talking about an agent is not instructing it.
+  "The agent should keep going until it's done",
+  "Claude will keep going until every test passes",
+  // Errands while away need a real work verb in the same clause.
+  "Plan meals for the dog sitter while I'm away",
+  "Research flights for while I'm away in December",
+  "Organize the garage cleaners for while I'm away",
+  "Plan my week, I'm going to bed now",
+  "Start the dishwasher before I wake up",
+  "Clean up my inbox while I sleep",
+  "I'm off to bed. Finish the report and send it by morning",
+  // Other quick tasks.
+  "Continue editing until the paragraph is done",
+  "Rebuild the entire database index",
 ];
 
 function tempDir(prefix) {
@@ -408,6 +455,36 @@ test("proposeWorkOrder returns null without an Orchestrator, for ordinary prompt
   }
 });
 
+test("proposal files are private, never overwritten, and pruned after two weeks", () => {
+  const home = tempDir("wo-file-");
+  try {
+    const workspace = path.join(home, "workspace");
+    installOrchestrator(workspace);
+    const proposal = proposeWorkOrder("Keep going until every module is migrated", { workspaceRoot: workspace, env: {} });
+    const dir = path.join(home, "proposals");
+    const stale = path.join(dir, "dispatch-wo-20000101-aaaaaaaaaaaa-000000.json");
+    const unrelated = path.join(dir, "notes.json");
+    touch(stale, "{}");
+    touch(unrelated, "{}");
+    const old = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000);
+    fs.utimesSync(stale, old, old);
+    fs.utimesSync(unrelated, old, old);
+    const file = writeProposalFile(proposal, { dir });
+    assert.equal(path.dirname(file), dir);
+    assert.equal(fs.existsSync(stale), false);
+    assert.equal(fs.existsSync(unrelated), true);
+    assert.equal(writeProposalFile(proposal, { dir }), null, "an existing proposal file is never overwritten");
+    const pointer = formatWorkOrderContext(proposal, { file });
+    assert.equal(pointer.split("\n").length, 3);
+    for (const skill of GOAL_STACK_SKILLS) assert.ok(pointer.includes(skill), skill);
+    assert.match(pointer, /nothing was submitted/);
+    // An unwritable folder falls back to the inlined JSON.
+    assert.equal(writeProposalFile(proposal, { dir: path.join(unrelated, "nested") }), null);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("the prompt hook appends the proposal only when the Orchestrator has work orders", () => {
   const home = tempDir("wo-hook-");
   try {
@@ -428,7 +505,7 @@ test("the prompt hook appends the proposal only when the Orchestrator has work o
     const longPrompt = "Work on this overnight: port the CRM to Postgres";
 
     const before = run(longPrompt);
-    assert.doesNotMatch(before, /Orchestrator work order proposal/);
+    assert.doesNotMatch(before, /MyOS long-running work/);
 
     installOrchestrator(workspace, { workOrders: false });
     assert.equal(run(longPrompt), before, "an Orchestrator without work orders changes nothing");
@@ -436,9 +513,16 @@ test("the prompt hook appends the proposal only when the Orchestrator has work o
     installOrchestrator(workspace);
     const after = run(longPrompt);
     assert.ok(after.startsWith(before), "the existing route context is kept as is");
-    assert.match(after, /Orchestrator work order proposal/);
-    assert.ok(after.includes(`node ${path.join(workspace, "orchestrator", "bin", "orchestrator.js")} work-order-submit --file <path> --root ${workspace}`));
-    assert.doesNotMatch(run("Fix the typo in README"), /Orchestrator work order proposal/);
+    // A short pointer, not the inlined plan: the JSON is in a private file.
+    const added = after.slice(before.length);
+    assert.match(added, /\[MyOS long-running work\] Long job detected/);
+    assert.ok(added.trim().split("\n").length <= 3 && added.length < 1200, added);
+    const proposalDir = path.join(myosHome, "state", "work-order-proposals");
+    const [file] = fs.readdirSync(proposalDir).map((name) => path.join(proposalDir, name));
+    assert.ok(added.includes(`node ${path.join(workspace, "orchestrator", "bin", "orchestrator.js")} work-order-submit --file ${file} --root ${workspace}`));
+    assertSubmittableShape(JSON.parse(fs.readFileSync(file, "utf8")));
+    assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+    assert.doesNotMatch(run("Fix the typo in README"), /MyOS long-running work/);
     assert.equal(run(longPrompt, { MYOS_WORK_ORDER_PROPOSALS: "0" }), before);
 
     const log = fs.readFileSync(path.join(home, "logs", "myos-dispatch-hooks.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
