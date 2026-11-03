@@ -35,40 +35,59 @@ const MAX_GOAL_CHARS = 2000;
 const MAX_PHASES = 8;
 const MODEL_STEP_RESERVATION_USD = 0.25;
 
-// Strong signals stand alone. A single weak signal also needs a directive that
-// opens a clause with a work verb, so "what happened overnight?", "run the
-// overnight report" or "kill the long-running job" never match. Generic verbs
-// (run, fix, do, make, test, move) are deliberately not directives here: they
-// open quick tasks far more often than long ones.
+// Three kinds of evidence, combined structurally rather than by example:
+// - Standalone signals carry the intent on their own: "keep going until it's
+//   done", "work on this overnight", "finish it while I sleep", "run this
+//   autonomously for 6 hours", "spend the next few hours refactoring".
+// - Scope signals name big work (a large migration, the whole app, a
+//   long-running job). They need a directive work verb opening a clause, or a
+//   second signal.
+// - Time signals (overnight, a few hours, "this will take a while", an
+//   "until" with no completion object) never count on their own, even with a
+//   directive: "start a timer for 2 hours", "investigate why the sync failed
+//   overnight" and "loop until the server responds" are quick tasks. They only
+//   add to a scope or standalone signal.
+// Generic verbs (run, fix, do, make, test, move) are never directives here.
 const OVERNIGHT = "overnight|all night|through the night|over the weekend|all weekend";
-const SCOPE_NOUNS = "app|application|codebase|platform|portal|system|site|website|backend|frontend|product|stack|service|flow|pipeline|repo|repository|crm|infrastructure|monorepo|database|onboarding";
-const PLURAL_SCOPE = "modules|installs|services|apps|repos|repositories|projects|sites|packages|customers|clients|tables|pages";
-const STRONG_SIGNALS = [
-  ["keep_going_until", /\b(?:keep|continue|carry on|grind|iterate|loop)\b(?:\s+(?:going|working|at it|iterating|grinding|pushing|away|on (?:this|it|that))){0,2}\s+(?:until|till)\b/],
-  ["keep_going_until", /\bwork\s+(?:on (?:this|it|that)|away|through (?:this|it|them))\s+(?:until|till)\b/],
-  ["dont_stop_until", /\b(?:don'?t|do not|never)\s+stop\b[^.?!\n]{0,20}?\b(?:until|till|before)\b/],
+const NUMBER = "several|a few|few|many|\\d{1,3}|two|three|four|five|six|seven|eight|nine|ten|twelve|24";
+const SCOPE_NOUNS = "app|application|codebase|platform|portal|system|site|website|backend|frontend|product|stack|service|flow|pipeline|repo|repository|crm|infrastructure|monorepo|database|module|onboarding";
+const PLURAL_SCOPE = "modules|installs|services|apps|repos|repositories|projects|sites|packages|customers|clients|tables|pages|files";
+const UNTIL_VERBS = "(?:keep|continue|carry on|grind|iterate|loop)\\b(?:\\s+(?:going|working|at it|iterating|grinding|pushing|away|on (?:this|it|that))){0,2}|work\\s+(?:on (?:this|it|that)|away|through (?:this|it|them))|(?:don'?t|do not|never)\\s+stop\\b[^.?!\\n]{0,20}?";
+const UNTIL_RE = new RegExp(`\\b(?:${UNTIL_VERBS})\\s+(?:until|till|before)\\b([^.?!\\n]{0,60})`);
+// What "until" must reach for the persistence to mean a whole goal.
+const COMPLETION_RE = /^\s*(?:all|every|everything|each)\b|\b(?:done|finished|complete|completed|shipped|migrated|merged|green|pass|passes|passing|works|compiles|beats|fixed|deployed|live)\b/;
+
+const STANDALONE_SIGNALS = [
   ["work_overnight", new RegExp(`\\b(?:work|keep working|keep going|continue|grind|iterate)(?:\\s+on\\s+(?:this|it|that|these|them))?\\s+(?:${OVERNIGHT})\\b`)],
+  ["while_away", /\bwhile i(?:'m| am)? (?:asleep|sleeping|sleep|away|out|offline|gone)\b/],
+  ["autonomous_hours", new RegExp(`\\bautonomously\\b[^.?!\\n]{0,30}?\\b(?:for|over)\\s+(?:the next\\s+)?(?:${NUMBER})\\s*\\+?\\s*(?:hours?|hrs|days)\\b|\\bautonomously\\s+(?:${OVERNIGHT})\\b`)],
+  ["dedicated_hours", new RegExp(`\\bspend\\s+(?:the next\\s+)?(?:${NUMBER})\\s*\\+?\\s*(?:hours?|hrs|days)\\s+[a-z]+ing\\b`)],
 ];
-const WEAK_SIGNALS = [
-  // Adverbial only: "..., overnight." or "Overnight, ..." but not "the overnight backup".
-  ["overnight", new RegExp(`(?:^|[.,;:!?\\n]\\s*)(?:${OVERNIGHT})\\b|\\b(?:${OVERNIGHT})(?=\\s*(?:$|[.,;:!?\\n]|(?:and|then|so|while|if|please|for me)\\b))|\\bwhile i(?:'m| am)? (?:asleep|sleeping|sleep|away|out|offline|gone)\\b`)],
-  ["multi_hour", /\bmulti[- ]?(?:hour|day|session)\b|\b(?:spend|for|over|taking)\s+(?:the next\s+)?(?:several|a few|few|many|\d{1,2}|two|three|four|five|six|eight|ten|twelve)\s*\+?\s*(?:hours?|hrs|days)\b/],
-  ["takes_a_while", /\b(?:this|it) (?:will|could|might|may|is going to) take (?:a while|a long time|hours|days|all night|ages)\b/],
-  ["long_running", /\blong[- ]running\s+(?:job|task|goal|work|migration|build|project|effort|session)\b/],
+const SCOPE_SIGNALS = [
+  ["long_running", /\blong[- ]running\s+(?:job|task|goal|work|migration|build|project|effort|session)\b|\bmulti[- ]?(?:hour|day|session)\s+(?:[a-z-]+\s+){0,2}?(?:job|task|goal|effort|project|migration|build|refactor|run)\b/],
   ["multi_step_goal", /\bmulti[- ]step\s+(?:goal|plan|project|migration|build|effort)\b/],
   ["large_change", /\b(?:large|big|huge|massive|major|full[- ]scale)\s+(?:[a-z0-9-]+\s+){0,2}?(?:migration|rewrite|overhaul|refactor(?:ing)?|re-?platform(?:ing)?)\b/],
   ["migrate_all", /\bmigrat(?:e|ing)\s+(?:all|every\w*|the (?:entire|whole)|our (?:entire|whole)|everything)\b/],
-  ["whole_scope", new RegExp(`\\b(?:build|rebuild|rewrite|overhaul|refactor|migrate|port|convert|develop|create|redesign|upgrade)\\s+(?:out\\s+)?(?:(?:the|an?|our|my|this)\\s+(?:entire|whole|full|complete)\\s+(?:[a-z0-9-]+\\s+){0,2}?(?:${SCOPE_NOUNS})|all\\s+(?:of\\s+)?(?:the\\s+|our\\s+|my\\s+)?(?:\\d+\\s+)?(?:[a-z0-9-]+\\s+){0,2}?(?:${PLURAL_SCOPE}))\\b`)],
+  ["whole_scope", new RegExp(`\\b(?:build|rebuild|write|rewrite|overhaul|refactor|migrate|port|convert|develop|create|redesign|upgrade)\\s+(?:out\\s+)?(?:the|an?|our|my|this)\\s+(?:entire|whole|full|complete)\\s+(?:[a-z0-9-]+\\s+){0,2}?(?:${SCOPE_NOUNS})\\b`)],
 ];
-const IMPERATIVE_VERBS = "spend|build|migrate|port|convert|rewrite|refactor|implement|work|keep|continue|ship|finish|complete|research|investigate|audit|develop|upgrade|overhaul|rebuild|redesign|grind|iterate|process|clean up|organize|analy[sz]e|plan|start|kick off|tackle|drive";
+// "Upgrade all the packages" is quick; "all ..." counts only with a second
+// signal or ten or more items.
+const ALL_SCOPE_RE = new RegExp(`\\b(?:build|rebuild|rewrite|overhaul|refactor|migrate|port|convert|develop|create|redesign|upgrade)\\s+all\\s+(?:of\\s+)?(?:the\\s+|our\\s+|my\\s+)?(?:(\\d+)\\s+)?(?:[a-z0-9-]+\\s+){0,2}?(?:${PLURAL_SCOPE})\\b`);
+const TIME_SIGNALS = [
+  ["overnight", new RegExp(`\\b(?:${OVERNIGHT})\\b`)],
+  ["multi_hour", new RegExp(`\\bmulti[- ]?(?:hour|day|session)\\b|\\bspend\\s+(?:the next\\s+)?(?:${NUMBER})\\s*\\+?\\s*(?:hours?|hrs|days)\\b`)],
+  ["takes_a_while", /\b(?:this|it) (?:will|could|might|may|is going to) take (?:a while|a long time|hours|days|all night|ages)\b|\btake as long as (?:you need|it takes)\b/],
+];
+const IMPERATIVE_VERBS = "spend|build|migrate|port|convert|rewrite|refactor|implement|work|keep|continue|ship|finish|complete|research|investigate|audit|develop|upgrade|overhaul|rebuild|redesign|grind|iterate|process|clean up|organize|analy[sz]e|plan|start|kick off|tackle|drive|write";
 const IMPERATIVE_RE = new RegExp(`(?:^|[.!?;:,\\n]\\s*|\\b(?:please|can you|could you|would you|will you|i want you to|i need you to|go ahead and|let'?s|then|and)\\s+)(?:${IMPERATIVE_VERBS})\\b`);
 const QUESTION_START_RE = /^(?:what|what's|how|why|when|where|who|whose|which|is|are|was|were|does|do|did|has|have|had|should|shall|isn't|aren't|doesn't|didn't)\b/;
 // A message for someone else ("Draft a reply: I'll keep working on it until
 // Friday", "Remind Joe to work on this over the weekend") is not a goal.
-const RELAY_START_RE = /^(?:(?:please|can you|could you|would you)\s+)?(?:draft|reply|respond|tell|remind|message|email|text|dm|send|forward|ask|let \S+ know|write (?:a|an|the|back)\b)/;
+const RELAY_START_RE = /^(?:(?:please|can you|could you|would you)\s+)?(?:draft|reply|respond|tell|remind|message|email|text|dm|send|forward|ask|let \S+ know|write back\b|write (?:a|an|the|my|our) (?:reply|response|message|email|note|text|dm|post|caption)\b)/;
 const NEGATED_BEFORE_RE = /\b(?:don'?t|do not|no need to|never|not|without|stop)\s+(?:[a-z']+\s+){0,3}$/;
-// Someone's own plan ("we'll continue working until ...") rather than a directive.
-const SPEAKER_BEFORE_RE = /\b(?:i|we|he|she|they)(?:'ll|'re|'m|'d| will| would| are| am| were| was)?\s+(?:(?:also|still|just|probably)\s+)?(?:going to\s+)?$/;
+// Someone else's plan ("they will keep going until Friday"). "We" is the user
+// and the assistant together, so "we'll keep going until it's done" is a goal.
+const SPEAKER_BEFORE_RE = /\b(?:i|he|she|they)(?:'ll|'re|'m|'d| will| would| are| am| were| was)?\s+(?:(?:also|still|just|probably)\s+)?(?:going to\s+)?$/;
 const LIST_ITEM_RE = /^\s*(?:\d{1,2}[.)]|[-*•])\s+(\S.{2,})$/;
 
 function enabled(env = process.env) {
@@ -86,13 +105,14 @@ function excluded(text, index) {
   return NEGATED_BEFORE_RE.test(before) || SPEAKER_BEFORE_RE.test(before);
 }
 
+function usable(text, match) {
+  return Boolean(match) && !excluded(text, match.index);
+}
+
 function findSignals(text, table) {
   const found = [];
   for (const [name, pattern] of table) {
-    if (found.includes(name)) continue;
-    const match = pattern.exec(text);
-    if (!match || excluded(text, match.index + (match[0].length - match[0].trimStart().length))) continue;
-    found.push(name);
+    if (!found.includes(name) && usable(text, pattern.exec(text))) found.push(name);
   }
   return found;
 }
@@ -103,15 +123,31 @@ function detectLongRunningIntent(text) {
   const none = { matched: false, signals: [], strength: null };
   if (!normalized || normalized.startsWith("<")) return none; // injected notifications, not user goals
   if (RELAY_START_RE.test(normalized)) return none;
-  const strong = findSignals(normalized, STRONG_SIGNALS);
+
+  const standalone = findSignals(normalized, STANDALONE_SIGNALS);
+  const time = findSignals(normalized, TIME_SIGNALS);
+  const until = UNTIL_RE.exec(normalized);
+  if (usable(normalized, until)) {
+    const kind = /stop\b/.test(until[0].slice(0, 12)) ? "dont_stop_until" : "keep_going_until";
+    if (COMPLETION_RE.test(until[1])) standalone.unshift(kind);
+    else time.push("until_without_goal");
+  }
   // "Do not stop until ..." starts like a question; only a real question ending in "?" is skipped.
-  if (!strong.length && QUESTION_START_RE.test(normalized) && /\?\s*$/.test(normalized)) return none;
-  const weak = findSignals(normalized, WEAK_SIGNALS).filter((name) => !strong.includes(name));
-  if (strong.length) return { matched: true, signals: [...strong, ...weak], strength: "strong" };
-  // One weak signal needs a directive; two independent ones ("over the weekend,
-  // rebuild the whole portal") carry the intent on their own.
-  if (!weak.length || (weak.length < 2 && !IMPERATIVE_RE.test(normalized))) return none;
-  return { matched: true, signals: weak, strength: "weak" };
+  if (!standalone.length && QUESTION_START_RE.test(normalized) && /\?\s*$/.test(normalized)) return none;
+
+  const scope = findSignals(normalized, SCOPE_SIGNALS);
+  const allScope = ALL_SCOPE_RE.exec(normalized);
+  // "migrate all the ..." already counts as migrate_all; the same words are not a second signal.
+  const otherSignals = standalone.length + scope.filter((name) => name !== "migrate_all").length + time.length;
+  if (usable(normalized, allScope) && (otherSignals > 0 || Number(allScope[1]) >= 10)) scope.push("all_scope");
+
+  const signals = [...new Set([...standalone, ...scope, ...time])];
+  if (standalone.length) return { matched: true, signals, strength: "strong" };
+  // Scope needs a directive or a second signal; time alone never matches.
+  if (scope.length && (IMPERATIVE_RE.test(normalized) || scope.length + time.length >= 2)) {
+    return { matched: true, signals, strength: "scope" };
+  }
+  return none;
 }
 
 function exists(file) {
