@@ -10,7 +10,7 @@ const { runCodexWorker } = require("./background/codex-worker");
 const { appendDispatcherEvent } = require("./dispatcher-memory");
 const { matchProjects } = require("./workspace-context");
 const { inferGoalScale } = require("./goal-scale");
-const { canonicalHomeRoot, resolveWorkspaceRoot } = require("./myos-compat");
+const { canonicalHomeRoot, resolveProjectsRoot, resolveWorkspaceRoot } = require("./myos-compat");
 const { runDataLookup } = require("./data-lookup");
 const {
   startBackgroundTasks,
@@ -32,7 +32,8 @@ function resolveRegistryWorkspaceRoot() {
 const WORKSPACE_ROOT = resolveRegistryWorkspaceRoot();
 const SHARED_RECIPES_ROOT = path.join(WORKSPACE_ROOT, "agents/shared/recipes");
 const AGENTS_ROOT = path.join(WORKSPACE_ROOT, "agents");
-const PROJECTS_ROOT = path.join(WORKSPACE_ROOT, "projects");
+// <workspace>/projects, or the Organizer's <install>/projects on All Sorted.
+const PROJECTS_ROOT = resolveProjectsRoot(WORKSPACE_ROOT);
 const PROJECT_INDEX_PATH = path.join(PROJECTS_ROOT, "_index.json");
 const REGISTRY_TTL_MS = 10_000;
 
