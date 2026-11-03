@@ -47,6 +47,21 @@ function resolveWorkspacePath(...segments) {
   return path.join(resolveWorkspaceRoot(), ...segments);
 }
 
+// The project registry folder (holding _index.json and the project folders).
+// MyOS homes keep it at <home>/workspace/projects. All Sorted installs keep it
+// where the Organizer writes it, <home>/projects, one level above the
+// workspace (the same split capability-router.js resolves for
+// capabilities-index.json). The workspace copy always wins when it has an
+// index, so a home that already resolved its projects never changes; the
+// install copy is used only when the workspace has no index and it does.
+function resolveProjectsRoot(workspaceRoot = resolveWorkspaceRoot()) {
+  const own = path.join(workspaceRoot, "projects");
+  if (fs.existsSync(path.join(own, "_index.json"))) return own;
+  const installCopy = path.join(path.dirname(workspaceRoot), "projects");
+  if (fs.existsSync(path.join(installCopy, "_index.json"))) return installCopy;
+  return own;
+}
+
 function resolveLogsRoot() {
   return resolveHomePath("logs");
 }
@@ -105,6 +120,7 @@ module.exports = {
   resolveLogsRoot,
   resolveStateRoot,
   resolveModelCatalogLocalPath,
+  resolveProjectsRoot,
   resolveWorkspacePath,
   resolveWorkspaceRoot,
   rootCandidates,

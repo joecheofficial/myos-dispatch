@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { resolveWorkspaceRoot } = require('./myos-compat.js');
 const { readJsonCached } = require('./json-cache');
+const { compileBoundedPhrase } = require('./phrase-boundary');
 
 const WORKSPACE_ROOT = resolveWorkspaceRoot();
 
@@ -35,7 +36,8 @@ const GENERIC_TOKENS = new Set([
   'up', 'we', 'with', 'you', 'your',
 ]);
 // Cross-domain tags are useful metadata but cannot identify a capability.
-const GENERIC_CAPABILITY_ALIASES = new Set(["api", "media", "myos", "service", "tool", "agent", "memory", "database", "launch", "files", "storage", "status", "chat", "transactional"]);
+// "git" names a tool, not the Git Manager: "explain git rebase" is a question.
+const GENERIC_CAPABILITY_ALIASES = new Set(["api", "media", "myos", "service", "tool", "agent", "memory", "database", "launch", "files", "storage", "status", "chat", "transactional", "git"]);
 // Organizer-built indexes alias a project capability with its package.json script
 // names. Every Node project has "start", "test", "check" or "status", so one of
 // those words in a prompt is no evidence for any particular project (issue #8
@@ -69,6 +71,40 @@ function normalizeText(value) {
   return String(value || '').toLowerCase();
 }
 
+// "Who is Ana, when did I last talk to her, about what?" asks about a person and
+// the history with them. Its words ("what", "about", "when") also fill most
+// skill descriptions, so it scored onto unrelated skills (an app-review skill on
+// a customer install) and a contact name or "message" read as a write. Only a
+// recall of contact with someone counts: "when did we last deploy" does not.
+const CONTACT_VERBS = "talk(?:ed)?|spoke|speak|chat(?:ted)?|met|meet|messaged|message|emailed|email|texted|text|called|call|heard|hear|saw|see|caught up|catch up|connected|connect|spoken";
+const RELATIONSHIP_RECALL_RE = new RegExp([
+  `\\bwhen\\s+(?:did|have)\\s+(?:i|we)\\s+last\\s+(?:${CONTACT_VERBS})\\b`,
+  `\\bwhen\\s+was\\s+the\\s+last\\s+time\\s+(?:i|we)\\s+(?:${CONTACT_VERBS})\\b`,
+  `\\blast\\s+time\\s+(?:i|we)\\s+(?:${CONTACT_VERBS})\\b`,
+  `\\b(?:i|we)\\s+last\\s+(?:${CONTACT_VERBS})\\b`,
+  `\\blast\\s+(?:talked|spoke|spoken|chatted|met|messaged|emailed|texted|called|contacted|heard from)\\b`,
+  `\\bwhat\\s+did\\s+(?:i|we)\\s+(?:last\\s+)?(?:talk|speak|chat|discuss)\\b`,
+  `\\bhow\\s+do\\s+(?:i|we)\\s+know\\s+(?!(?:if|whether|when|what|that|how|which|why)\\b)\\S`,
+].join('|'));
+// Capabilities that answer "who is this person and what is our history": a
+// relationship graph, contact resolution (whois / ontology), then a CRM.
+const RELATIONSHIP_CAPABILITY_TIERS = [
+  { re: /\b(?:relationships?|whois)\b/, bonus: 20 },
+  { re: /\b(?:identity|resolve[\s_-]contact|contact[\s_-]identity)\b/, bonus: 15 },
+  { re: /\b(?:crm|contacts?|people)\b/, bonus: 10 },
+];
+
+function isRelationshipQuestion(text) {
+  return RELATIONSHIP_RECALL_RE.test(normalizeText(text).replace(/[\u2018\u2019]/g, "'"));
+}
+
+// Tier bonus for a capability that can answer a relationship question, or null.
+function relationshipCapabilityBonus(capability = {}) {
+  const names = normalizeText([capability.id, ...(capability.aliases || [])].join(' ')).replace(/[/:]+/g, ' ');
+  const tier = RELATIONSHIP_CAPABILITY_TIERS.find((entry) => entry.re.test(names));
+  return tier ? tier.bonus : null;
+}
+
 function tokenize(value) {
   return normalizeText(value)
     .split(/[^a-z0-9]+/)
@@ -91,7 +127,7 @@ function hasBoundedPhrase(text, phrase) {
   let pattern = phraseRegexCache.get(needle);
   if (!pattern) {
     const escaped = escapeRegex(needle).replace(/\s+/g, '\\s+');
-    pattern = new RegExp(`\\b${escaped}\\b`, 'i');
+    pattern = compileBoundedPhrase(escaped, 'i');
     phraseRegexCache.set(needle, pattern);
   }
   return pattern.test(normalizeText(text));
@@ -208,19 +244,29 @@ function shortlistCapabilities(text, lane = null, limit = 5, options = {}) {
   }
   const index = loadCapabilityIndex(options);
   const scanDir = options.scanDir || options.scan_dir || index.scan_dir || null;
+  // A relationship question is answered only by a relationship, contact or CRM
+  // capability; anything else scored on its filler words.
+  const relationship = isRelationshipQuestion(text);
   const scored = index.capabilities
     .filter((capability) => !lane || capability.execution_lane === lane)
     .map((capability) => {
+      const bonus = relationship ? relationshipCapabilityBonus(capability) : 0;
+      if (bonus === null) return null;
       const updatedCapability = {
         ...capability,
         ...(scanDir ? { scan_dir: scanDir } : {}),
       };
+      const match = scoreCapabilityMatch(capability, text);
+      // A recipe still needs its own phrase evidence; the bonus only ranks it.
+      if (relationship && capability.type === 'recipe' && match.score <= 0) return null;
       return {
         capability: updatedCapability,
-        ...scoreCapabilityMatch(capability, text),
+        score: match.score + bonus,
+        evidenceScore: match.evidenceScore + bonus,
         ...(scanDir ? { scan_dir: scanDir } : {}),
       };
     })
+    .filter(Boolean)
     .filter((entry) =>
       entry.score > 0 &&
       (entry.evidenceScore >= MIN_CAPABILITY_EVIDENCE_SCORE || entry.score >= MIN_CAPABILITY_TOTAL_SCORE)
@@ -371,7 +417,7 @@ function selectExecutionLane(text, options = {}) {
   // A read request (check, verify, show, ...) never routes to a recipe that
   // changes something, whatever its score ("check the stripe payment from Alex"
   // is not "create a payment link").
-  const readRequest = READ_REQUEST_RE.test(normalizeText(text).trim());
+  const readRequest = READ_REQUEST_RE.test(normalizeText(text).trim()) || isRelationshipQuestion(text);
   const recipeCandidates = shortlistCapabilities(text, 'recipe_dispatcher', 3, options)
     .filter((entry) => !readRequest || !isMutatingRecipe(entry.capability, manifestBaseDirs(options)));
   const workerCandidates = shortlistCapabilities(text, 'worker_skill', 3, options);
@@ -445,6 +491,7 @@ function selectExecutionLane(text, options = {}) {
 module.exports = {
   CAPABILITIES_INDEX_PATH,
   inferExecutionSignals,
+  isRelationshipQuestion,
   loadCapabilityIndex,
   recipeOwner,
   scoreCapability,
