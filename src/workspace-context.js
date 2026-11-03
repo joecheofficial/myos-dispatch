@@ -2,7 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 const { readJsonCached } = require("./json-cache");
-const { isRelationshipQuestion, loadCapabilityIndex, shortlistCapabilities, selectExecutionLane } = require("./capability-router");
+const { isRelationshipQuestion, loadCapabilityIndex, shortlistCapabilities, selectExecutionLane, stripRelationshipRecall } = require("./capability-router");
 const { inferGoalScale } = require("./goal-scale");
 const { buildParallelizationPlan, detectBlockedReasons } = require("./parallelization-planner");
 const { homeDir, resolveProjectsRoot, resolveWorkspacePath, resolveWorkspaceRoot } = require("./myos-compat");
@@ -36,7 +36,6 @@ const EXPLORATORY_HINTS = /\b(help me understand|explain|what's going on|what is
 const FOLLOW_UP_HINTS = /\b(also|this|that|it|they|them|these|those|here|there|same|again|too|correct|yes|no|for this|for that|subdomain|rsvp)\b/;
 const READ_HINTS = /\b(what|what is|what's|what are|where is|where's|which|who is|who's|how many|show|find|get|look up|count|list|tell me|give me|retrieve|check)\b/;
 const WRITE_HINTS = /\b(add|update|save|mark|put|attach|send|forward|message|dm|notify|share|create|record|store|log|set|change|fix|repair|replace|redirect|deploy|commit|push|publish|implement|edit|upload|remove|delete|move|rename|prove|improve|upgrade|finish)\b/;
-const RELATIONSHIP_WRITE_CLAUSE_RE = /(?:^|[.!?;:]\s*|,\s*|\b(?:and|then|also)\s+)(?:please\s+)?(?:send|message|email|text|dm|reply|forward|add|update|save|mark|create|log|record|set|change|draft|write|tag|remove|delete|schedule|book|invite)\b/;
 const PROJECT_OPERATION_HINTS = /\b(giveaway(?:s)? page|mentorship page|promo code|promo link|payment link|onboarding|calendar|invite|rsvp|signups?|cohort|participant|participants?)\b/;
 // A request to produce something new ("build a launch for Lumen", "create an email
 // sequence for Lumen") may USE a project's data source, but it is not a lookup of
@@ -130,6 +129,16 @@ const LONG_PROMPT_WORDS = 60;
 const WEAK_MENTION_WINDOW = 200;
 const DIRECTIVE_OBJECT_RE_PREFIX = "\\b(?:check|run|use|open|fix|update|audit|review|send|start|debug|inspect|read|show|build|deploy|test|improve|work on|look at|investigate)\\s+(?:(?:the|my|our)\\s+)?";
 
+// "check|run|... [the] <slug>" as a whole word. A slug ending in a letter or
+// number ends at the next non-letter of any script ("камарумс"); otherwise \b
+// as before. Kept as one regex so the optional article can backtrack.
+function directiveObjectPattern(slug) {
+  const wordEnd = /[\p{L}\p{N}\p{M}_]$/u.test(slug);
+  return wordEnd
+    ? new RegExp(`${DIRECTIVE_OBJECT_RE_PREFIX}${escapeRegex(slug)}(?![\\p{L}\\p{N}\\p{M}_])`, "iu")
+    : new RegExp(`${DIRECTIVE_OBJECT_RE_PREFIX}${escapeRegex(slug)}\\b`, "i");
+}
+
 function countPhraseHits(haystack, needle) {
   const escaped = escapeRegex(needle).replace(/\s+/g, "\\s+");
   const found = compileBoundedPhrase(escaped, "i").indices(haystack);
@@ -177,7 +186,7 @@ function scoreProject(query, project) {
     const firstSentence = haystack.split(/[.!?\n]/)[0] || "";
     const slug = normalizeText(project.slug).trim();
     const directiveObject = slug
-      && compileBoundedPhrase(`${DIRECTIVE_OBJECT_RE_PREFIX}${escapeRegex(slug)}`, "i").test(firstSentence);
+      && directiveObjectPattern(slug).test(firstSentence);
     if (!directiveObject) return 0;
   }
 
@@ -522,6 +531,14 @@ function inferIntentType(query) {
   return "exploratory";
 }
 
+// A relationship question without its recall phrases and without the
+// capitalised names inside a sentence (a sentence's first word is kept, so
+// "Send Mark the notes" still reads as a send).
+function relationshipRequestText(query) {
+  return stripRelationshipRecall(query)
+    .replace(/(?<!(?:^|[.!?])\s*)(?<![\p{L}\p{N}_])\p{Lu}[\p{L}\p{N}'-]*/gu, " ");
+}
+
 function inferActionType(query, { userPrompt = false } = {}) {
   const text = normalizeText(query);
   // Prompt constraints are not shell syntax. Keep command safety inference on
@@ -531,10 +548,10 @@ function inferActionType(query, { userPrompt = false } = {}) {
     || /\b(?:keep|remain|stay)\s+(?:this\s+|strictly\s+)?read[ -]only\b/i.test(text)
     || /\b(?:(?:do not|don't|don’t|never)\s+(?:make\s+any\s+changes|change\s+anything|modify\s+anything|edit\s+anything)|no\s+(?:writes|changes|edits)\s*(?:[.!;,]|$))/i.test(text)
   )) return "read";
-  // "Who is Mark, when did I last message him?" reads history: the contact's
-  // name or a contact verb is not a write. An explicit write clause
-  // ("... and add her to the CRM") still is.
-  if (userPrompt && isRelationshipQuestion(text) && !RELATIONSHIP_WRITE_CLAUSE_RE.test(text)) return "read";
+  // "Who is Mark Chen, when did I last message him?" reads history. Its write
+  // words are the contact's name ("Mark") and the recalled contact
+  // ("message"), not a request. Any other write word still makes it a write.
+  if (userPrompt && isRelationshipQuestion(query) && !WRITE_HINTS.test(normalizeText(relationshipRequestText(query)))) return "read";
   const hasWrite = WRITE_HINTS.test(text);
   const hasRead = READ_HINTS.test(text) || DIRECT_LOOKUP_HINTS.test(text);
 

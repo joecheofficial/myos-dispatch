@@ -74,18 +74,24 @@ function normalizeText(value) {
 // "Who is Ana, when did I last talk to her, about what?" asks about a person and
 // the history with them. Its words ("what", "about", "when") also fill most
 // skill descriptions, so it scored onto unrelated skills (an app-review skill on
-// a customer install) and a contact name or "message" read as a write. Only a
-// recall of contact with someone counts: "when did we last deploy" does not.
-const CONTACT_VERBS = "talk(?:ed)?|spoke|speak|chat(?:ted)?|met|meet|messaged|message|emailed|email|texted|text|called|call|heard|hear|saw|see|caught up|catch up|connected|connect|spoken";
-const RELATIONSHIP_RECALL_RE = new RegExp([
+// a customer install), and a contact's name or "message" read as a write.
+// It needs both a recall of contact ("when did I last talk", "last talked") and
+// a person: a leading "who is ...", or a pronoun or capitalised name as the
+// object of the contact. "When did we last deploy" or "last time I called the
+// API" are not relationship questions.
+const CONTACT_VERBS = "talk|talked|speak|spoke|spoken|chat|chatted|message|messaged|email|emailed|text|texted|meet|met";
+const RELATIONSHIP_RECALL_SOURCE = [
   `\\bwhen\\s+(?:did|have)\\s+(?:i|we)\\s+last\\s+(?:${CONTACT_VERBS})\\b`,
   `\\bwhen\\s+was\\s+the\\s+last\\s+time\\s+(?:i|we)\\s+(?:${CONTACT_VERBS})\\b`,
   `\\blast\\s+time\\s+(?:i|we)\\s+(?:${CONTACT_VERBS})\\b`,
   `\\b(?:i|we)\\s+last\\s+(?:${CONTACT_VERBS})\\b`,
-  `\\blast\\s+(?:talked|spoke|spoken|chatted|met|messaged|emailed|texted|called|contacted|heard from)\\b`,
-  `\\bwhat\\s+did\\s+(?:i|we)\\s+(?:last\\s+)?(?:talk|speak|chat|discuss)\\b`,
-  `\\bhow\\s+do\\s+(?:i|we)\\s+know\\s+(?!(?:if|whether|when|what|that|how|which|why)\\b)\\S`,
-].join('|'));
+  "\\blast\\s+(?:talked|spoke|spoken|chatted|messaged|emailed|texted)\\b",
+  "\\bwhat\\s+did\\s+(?:i|we)\\s+(?:last\\s+)?(?:talk|speak|chat)\\s+(?:(?:to|with)\\s+\\S+\\s+)?about\\b",
+].join("|");
+const RELATIONSHIP_RECALL_RE = new RegExp(RELATIONSHIP_RECALL_SOURCE, "i");
+const WHO_LEAD_RE = /^\s*(?:(?:hey|ok|okay|so)[,\s]+)?who(?:'s|\s+is|\s+was)\s+\S/i;
+// Case-sensitive on purpose: a capitalised word after the contact is a name.
+const PERSON_OBJECT_RE = /(?:^|[^\p{L}\p{N}_])(?:to|with|from|[Tt]alk(?:ed)?|[Ss]p(?:eak|oke)|[Cc]hat(?:ted)?|[Mm]essag(?:e|ed)|[Ee]mail(?:ed)?|[Tt]ext(?:ed)?|[Mm]eet|[Mm]et)\s+(?:him\b|her\b|them\b|\p{Lu})/u;
 // Capabilities that answer "who is this person and what is our history": a
 // relationship graph, contact resolution (whois / ontology), then a CRM.
 const RELATIONSHIP_CAPABILITY_TIERS = [
@@ -94,8 +100,20 @@ const RELATIONSHIP_CAPABILITY_TIERS = [
   { re: /\b(?:crm|contacts?|people)\b/, bonus: 10 },
 ];
 
+function normalizeApostrophes(value) {
+  return String(value || "").replace(/[\u2018\u2019]/g, "'");
+}
+
 function isRelationshipQuestion(text) {
-  return RELATIONSHIP_RECALL_RE.test(normalizeText(text).replace(/[\u2018\u2019]/g, "'"));
+  const original = normalizeApostrophes(text);
+  if (!RELATIONSHIP_RECALL_RE.test(original)) return false;
+  return WHO_LEAD_RE.test(original) || PERSON_OBJECT_RE.test(original);
+}
+
+// The request with its recall phrases removed ("when did I last message"), so
+// a write check sees only what the user asks to be done.
+function stripRelationshipRecall(text) {
+  return normalizeApostrophes(text).replace(new RegExp(RELATIONSHIP_RECALL_SOURCE, "gi"), " ");
 }
 
 // Tier bonus for a capability that can answer a relationship question, or null.
@@ -238,6 +256,27 @@ function inferExecutionSignals(text) {
   };
 }
 
+// Scoring for a relationship question. A capability the request names keeps
+// its own score (a recipe always needs its own phrase evidence). Otherwise only
+// a relationship, contact or CRM capability may answer: with evidence of its
+// own it gets its tier bonus; without any it is still offered, ranked below
+// every candidate that has evidence. Everything else scored on filler words.
+function relationshipMatch(capability, text) {
+  const match = scoreCapabilityMatch(capability, text);
+  if (capability.type === 'recipe' && match.score <= 0) return null;
+  const bonus = relationshipCapabilityBonus(capability);
+  if (bonus === null) {
+    const haystack = normalizeText(text);
+    const named = capability.type === 'recipe' || (capability.aliases || [])
+      .some((alias) => isIdentifyingAlias(capability, alias) && hasBoundedPhrase(haystack, alias));
+    return named ? match : null;
+  }
+  if (match.evidenceScore > 0) {
+    return { score: match.score + bonus, evidenceScore: match.evidenceScore + bonus };
+  }
+  return { score: MIN_CAPABILITY_EVIDENCE_SCORE + bonus / 10, evidenceScore: MIN_CAPABILITY_EVIDENCE_SCORE };
+}
+
 function shortlistCapabilities(text, lane = null, limit = 5, options = {}) {
   if (ROUTING_COMPLAINT_RE.test(normalizeText(text))) {
     return [];
@@ -250,19 +289,15 @@ function shortlistCapabilities(text, lane = null, limit = 5, options = {}) {
   const scored = index.capabilities
     .filter((capability) => !lane || capability.execution_lane === lane)
     .map((capability) => {
-      const bonus = relationship ? relationshipCapabilityBonus(capability) : 0;
-      if (bonus === null) return null;
       const updatedCapability = {
         ...capability,
         ...(scanDir ? { scan_dir: scanDir } : {}),
       };
-      const match = scoreCapabilityMatch(capability, text);
-      // A recipe still needs its own phrase evidence; the bonus only ranks it.
-      if (relationship && capability.type === 'recipe' && match.score <= 0) return null;
+      const match = relationship ? relationshipMatch(capability, text) : scoreCapabilityMatch(capability, text);
+      if (!match) return null;
       return {
         capability: updatedCapability,
-        score: match.score + bonus,
-        evidenceScore: match.evidenceScore + bonus,
+        ...match,
         ...(scanDir ? { scan_dir: scanDir } : {}),
       };
     })
@@ -417,7 +452,7 @@ function selectExecutionLane(text, options = {}) {
   // A read request (check, verify, show, ...) never routes to a recipe that
   // changes something, whatever its score ("check the stripe payment from Alex"
   // is not "create a payment link").
-  const readRequest = READ_REQUEST_RE.test(normalizeText(text).trim()) || isRelationshipQuestion(text);
+  const readRequest = READ_REQUEST_RE.test(normalizeText(text).trim());
   const recipeCandidates = shortlistCapabilities(text, 'recipe_dispatcher', 3, options)
     .filter((entry) => !readRequest || !isMutatingRecipe(entry.capability, manifestBaseDirs(options)));
   const workerCandidates = shortlistCapabilities(text, 'worker_skill', 3, options);
@@ -493,6 +528,7 @@ module.exports = {
   inferExecutionSignals,
   isRelationshipQuestion,
   loadCapabilityIndex,
+  stripRelationshipRecall,
   recipeOwner,
   scoreCapability,
   scoreCapabilityMatch,
