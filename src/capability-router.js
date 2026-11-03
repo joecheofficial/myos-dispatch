@@ -101,7 +101,7 @@ const NAME_RUN = "\\p{Lu}[\\p{L}\\p{N}'-]*(?:[ \\t]+\\p{Lu}[\\p{L}\\p{N}'-]*){0,
 const NAMED_PERSON_RE = new RegExp(`(?<=${PERSON_OBJECT_LEAD})${NAME_RUN}|(?<=^\\s*(?:(?:[Hh]ey|[Oo]k|[Oo]kay|[Ss]o)[,\\s]+)?[Ww]ho(?:'s|\\s+is|\\s+was)\\s+)${NAME_RUN}`, "gu");
 // Words that ask for something to be done. A name run never swallows them
 // after its first word ("message Ana Send her the notes").
-const REQUEST_WORD_RE = /^(?:add|update|save|mark|put|attach|send|forward|message|dm|notify|share|create|record|store|log|set|change|fix|repair|replace|redirect|deploy|commit|push|publish|implement|edit|upload|remove|delete|move|rename|improve|upgrade|finish|invite|schedule|book|reply|draft|write|tag|email|text|call)$/i;
+const REQUEST_WORD_RE = /^(?:add|update|save|mark|put|attach|send|forward|message|dm|notify|share|create|record|store|log|set|change|fix|repair|replace|redirect|deploy|commit|push|publish|implement|edit|upload|remove|delete|move|rename|improve|upgrade|finish|invite|schedule|book|reply|draft|write|tag|email|text|call|cancel|refund|charge|pay|bill|transfer|buy|purchase|order|ping|remind|nudge|follow|archive|approve|submit|assign|close|merge|post|sync|import|export|reset|restart|install|uninstall|kill|enable|disable|grant|revoke|block|unblock|confirm|accept|decline|reject)$/i;
 // Capabilities that answer "who is this person and what is our history": a
 // relationship graph, contact resolution (whois / ontology), then a CRM.
 const RELATIONSHIP_CAPABILITY_TIERS = [
