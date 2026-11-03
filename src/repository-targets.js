@@ -3,7 +3,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-const { resolveWorkspaceRoot } = require("./myos-compat");
+const { resolveProjectsRoot, resolveWorkspaceRoot } = require("./myos-compat");
 
 const MAX_NESTED_DEPTH = 4;
 const MAX_NESTED_REPOS = 12;
@@ -57,8 +57,14 @@ function findNestedGitRoots(rootPath, options = {}) {
 
 function loadProjectRepositoryTargets(projectSlug, options = {}) {
   if (!projectSlug) return [];
-  const workspaceRoot = options.workspaceRoot || resolveWorkspaceRoot();
-  const indexPath = options.projectIndexPath || path.join(workspaceRoot, "projects", "_index.json");
+  // Repository paths are relative to the folder holding projects/: the
+  // workspace on MyOS homes, the install root when the Organizer's registry
+  // lives at <install>/projects. An explicit index keeps its workspace base.
+  const projectsRoot = resolveProjectsRoot(options.workspaceRoot || resolveWorkspaceRoot());
+  const indexPath = options.projectIndexPath || path.join(projectsRoot, "_index.json");
+  const workspaceRoot = options.projectIndexPath
+    ? (options.workspaceRoot || resolveWorkspaceRoot())
+    : path.dirname(projectsRoot);
   let index;
   try {
     index = JSON.parse(fs.readFileSync(indexPath, "utf8"));

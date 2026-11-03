@@ -18,14 +18,19 @@ function planWithContext(text, opts = {}) {
     if (header && !/\b(?:project|homepage|website|portal|app|repository|repo)\b/i.test(header[1])) header = null;
     explicitHeader = Boolean(header);
     const workspace = env.MYOS_HOME_ROOT ? path.join(env.MYOS_HOME_ROOT,'workspace') : require('../myos-compat').resolveWorkspaceRoot();
+    // Repository paths are relative to the folder that holds projects/: the
+    // workspace on MyOS homes, the install root on All Sorted installs.
+    const projectsRoot = require('../myos-compat').resolveProjectsRoot(workspace);
+    const repositoryBase = path.dirname(projectsRoot);
     let registeredOwner;
     if (header) {
       try {
-        const file = path.join(workspace,'projects/_index.json');
+        const file = path.join(projectsRoot,'_index.json');
         if (fs.statSync(file).size <= 1024 * 1024) {
           const projects = JSON.parse(fs.readFileSync(file,'utf8')).projects || {};
           const entries = Array.isArray(projects) ? projects : Object.entries(projects).map(([slug,p])=>({slug,...p}));
-          const matches = entries.filter(p=>[p.slug,p.name,...(p.aliases || [])].some(v=>boundedMention(header[1],v)));
+          const { isRoutableProject } = require('../workspace-context');
+          const matches = entries.filter(p=>isRoutableProject(p) && [p.slug,p.name,...(p.aliases || [])].some(v=>boundedMention(header[1],v)));
           if (matches.length === 1) registeredOwner = matches[0];
         }
       } catch {}
@@ -46,8 +51,8 @@ function planWithContext(text, opts = {}) {
       if (supported && registeredOwner) {
         const repositories = (registeredOwner.repositories || []).filter(r=>[r.id,...(r.aliases || [])].some(v=>boundedMention(header[1],v)));
         if (repositories.length === 1 && typeof repositories[0].path === 'string') {
-          const target = path.resolve(workspace,repositories[0].path);
-          const relative = path.relative(workspace,target);
+          const target = path.resolve(repositoryBase,repositories[0].path);
+          const relative = path.relative(repositoryBase,target);
           if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)) repositoryTarget = {id:repositories[0].id,path:target};
         }
       }
@@ -92,12 +97,16 @@ function planWithContext(text, opts = {}) {
 
   if (desktop && !explicit?.length && !explicitHeader && fresh && prior.repositoryTarget) {
     const workspace = env.MYOS_HOME_ROOT ? path.join(env.MYOS_HOME_ROOT,'workspace') : require('../myos-compat').resolveWorkspaceRoot();
+    // Repository paths are relative to the folder that holds projects/: the
+    // workspace on MyOS homes, the install root on All Sorted installs.
+    const projectsRoot = require('../myos-compat').resolveProjectsRoot(workspace);
+    const repositoryBase = path.dirname(projectsRoot);
     try {
-      const projects = JSON.parse(fs.readFileSync(path.join(workspace,'projects/_index.json'),'utf8')).projects || {};
+      const projects = JSON.parse(fs.readFileSync(path.join(projectsRoot,'_index.json'),'utf8')).projects || {};
       const project = Array.isArray(projects) ? projects.find(p=>p.slug === prior.projectSlug) : projects[prior.projectSlug];
       const repository = project?.repositories?.find(r=>r.id === prior.repositoryTarget.id);
-      const expected = repository && path.resolve(workspace,repository.path);
-      const relative = expected && path.relative(workspace,expected);
+      const expected = repository && path.resolve(repositoryBase,repository.path);
+      const relative = expected && path.relative(repositoryBase,expected);
       if (!relative || relative.startsWith('..') || path.isAbsolute(relative) || expected !== prior.repositoryTarget.path || !fs.statSync(expected).isDirectory()) throw new Error('stale repository target');
     } catch {
       fs.writeFileSync(file,'{}',{mode:0o600});
@@ -122,6 +131,6 @@ function planWithContext(text, opts = {}) {
 function boundedMention(text, value) {
   if (typeof value !== 'string' || value.trim().length < 2) return false;
   const phrase = value.toLowerCase().replaceAll('-', ' ').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp('\\b' + phrase + '\\b','i').test(text.toLowerCase().replaceAll('-', ' '));
+  return require('../phrase-boundary').compileBoundedPhrase(phrase, 'i').test(text.toLowerCase().replaceAll('-', ' '));
 }
 module.exports = { planWithContext };

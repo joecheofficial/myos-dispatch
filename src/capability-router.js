@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { resolveWorkspaceRoot } = require('./myos-compat.js');
 const { readJsonCached } = require('./json-cache');
+const { compileBoundedPhrase } = require('./phrase-boundary');
 
 const WORKSPACE_ROOT = resolveWorkspaceRoot();
 
@@ -35,7 +36,8 @@ const GENERIC_TOKENS = new Set([
   'up', 'we', 'with', 'you', 'your',
 ]);
 // Cross-domain tags are useful metadata but cannot identify a capability.
-const GENERIC_CAPABILITY_ALIASES = new Set(["api", "media", "myos", "service", "tool", "agent", "memory", "database", "launch", "files", "storage", "status", "chat", "transactional"]);
+// "git" names a tool, not the Git Manager: "explain git rebase" is a question.
+const GENERIC_CAPABILITY_ALIASES = new Set(["api", "media", "myos", "service", "tool", "agent", "memory", "database", "launch", "files", "storage", "status", "chat", "transactional", "git"]);
 // Organizer-built indexes alias a project capability with its package.json script
 // names. Every Node project has "start", "test", "check" or "status", so one of
 // those words in a prompt is no evidence for any particular project (issue #8
@@ -69,6 +71,84 @@ function normalizeText(value) {
   return String(value || '').toLowerCase();
 }
 
+// "Who is Ana, when did I last talk to her, about what?" asks about a person and
+// the history with them. Its words ("what", "about", "when") also fill most
+// skill descriptions, so it scored onto unrelated skills (an app-review skill on
+// a customer install), and a contact's name or "message" read as a write.
+// It needs both a recall of contact ("when did I last talk", "last talked") and
+// a person: a leading "who is ...", or a pronoun or capitalised name as the
+// object of the contact. "When did we last deploy" or "last time I called the
+// API" are not relationship questions.
+const CONTACT_VERBS = "talk|talked|speak|spoke|spoken|chat|chatted|message|messaged|email|emailed|text|texted|meet|met";
+const RELATIONSHIP_RECALL_SOURCE = [
+  `\\bwhen\\s+(?:did|have)\\s+(?:i|we)\\s+last\\s+(?:${CONTACT_VERBS})\\b`,
+  `\\bwhen\\s+was\\s+the\\s+last\\s+time\\s+(?:i|we)\\s+(?:${CONTACT_VERBS})\\b`,
+  `\\blast\\s+time\\s+(?:i|we)\\s+(?:${CONTACT_VERBS})\\b`,
+  `\\b(?:i|we)\\s+last\\s+(?:${CONTACT_VERBS})\\b`,
+  "\\blast\\s+(?:talked|spoke|spoken|chatted|messaged|emailed|texted)\\b",
+  "\\bwhat\\s+did\\s+(?:i|we)\\s+(?:last\\s+)?(?:talk|speak|chat)\\s+(?:(?:to|with)\\s+\\S+\\s+)?about\\b",
+].join("|");
+const RELATIONSHIP_RECALL_RE = new RegExp(RELATIONSHIP_RECALL_SOURCE, "i");
+const WHO_LEAD_RE = /^\s*(?:(?:hey|ok|okay|so)[,\s]+)?who(?:'s|\s+is|\s+was)\s+\S/i;
+// The person is the direct object of the contact: "talk to her", "spoke with
+// Ana", "message Ben". Case-sensitive on purpose: a capitalised word there is
+// a name. "talk about it with Codex" is not a person object.
+const CONTACT_VERB_CASED = "[Tt]alk(?:ed)?|[Ss]p(?:eak|oke|oken)|[Cc]hat(?:ted)?|[Mm]essag(?:e|ed)|[Ee]mail(?:ed)?|[Tt]ext(?:ed)?|[Mm]eet|[Mm]et";
+const PERSON_OBJECT_LEAD = `(?:^|[^\\p{L}\\p{N}_])(?:${CONTACT_VERB_CASED})(?:\\s+(?:to|with))?\\s+`;
+const PERSON_OBJECT_RE = new RegExp(`${PERSON_OBJECT_LEAD}(?:(?:him|her|them)(?![\\p{L}\\p{N}_])|\\p{Lu})`, "u");
+// A name: up to four capitalised words. Used only to blank the name out.
+const NAME_RUN = "\\p{Lu}[\\p{L}\\p{N}'-]*(?:[ \\t]+\\p{Lu}[\\p{L}\\p{N}'-]*){0,3}";
+const NAMED_PERSON_RE = new RegExp(`(?<=${PERSON_OBJECT_LEAD})${NAME_RUN}|(?<=^\\s*(?:(?:[Hh]ey|[Oo]k|[Oo]kay|[Ss]o)[,\\s]+)?[Ww]ho(?:'s|\\s+is|\\s+was)\\s+)${NAME_RUN}`, "gu");
+// Words that ask for something to be done. A name run never swallows them
+// after its first word ("message Ana Send her the notes").
+const REQUEST_WORD_RE = /^(?:add|update|save|mark|put|attach|send|forward|message|dm|notify|share|create|record|store|log|set|change|fix|repair|replace|redirect|deploy|commit|push|publish|implement|edit|upload|remove|delete|move|rename|improve|upgrade|finish|invite|schedule|book|reply|draft|write|tag|email|text|call|cancel|refund|charge|pay|bill|transfer|buy|purchase|order|ping|remind|nudge|follow|archive|approve|submit|assign|close|merge|post|sync|import|export|reset|restart|install|uninstall|kill|enable|disable|grant|revoke|block|unblock|confirm|accept|decline|reject)$/i;
+// Capabilities that answer "who is this person and what is our history": a
+// relationship graph, contact resolution (whois / ontology), then a CRM.
+const RELATIONSHIP_CAPABILITY_TIERS = [
+  { re: /\b(?:relationships?|whois)\b/, bonus: 20 },
+  { re: /\b(?:identity|resolve[\s_-]contact|contact[\s_-]identity)\b/, bonus: 15 },
+  { re: /\b(?:crm|contacts?|people)\b/, bonus: 10 },
+];
+
+function normalizeApostrophes(value) {
+  return String(value || "").replace(/[\u2018\u2019]/g, "'");
+}
+
+function isRelationshipQuestion(text) {
+  const original = normalizeApostrophes(text);
+  if (!RELATIONSHIP_RECALL_RE.test(original)) return false;
+  return WHO_LEAD_RE.test(original) || PERSON_OBJECT_RE.test(original);
+}
+
+// A relationship question with the person's name and the recall phrase
+// ("when did I last message") blanked out, so a write check sees only what the
+// user asks to be done: "who is Mark Chen, when did I last message him" has
+// none, "... then add her to the CRM" still does.
+function relationshipRequestText(text) {
+  return normalizeApostrophes(text)
+    .replace(NAMED_PERSON_RE, (run) => {
+      const words = run.split(/([ \t]+)/);
+      let cut = words.length;
+      for (let i = 2; i < words.length; i += 2) {
+        if (REQUEST_WORD_RE.test(words[i])) { cut = i; break; }
+      }
+      return " ".repeat(words.slice(0, cut).join("").length) + words.slice(cut).join("");
+    })
+    .replace(new RegExp(RELATIONSHIP_RECALL_SOURCE, "gi"), " ");
+}
+
+// True when a relationship question also asks for something to be done.
+function relationshipQuestionRequestsWrite(text) {
+  return normalizeText(relationshipRequestText(text)).split(/[^\p{L}\p{N}_]+/u).some((word) => REQUEST_WORD_RE.test(word));
+}
+
+// Tier bonus for a capability that can answer a relationship question, or null.
+function relationshipCapabilityBonus(capability = {}) {
+  const names = normalizeText([capability.id, ...(capability.aliases || [])].join(' ')).replace(/[/:]+/g, ' ');
+  const tier = RELATIONSHIP_CAPABILITY_TIERS.find((entry) => entry.re.test(names));
+  return tier ? tier.bonus : null;
+}
+
 function tokenize(value) {
   return normalizeText(value)
     .split(/[^a-z0-9]+/)
@@ -91,7 +171,7 @@ function hasBoundedPhrase(text, phrase) {
   let pattern = phraseRegexCache.get(needle);
   if (!pattern) {
     const escaped = escapeRegex(needle).replace(/\s+/g, '\\s+');
-    pattern = new RegExp(`\\b${escaped}\\b`, 'i');
+    pattern = compileBoundedPhrase(escaped, 'i');
     phraseRegexCache.set(needle, pattern);
   }
   return pattern.test(normalizeText(text));
@@ -202,12 +282,36 @@ function inferExecutionSignals(text) {
   };
 }
 
+// Scoring for a relationship question. A capability the request names keeps
+// its own score (a recipe always needs its own phrase evidence). Otherwise only
+// a relationship, contact or CRM capability may answer: with evidence of its
+// own it gets its tier bonus; without any it is still offered, ranked below
+// every candidate that has evidence. Everything else scored on filler words.
+function relationshipMatch(capability, text) {
+  const match = scoreCapabilityMatch(capability, text);
+  if (capability.type === 'recipe' && match.score <= 0) return null;
+  const bonus = relationshipCapabilityBonus(capability);
+  if (bonus === null) {
+    const haystack = normalizeText(text);
+    const named = capability.type === 'recipe' || (capability.aliases || [])
+      .some((alias) => isIdentifyingAlias(capability, alias) && hasBoundedPhrase(haystack, alias));
+    return named ? match : null;
+  }
+  if (match.evidenceScore > 0) {
+    return { score: match.score + bonus, evidenceScore: match.evidenceScore + bonus };
+  }
+  return { score: MIN_CAPABILITY_EVIDENCE_SCORE + bonus / 10, evidenceScore: MIN_CAPABILITY_EVIDENCE_SCORE };
+}
+
 function shortlistCapabilities(text, lane = null, limit = 5, options = {}) {
   if (ROUTING_COMPLAINT_RE.test(normalizeText(text))) {
     return [];
   }
   const index = loadCapabilityIndex(options);
   const scanDir = options.scanDir || options.scan_dir || index.scan_dir || null;
+  // A relationship question is answered only by a relationship, contact or CRM
+  // capability; anything else scored on its filler words.
+  const relationship = isRelationshipQuestion(text);
   const scored = index.capabilities
     .filter((capability) => !lane || capability.execution_lane === lane)
     .map((capability) => {
@@ -215,12 +319,15 @@ function shortlistCapabilities(text, lane = null, limit = 5, options = {}) {
         ...capability,
         ...(scanDir ? { scan_dir: scanDir } : {}),
       };
+      const match = relationship ? relationshipMatch(capability, text) : scoreCapabilityMatch(capability, text);
+      if (!match) return null;
       return {
         capability: updatedCapability,
-        ...scoreCapabilityMatch(capability, text),
+        ...match,
         ...(scanDir ? { scan_dir: scanDir } : {}),
       };
     })
+    .filter(Boolean)
     .filter((entry) =>
       entry.score > 0 &&
       (entry.evidenceScore >= MIN_CAPABILITY_EVIDENCE_SCORE || entry.score >= MIN_CAPABILITY_TOTAL_SCORE)
@@ -445,7 +552,10 @@ function selectExecutionLane(text, options = {}) {
 module.exports = {
   CAPABILITIES_INDEX_PATH,
   inferExecutionSignals,
+  isRelationshipQuestion,
   loadCapabilityIndex,
+  relationshipQuestionRequestsWrite,
+  relationshipRequestText,
   recipeOwner,
   scoreCapability,
   scoreCapabilityMatch,
