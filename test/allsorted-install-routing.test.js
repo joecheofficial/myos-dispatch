@@ -274,6 +274,10 @@ test("write requests that mention the last contact stay writes", () => {
   for (const query of [
     "When did I last talk to Ana? Invite her to the cohort",
     "When did we last meet with Ana? Schedule a call with her next week",
+    "When did I last talk to Ana? Cancel her subscription",
+    "When did I last talk to Ana? Refund her last payment",
+    "When did I last talk to Ana? Charge her card for the balance",
+    "When did I last speak to Ana? Ping her about the invoice",
   ]) {
     assert.notEqual(inferActionType(query, { userPrompt: true }), "read", query);
   }
