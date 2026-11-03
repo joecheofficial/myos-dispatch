@@ -2,6 +2,16 @@
 
 All notable changes to MyOS Dispatch are documented here.
 
+## v4.4.0-rc.7 - 2026-11-03
+
+All Sorted customer line: v4.4.0-rc.6 plus the routing fixes found on a customer install, below. It does not include later main-branch provider and writer routing work.
+
+- The projects folder resolves the same way for every hook surface, so an install whose workspace links its projects folder elsewhere still routes project prompts.
+- Capability index entries whose status is missing, retired, archive or archived are never routed to.
+- Phrase matching respects word boundaries in any script, not only ASCII.
+- "git" alone names a tool, not the Git Manager: "explain git rebase" is a question; "start a git manager task" still routes to it.
+- Questions about a person ("who is X", "when did I last talk to X") are reads and prefer the contacts and CRM owners. Money and nudge verbs keep a relationship prompt off "read", and only the person's name is blanked in the write check.
+
 ## v4.4.0-rc.6 - 2026-11-01
 
 All Sorted customer line: v4.4.0-rc.5 plus the support #17/#18 fixes below. It does not include later main-branch provider and writer routing work.
