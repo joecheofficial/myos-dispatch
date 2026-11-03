@@ -60,12 +60,13 @@ const MODEL_STEP_RESERVATION_USD = 0.25;
 const OVERNIGHT = "overnight|all night|through the night|over the weekend|all weekend";
 const NUMBER = "several|a few|few|many|\\d{1,3}|two|three|four|five|six|seven|eight|nine|ten|twelve|24";
 const SCOPE_NOUNS = "app|application|codebase|platform|portal|system|site|website|backend|frontend|product|stack|service|flow|pipeline|repo|repository|crm|infrastructure|monorepo|database|module|onboarding";
+const WORK_ITEMS = "modules|installs|services|apps|repos|repositories|projects|sites|packages|customers|clients|tables|pages|files|invoices|tickets|contacts|phases|tests";
 const PLURAL_SCOPE = "modules|installs|services|apps|repos|repositories|projects|sites|packages|customers|clients|tables|pages|files";
 // The scope noun is the object: end of text, punctuation or a preposition follows.
 const PHRASE_END = "(?=\\s*(?:$|[.,;:!?\\n)]|(?:to|in|into|from|with|for|on|onto|using|and|then|so|over|across|by|end)\\b))";
 const SCOPE_VERBS = "build|rebuild|rewrite|overhaul|refactor|migrate|port|convert|redesign|upgrade";
 const AUTHORING_VERBS = "write|create|develop";
-const INSTRUCTION_PREFIX_RE = /(?:^|[.!?;:,\n]\s*|\b(?:please|can you|could you|would you|will you|i want you to|i need you to|go ahead and|let'?s|then|and|ok|okay|now|so|just|we'?ll|we will|we'?re going to|we are going to|we need to|you need to|you should|you can)\s+)$/;
+const INSTRUCTION_PREFIX_RE = /(?:^|[.!?;:,\n]\s*|\b(?:please|can you|could you|would you|will you|i want you to|i need you to|go ahead and|let'?s|then|and|ok|okay|now|so|just|you|we'?ll|we will|we'?re going to|we are going to|we need to|you need to|you should|you can)\s+|(?:^|\s)(?:@[a-z0-9_-]+|claude|codex|ultragoal|ralph)[,:]?\s+)$/;
 const UNTIL_RE = /\b(?:(?:keep|continue|carry on|grind|iterate)\b(?:\s+(?:going|working|at it|iterating|grinding|pushing|away|on (?:this|it|that|(?:the|our|my|this) [a-z0-9-]+(?: [a-z0-9-]+){0,2}))){0,2}|work\s+(?:on (?:this|it|that|(?:the|our|my|this) [a-z0-9-]+(?: [a-z0-9-]+){0,2})|away|through (?:this|it|them))|(?:don'?t|do not|never)\s+stop\b[^.?!\n]{0,20}?)\s+(?:until|till|before)\s+([^.?!\n]{0,60})/;
 // The completion or scope object must be what the "until" clause is about.
 const COMPLETION_RE = new RegExp([
@@ -85,7 +86,10 @@ const STANDALONE_SIGNALS = [
 // to the assistant; "we'll spend two days exploring Kyoto" is a travel plan.
 const DEDICATED_HOURS_RE = new RegExp(`\\bspend\\s+(?:the next\\s+(?:${NUMBER})\\s*\\+?\\s*(?:hours?|hrs)|(?:${NUMBER})\\s*\\+?\\s*(?:hours?|hrs)|the night)\\s+[a-z]+ing\\b`);
 const DIRECT_INSTRUCTION_PREFIX_RE = /(?:^|[.!?;:,\n]\s*|\b(?:please|can you|could you|would you|will you|i want you to|i need you to|go ahead and|then|and|ok|okay|now|so|just)\s+)$/;
-const AWAY_RE = /\bwhile i(?:'m| am)? (?:asleep|sleeping|sleep|away)\b|\b(?:i'?m|i am) (?:off to|going to) bed\b|\bbefore i wake up\b/;
+// "While I sleep" counts only with a real work verb in the same clause:
+// "finish the migration while I sleep", not "plan meals while I'm away".
+const AWAY_RE = /\bwhile i(?:'m| am)? (?:asleep|sleeping|sleep|away)\b/;
+const AWAY_WORK_RE = /(?:^|\s)(?:build|migrate|port|convert|rewrite|refactor|implement|finish|ship|overhaul|rebuild|redesign|upgrade|keep going|continue|work on|grind|iterate|tackle|complete)\b/;
 const SCOPE_SIGNALS = [
   ["long_running", /\blong[- ]running\s+(?:job|task|goal|work|migration|build|project|effort|session)\b|\bmulti[- ]?(?:hour|day|session)\s+(?:[a-z-]+\s+){0,2}?(?:job|task|goal|effort|project|migration|build|refactor|run)\b/],
   ["multi_step_goal", /\bmulti[- ]step\s+(?:goal|plan|project|migration|build|effort)\b/],
@@ -93,7 +97,8 @@ const SCOPE_SIGNALS = [
   ["migrate_all", /\bmigrat(?:e|ing)\s+(?:all|every\w*|the (?:entire|whole)|our (?:entire|whole)|everything)\b/],
   ["whole_scope", new RegExp(`\\b(?:${SCOPE_VERBS})\\s+(?:out\\s+)?(?:the|an?|our|my|this)\\s+(?:entire|whole|full|complete)\\s+(?:[a-z0-9-]+\\s+){0,2}?(?:${SCOPE_NOUNS})${PHRASE_END}`)],
   // Ten or more items: "process all 300 invoices", "port the remaining 30 modules".
-  ["many_items", /\b(?:all|the remaining|remaining|every one of the|each of the|through all)\s+(?:of\s+)?(?:the\s+|our\s+|my\s+)?(\d{2,})\s+[a-z]|\b(?:backlog|batch|queue|list|pile) of (\d{2,})\s+[a-z]/],
+  // Ten or more work items, with the directive in the same clause (checked below).
+  ["many_items", new RegExp(`\\b(?:all|the remaining|remaining|every one of the|each of the|through all|(?:backlog|batch|queue|list|pile) of)\\s+(?:of\\s+)?(?:the\\s+|our\\s+|my\\s+)?(?:\\d{2,}|\\d{1,3}(?:,\\d{3})+)\\s+(?:[a-z0-9-]+\\s+){0,2}?(?:${WORK_ITEMS})\\b`)],
 ];
 // Only with a second signal: "upgrade all the packages", "write the entire backend".
 const SECOND_SIGNAL_SCOPE = [
@@ -113,7 +118,7 @@ const QUESTION_START_RE = /^(?:what|what's|how|why|when|where|who|whose|which|is
 const FILLER = "(?:(?:hey|hi|ok|okay|also|and|so|now|then|quick one)[,!:]?\\s+){0,3}(?:(?:please|can you|could you|would you)\\s+)?";
 const RELAY_START_RE = new RegExp(`^${FILLER}(?:draft|reply|respond|tell|remind|message|email|text|dm|send|forward|ask|let \\S+ know|write back\\b|write (?:a|an|the|my|our) (?:reply|response|message|email|note|text|dm|post|caption)\\b)`);
 const DRAFTING_CLAUSE_RE = /(?:^|[.!?;:,\n]\s*)(?:(?:then|and|also|please)\s+)*(?:draft|write|compose)\s+(?:a|an|the|my|our)\s+(?:[a-z0-9-]+\s+){0,2}?(?:reply|response|message|email|announcement|post|note|letter|dm|text|caption|tweet)\b/;
-const QUOTED_BEFORE_RE = /\b(?:said|says|wrote|writes|asked|replied|texted|messaged|quote)\b\s*[:,"]?/;
+const QUOTED_BEFORE_RE = /\b(?:said|says|wrote|writes|asked|replied|texted|messaged)\b\s*[:,"]?/;
 const NEGATED_BEFORE_RE = /\b(?:don'?t|do not|no need to|never|not|without|stop)\s+(?:[a-z']+\s+){0,3}$/;
 // Someone else's plan ("they will keep going until Friday"). "We" is the user
 // and the assistant together, so "we'll keep going until it's done" is a goal.
@@ -130,9 +135,36 @@ function normalize(text) {
   return value.replace(/[‘’]/g, "'").toLowerCase().replace(/[ \t]+/g, " ").trim();
 }
 
+// The sentence around a position (".", "!", "?" or a line break end it).
+function sentenceAt(text, index) {
+  let start = index;
+  while (start > 0 && !/[.!?\n]/.test(text[start - 1])) start -= 1;
+  let end = index;
+  while (end < text.length && !/[.!?\n]/.test(text[end])) end += 1;
+  return { start, text: text.slice(start, end) };
+}
+
+// The clause around a position (sentence punctuation plus , ; : end it).
+function clauseAt(text, index) {
+  let start = index;
+  while (start > 0 && !/[.!?;:,\n]/.test(text[start - 1])) start -= 1;
+  let end = index;
+  while (end < text.length && !/[.!?;:,\n]/.test(text[end])) end += 1;
+  return text.slice(start, end).trim();
+}
+
+// Quoted speech and drafting requests apply only within their own sentence:
+// "You said it was done. Keep going until every module is migrated" matches.
+// A sentence that asks for a drafted message keeps a signal only when the
+// signal opens the sentence ("Migrate all 40 modules, then write a release
+// note"), not when it is reported ("We will migrate all the tables, write
+// the announcement email").
 function excluded(text, index) {
   const before = text.slice(Math.max(0, index - 40), index);
-  return NEGATED_BEFORE_RE.test(before) || SPEAKER_BEFORE_RE.test(before) || QUOTED_BEFORE_RE.test(text.slice(0, index));
+  if (NEGATED_BEFORE_RE.test(before) || SPEAKER_BEFORE_RE.test(before)) return true;
+  const sentence = sentenceAt(text, index);
+  if (QUOTED_BEFORE_RE.test(text.slice(sentence.start, index))) return true;
+  return DRAFTING_CLAUSE_RE.test(sentence.text) && text.slice(sentence.start, index).trim() !== "";
 }
 
 function usable(text, match) {
@@ -156,7 +188,7 @@ function detectLongRunningIntent(text) {
   const normalized = normalize(text);
   const none = { matched: false, signals: [], strength: null };
   if (!normalized || normalized.startsWith("<")) return none; // injected notifications, not user goals
-  if (RELAY_START_RE.test(normalized) || DRAFTING_CLAUSE_RE.test(normalized)) return none;
+  if (RELAY_START_RE.test(normalized)) return none;
   if (QUESTION_START_RE.test(normalized) && /\?\s*$/.test(normalized)) return none;
 
   const directive = IMPERATIVE_RE.test(normalized);
@@ -171,9 +203,10 @@ function detectLongRunningIntent(text) {
   const dedicated = DEDICATED_HOURS_RE.exec(normalized);
   if (usable(normalized, dedicated) && DIRECT_INSTRUCTION_PREFIX_RE.test(normalized.slice(Math.max(0, dedicated.index - 40), dedicated.index))) standalone.push("dedicated_hours");
   const away = AWAY_RE.exec(normalized);
-  if (usable(normalized, away) && directive) standalone.push("while_away");
+  if (usable(normalized, away) && AWAY_WORK_RE.test(clauseAt(normalized, away.index))) standalone.push("while_away");
 
-  const scope = findSignals(normalized, SCOPE_SIGNALS);
+  const scope = findSignals(normalized, SCOPE_SIGNALS, (value, match) => usable(value, match) &&
+    (!match[0].match(/^(?:all|the remaining|remaining|every|each|through|backlog|batch|queue|list|pile)\b/) || IMPERATIVE_RE.test(clauseAt(value, match.index))));
   // "migrate all the ..." already counts as migrate_all; the same words are not a second signal.
   const others = standalone.length + scope.filter((name) => name !== "migrate_all").length + time.length;
   for (const name of findSignals(normalized, SECOND_SIGNAL_SCOPE)) if (others > 0) scope.push(name);
@@ -334,8 +367,32 @@ function shellQuote(value) {
 // --root is explicit because the CLI otherwise prefers ALLSORTED_ROOT or
 // MYOS_HOME_ROOT, and MyOS sessions set MYOS_HOME_ROOT to ~/.myos, not to the
 // ~/.myos/workspace install root.
-function submitCommand(cli, root) {
-  return `node ${shellQuote(cli)} work-order-submit --file <path> --root ${shellQuote(root)}`;
+function submitCommand(cli, root, file) {
+  return `node ${shellQuote(cli)} work-order-submit --file ${file ? shellQuote(file) : "<path>"} --root ${shellQuote(root)}`;
+}
+
+const PROPOSAL_FILE_RE = /^dispatch-wo-[\w.-]{1,120}\.json$/;
+const PROPOSAL_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
+
+// Writes the proposed work order to <dir>/<idempotencyKey>.json (0600 in a
+// 0700 folder) and returns the path, so the injected context can stay a short
+// pointer. Proposals older than two weeks are pruned on the way. Only runs
+// after a match; any failure returns null and the caller inlines the JSON.
+function writeProposalFile(proposal, { dir, now = Date.now() } = {}) {
+  if (!proposal || !dir) return null;
+  try {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    for (const name of fs.readdirSync(dir)) {
+      if (!PROPOSAL_FILE_RE.test(name)) continue;
+      const file = path.join(dir, name);
+      try { if (now - fs.statSync(file).mtimeMs > PROPOSAL_RETENTION_MS) fs.unlinkSync(file); } catch {}
+    }
+    const file = path.join(dir, `${proposal.workOrder.idempotencyKey}.json`);
+    fs.writeFileSync(file, `${JSON.stringify(proposal.workOrder, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+    return file;
+  } catch {
+    return null;
+  }
 }
 
 // The full decision: null unless enabled, the prompt is long-running and the
@@ -356,14 +413,24 @@ function proposeWorkOrder(text, options = {}) {
     signals: intent.signals,
     strength: intent.strength,
     root: orchestrator.root,
+    cli: orchestrator.cli,
     command: submitCommand(orchestrator.cli, orchestrator.root),
     workOrder,
     skills: [...GOAL_STACK_SKILLS],
   };
 }
 
+// With a proposal file the context is a three-line pointer; without one
+// (the write failed) the JSON is inlined so the proposal is still usable.
 function formatWorkOrderContext(proposal, options = {}) {
   if (!proposal) return "";
+  if (options.file) {
+    return [
+      `[MyOS long-running work] Long job detected (${proposal.signals.join(", ")}). Proposal only: nothing was submitted. For in-session work use the goal-stack skills: ${proposal.skills.join(", ")}.`,
+      `Durable option: an Orchestrator work order (read-only scout steps) is drafted at ${options.file}. Review and edit it first; grants, approvals and budgets still apply per job.`,
+      `Submit only if the user explicitly asks: ${submitCommand(proposal.cli, proposal.root, options.file)}`,
+    ].join("\n");
+  }
   const compact = options.contextMode === "compact" || options.contextMode === "lean";
   return [
     "[MyOS long-running work: Orchestrator work order proposal]",
@@ -384,4 +451,5 @@ module.exports = {
   formatWorkOrderContext,
   proposeWorkOrder,
   resolveOrchestratorRoot,
+  writeProposalFile,
 };
