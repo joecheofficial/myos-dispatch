@@ -240,3 +240,57 @@ test("a relationship question prefers contact resolution, then the CRM, never a 
   const shortlist = shortlistCapabilities(RELATIONSHIP_QUESTIONS[1], "worker_skill", 5, { indexPath: crmOnly });
   assert.deepEqual(shortlist.map((entry) => entry.capability.id), ["skill:crm"]);
 });
+
+test("ordinary work prompts with 'last time' or 'how do I know' are not relationship questions", () => {
+  for (const query of [
+    "how do I know the stripe webhook fired",
+    "how do I know the build passed?",
+    "when did I last call the stripe api",
+    "last time I saw this bug was in the portal",
+    "when did we last see this error in the logs",
+    "last time we connected to the database it failed",
+    "what did we discuss in the last standup about the deploy",
+    "Please deploy the portal fix; last time we called the webhook it failed",
+  ]) {
+    assert.equal(isRelationshipQuestion(query), false, query);
+  }
+});
+
+test("write requests that mention the last contact stay writes", () => {
+  for (const query of [
+    "Can you add Ana to the CRM? When did I last talk to her",
+    "I need you to send Mark the invoice, when did I last email him",
+    "Please deploy the portal fix; last time we called the webhook it failed",
+    "fix the bug, last time I called the endpoint it 500ed",
+    "Send Mark the notes, when did we last talk to him",
+  ]) {
+    assert.equal(inferActionType(query, { userPrompt: true }), "write", query);
+  }
+});
+
+test("a capability the relationship question names keeps the route", () => {
+  const GHL = { id: "agent:gohighlevel", type: "agent", execution_lane: "worker_skill", aliases: ["GoHighLevel", "gohighlevel"], use_when: ["GoHighLevel contacts"], description: "GoHighLevel contacts, pipelines and calendars", priority: 50 };
+  const RELATIONSHIPS = { id: "agent:relationships", type: "agent", execution_lane: "worker_skill", aliases: ["Relationships", "relationships"], use_when: ["Relationship signals hub"], description: "Relationship signals hub", priority: 50 };
+  const indexPath = writeIndex([REPLICA, GHL, RELATIONSHIPS]);
+  const named = shortlistCapabilities("find contact Ana in gohighlevel, when did I last message her", "worker_skill", 5, { indexPath });
+  assert.equal(named[0]?.capability.id, "agent:gohighlevel");
+  assert.ok(named.every((entry) => entry.capability.id !== "skill:replica-entrepreneur"));
+  const unnamed = shortlistCapabilities("Who is Ana Ruiz, when did I last message her?", "worker_skill", 5, { indexPath });
+  assert.deepEqual(unnamed.map((entry) => entry.capability.id), ["agent:relationships"]);
+});
+
+test("on an install, a header-chosen repository survives the follow-up turn", () => {
+  const { planWithContext } = require("../src/decision/session-route");
+  const home = tempDir("allsorted-session-");
+  fs.mkdirSync(path.join(home, "workspace"), { recursive: true });
+  fs.mkdirSync(path.join(home, "projects", "foo", "web"), { recursive: true });
+  writeJson(path.join(home, "projects", "_index.json"), { projects: { foo: { name: "Foo", path: "foo", repositories: [{ id: "web", path: "projects/foo/web", aliases: ["web"] }] } } });
+  const scoped = (slug, name) => ({ branch: "project", projectSlug: slug, searchScope: `/${slug}`, projectMatches: [{ slug, name }], route: { lane: "worker_skill" } });
+  const opts = { surface: "codex", env: { MYOS_HOME_ROOT: home }, sessionId: "install-repo", resolvePlan: (text) => (/foo/i.test(text) ? scoped("foo", "Foo") : { projectMatches: [] }) };
+  const first = planWithContext("In the Foo project web repo: fix the header", opts);
+  assert.equal(first.projectSlug, "foo");
+  assert.equal(first.repositoryTarget?.path, path.join(home, "projects", "foo", "web"));
+  const next = planWithContext("also do it again", opts);
+  assert.equal(next.projectSlug, "foo");
+  assert.equal(next.repositoryTarget?.id, "web");
+});

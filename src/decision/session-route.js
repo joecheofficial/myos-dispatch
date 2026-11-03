@@ -18,10 +18,14 @@ function planWithContext(text, opts = {}) {
     if (header && !/\b(?:project|homepage|website|portal|app|repository|repo)\b/i.test(header[1])) header = null;
     explicitHeader = Boolean(header);
     const workspace = env.MYOS_HOME_ROOT ? path.join(env.MYOS_HOME_ROOT,'workspace') : require('../myos-compat').resolveWorkspaceRoot();
+    // Repository paths are relative to the folder that holds projects/: the
+    // workspace on MyOS homes, the install root on All Sorted installs.
+    const projectsRoot = require('../myos-compat').resolveProjectsRoot(workspace);
+    const repositoryBase = path.dirname(projectsRoot);
     let registeredOwner;
     if (header) {
       try {
-        const file = path.join(require('../myos-compat').resolveProjectsRoot(workspace),'_index.json');
+        const file = path.join(projectsRoot,'_index.json');
         if (fs.statSync(file).size <= 1024 * 1024) {
           const projects = JSON.parse(fs.readFileSync(file,'utf8')).projects || {};
           const entries = Array.isArray(projects) ? projects : Object.entries(projects).map(([slug,p])=>({slug,...p}));
@@ -47,8 +51,8 @@ function planWithContext(text, opts = {}) {
       if (supported && registeredOwner) {
         const repositories = (registeredOwner.repositories || []).filter(r=>[r.id,...(r.aliases || [])].some(v=>boundedMention(header[1],v)));
         if (repositories.length === 1 && typeof repositories[0].path === 'string') {
-          const target = path.resolve(workspace,repositories[0].path);
-          const relative = path.relative(workspace,target);
+          const target = path.resolve(repositoryBase,repositories[0].path);
+          const relative = path.relative(repositoryBase,target);
           if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)) repositoryTarget = {id:repositories[0].id,path:target};
         }
       }
