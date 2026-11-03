@@ -93,7 +93,6 @@ const LONG_RUNNING = [
   "Ok so keep going until it's done",
   "Please continue working on the auth refactor until it's done",
   "Investigate all 11 failing tests",
-  "While I sleep, finish the migration",
   "you keep going until the tests pass, I'm out",
   "Ok. You need to keep going until every module is migrated",
 ];
@@ -296,6 +295,14 @@ const ORDINARY = [
   "My team will finish the migration while I'm away. Draft my out of office",
   "The contractors will build the deck while I'm away",
   "I'm going to finish the deck while I'm away on vacation, remind me Friday",
+  "Plan meals while I'm away, then finish the shopping list",
+  "Water the plants while I'm away, and finish the grocery order",
+  "Order groceries while I'm away, then complete the checkout",
+  "Set an out of office while I'm away, then finish the reply to Ed",
+  "While I'm away, complete the visa form for me",
+  "While I'm away, can you build me a packing list for the kids",
+  "While I sleep, build me a playlist for tomorrow",
+  "While I'm away, just finish the RSVP list",
 ];
 
 function tempDir(prefix) {

@@ -193,16 +193,20 @@ function findSignals(text, table, accept = usable) {
   return found;
 }
 
-// "Finish the migration while I sleep" / "While I sleep, finish the migration":
-// a real work verb in the same sentence, given to the assistant (same position
-// check as the other standalone signals). "Ronnie will finish the migration
-// while I'm away" is someone else's work.
+// "Finish the migration while I sleep": a real work verb in the same clause,
+// given to the assistant (same position check as the other standalone
+// signals). "Ronnie will finish the migration while I'm away" is someone
+// else's work, and a verb in another clause ("plan meals while I'm away, then
+// finish the shopping list") never counts.
 function awayWorkInstructed(text, index) {
-  const sentence = sentenceAt(text, index);
+  let start = index;
+  while (start > 0 && !/[.!?;:,\n]/.test(text[start - 1])) start -= 1;
+  let end = index;
+  while (end < text.length && !/[.!?;:,\n]/.test(text[end])) end += 1;
   const pattern = new RegExp(AWAY_WORK_RE.source, "g");
-  for (let match = pattern.exec(sentence.text); match; match = pattern.exec(sentence.text)) {
-    const at = { index: sentence.start + match.index };
-    if (atInstruction(text, at)) return true;
+  const clause = text.slice(start, end);
+  for (let match = pattern.exec(clause); match; match = pattern.exec(clause)) {
+    if (atInstruction(text, { index: start + match.index })) return true;
   }
   return false;
 }
