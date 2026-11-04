@@ -312,23 +312,65 @@ esac
   assert.equal(perCallCodexOverEnv.routingSource, "explicit_override");
   assert.equal(codex.length, 4);
 
+  const explicitProviderWinsOverClaudePref = await myOSrunOauth({
+    ...options,
+    provider: "openai",
+    providerPreference: "claude",
+  });
+  assert.equal(explicitProviderWinsOverClaudePref.provider, "openai");
+  assert.equal(explicitProviderWinsOverClaudePref.routingSource, "explicit_override");
+  assert.equal(codex.length, 5);
+
+  process.env.GEMINI_API_KEY = "test-placeholder-not-a-secret";
+  let googleCalls = 0;
+  global.fetch = async (url) => {
+    googleCalls++;
+    assert.match(String(url), /generativelanguage\.googleapis\.com/);
+    return {
+      ok: true,
+      json: async () => ({
+        candidates: [{ content: { parts: [{ text: "from-gemini" }] } }],
+        usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 },
+      }),
+    };
+  };
+  const explicitGeminiPreferenceOverEnvClaude = await myOSrunOauth({
+    ...options,
+    profile: "google_cheap_extraction",
+    providerPreference: "gemini",
+  });
+  assert.equal(explicitGeminiPreferenceOverEnvClaude.provider, "google");
+  assert.equal(explicitGeminiPreferenceOverEnvClaude.routingSource, "explicit_override");
+  assert.equal(explicitGeminiPreferenceOverEnvClaude.text, "from-gemini");
+  assert.equal(googleCalls, 1);
+
+  const explicitAnthropicPreferenceOverEnvClaude = await myOSrunOauth({
+    ...options,
+    model: "claude-sonnet-5-5",
+    providerPreference: "anthropic",
+  });
+  assert.equal(explicitAnthropicPreferenceOverEnvClaude.provider, "anthropic");
+  assert.equal(explicitAnthropicPreferenceOverEnvClaude.routingSource, "explicit_override");
+  assert.equal(explicitAnthropicPreferenceOverEnvClaude.text, "from-claude");
+  assert.equal(codex.length, 5);
+
   for (const value of ["codex", "CODEX", "invalid", ""]) {
     process.env.MYOS_OAUTH_PROVIDER = value;
     const res = await myOSrunOauth(options);
     assert.equal(res.provider, "openai", `expected openai for MYOS_OAUTH_PROVIDER=${JSON.stringify(value)}`);
     assert.equal(res.routingSource, "taskClass");
   }
-  assert.equal(codex.length, 8);
+  assert.equal(codex.length, 9);
 
   process.env.MYOS_OAUTH_PROVIDER = "claude";
   fs.writeFileSync(path.join(root, "broken"), "");
   await assert.rejects(myOSrunOauth(options), /malformed output/);
-  assert.equal(codex.length, 8);
+  assert.equal(codex.length, 9);
   fs.rmSync(path.join(root, "broken"));
 
   fs.writeFileSync(path.join(root, "refuse"), "");
   const fallback = await myOSrunOauth(options);
   assert.equal(fallback.provider, "openai");
   assert.equal(fallback.routingSource, "taskClass");
-  assert.equal(codex.length, 9);
+  assert.equal(codex.length, 10);
 });
