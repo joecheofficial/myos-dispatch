@@ -478,8 +478,8 @@ const { buildHeavyGate, applyHeavyGate, detectHeavyLauncher } = require("../bin/
 
 const heavyTmp = fs.mkdtempSync(path.join(os.tmpdir(), "heavy-rewrite-"));
 const HEAVY_BIN = path.join(heavyTmp, "myos-heavy");
-fs.writeFileSync(BIN, "#!/bin/sh\n");
-const env = { MYOS_HEAVY_BIN: BIN };
+fs.writeFileSync(HEAVY_BIN, "#!/bin/sh\n");
+const heavyEnv = { MYOS_HEAVY_BIN: HEAVY_BIN };
 
 test("detects heavy launchers by class", () => {
   assert.equal(detectHeavyLauncher("python3.11 -m mlx_audio.tts.generate --text hi"), "tts");
@@ -502,13 +502,13 @@ test("detects heavy launchers by class", () => {
 
 test("wraps a bare heavy command, keeping env assignments in front", () => {
   const r = buildHeavyGate("HF_HUB_OFFLINE=1 python3.11 -m mlx_audio.tts.generate --text 'hi there'", heavyEnv);
-  assert.equal(r.updatedInput.command, `HF_HUB_OFFLINE=1 ${BIN} run --class tts -- python3.11 -m mlx_audio.tts.generate --text 'hi there'`);
+  assert.equal(r.updatedInput.command, `HF_HUB_OFFLINE=1 ${HEAVY_BIN} run --class tts -- python3.11 -m mlx_audio.tts.generate --text 'hi there'`);
   assert.equal(r.cls, "tts");
 });
 
 test("wraps only the heavy stage of an && chain", () => {
   const r = buildHeavyGate("cd /tmp/job && whisper rec.m4a --model medium", heavyEnv);
-  assert.equal(r.updatedInput.command, `cd /tmp/job && ${BIN} run --class whisper -- whisper rec.m4a --model medium`);
+  assert.equal(r.updatedInput.command, `cd /tmp/job && ${HEAVY_BIN} run --class whisper -- whisper rec.m4a --model medium`);
 });
 
 test("blocks backgrounded fan-outs of heavy processes", () => {
@@ -525,7 +525,7 @@ test("blocks backgrounded fan-outs of heavy processes", () => {
 });
 
 test("already gated, non-heavy, or complex commands are left alone (nudge only for complex)", () => {
-  assert.equal(buildHeavyGate(`${BIN} run --class tts -- python3 -m mlx_audio.tts.generate`, heavyEnv), null);
+  assert.equal(buildHeavyGate(`${HEAVY_BIN} run --class tts -- python3 -m mlx_audio.tts.generate`, heavyEnv), null);
   assert.equal(buildHeavyGate("myos-heavy run --class whisper -- whisper a.m4a", heavyEnv), null);
   assert.equal(buildHeavyGate("git status", heavyEnv), null);
   const piped = buildHeavyGate("whisper a.m4a --model medium | tee log.txt", heavyEnv);
@@ -539,7 +539,7 @@ test("no rewrite when the gate binary is missing on this machine", () => {
 test("applyHeavyGate composes with an rtk rewrite and the tool payload", () => {
   const payload = { tool_name: "Bash", tool_input: { command: "ffmpeg -i a.mp4 b.mp4", description: "encode" } };
   const r = applyHeavyGate(payload, null, heavyEnv);
-  assert.equal(r.updatedInput.command, `${BIN} run --class video -- ffmpeg -i a.mp4 b.mp4`);
+  assert.equal(r.updatedInput.command, `${HEAVY_BIN} run --class video -- ffmpeg -i a.mp4 b.mp4`);
   assert.equal(r.updatedInput.description, "encode");
   assert.match(r.context, /class video/);
   const blocked = applyHeavyGate({ tool_name: "Bash", tool_input: { command: "nohup ffmpeg -i a.mp4 b.mp4 &" } }, null, heavyEnv);
