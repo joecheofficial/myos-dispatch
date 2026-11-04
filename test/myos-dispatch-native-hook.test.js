@@ -528,6 +528,20 @@ test("fan-outs are rewritten stage by stage, never blocked", () => {
   }
 });
 
+test("codex surface (no rewrite) gets the gated command as context instead", () => {
+  const payload = { hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "whisper a.m4a --model medium" }, cwd: os.tmpdir(), session_id: "t" };
+  const prev = process.env.MYOS_HEAVY_BIN;
+  process.env.MYOS_HEAVY_BIN = HEAVY_BIN;
+  try {
+    const out = handleHookPayload(payload, "codex", { contextMode: "compact", rewrite: false });
+    assert.ok(out && out.hookSpecificOutput, "context emitted");
+    assert.equal(out.hookSpecificOutput.updatedInput, undefined, "no rewrite on codex");
+    assert.match(out.hookSpecificOutput.additionalContext, new RegExp(`run this exact command instead.*${HEAVY_BIN.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} run --class whisper -- whisper a.m4a --model medium`));
+  } finally {
+    if (prev === undefined) delete process.env.MYOS_HEAVY_BIN; else process.env.MYOS_HEAVY_BIN = prev;
+  }
+});
+
 test("already gated and non-heavy commands are left alone", () => {
   assert.equal(buildHeavyGate(`${HEAVY_BIN} run --class tts -- python3 -m mlx_audio.tts.generate`, heavyEnv), null);
   assert.equal(buildHeavyGate("myos-heavy run --class whisper -- whisper a.m4a", heavyEnv), null);

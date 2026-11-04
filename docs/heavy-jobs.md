@@ -12,6 +12,7 @@ machine-wide admission gate (workspace `ops/HEAVY-JOBS.md`). Stages are split at
 Nothing is ever blocked and nobody has to think about it (Joe, 2026-11-04): a fan-out that used to hang
 the Studio now becomes N queued gate calls that run as memory and slots allow.
 
-Nothing happens when the gate binary is missing (`MYOS_HEAVY_BIN` or `$MYOS_WORKSPACE/bin/myos-heavy`),
-when the command already mentions `myos-heavy`, or on the Codex surface (no rewrite ownership there).
+Nothing happens when the gate binary is missing (`MYOS_HEAVY_BIN` or `$MYOS_WORKSPACE/bin/myos-heavy`)
+or when the command already mentions `myos-heavy`. On the Codex surface (no rewrite ownership) the hook
+emits the gated command as context ("run this exact command instead") so the model lands in the gate anyway.
 Tests: the heavy-job section of `test/myos-dispatch-native-hook.test.js`.
