@@ -254,3 +254,81 @@ test("a cold connection reuses existing loader and bridge JSON transport with a 
   assert.deepEqual(result.json, { max: 512 });
   assert.deepEqual(JSON.parse(fs.readFileSync(trace)), { url: "http://127.0.0.1:8891" });
 });
+
+test("Claude preference runs Claude first, honors env and explicit overrides, stops on unknown failures and falls back on refusal", async (t) => {
+  const { root } = fixture(t);
+  delete process.env.MYOS_PUBLIC_LOCAL_PROVIDER_CONFIG;
+  delete process.env.MYOS_OAUTH_PROVIDER;
+  process.env.MYOS_OAUTH_RECOVERY = "";
+  process.env.MYOS_OAUTH_REGISTRY = path.join(root, "registry.json");
+  process.env.MYOS_OAUTH_CLASS_POLICY = path.join(root, "no-policy.json");
+  const at = new Date().toISOString();
+  const entry = (provider, model) => ({ provider, model, visible: true, auth: "subscription", observedAt: at, invokedAt: at, quarantineUntil: null });
+  fs.writeFileSync(process.env.MYOS_OAUTH_REGISTRY, JSON.stringify({ version: 1, revision: 1, scannedAt: at, providers: [], models: [entry("codex", "gpt-6.1-terra"), entry("claude", "claude-sonnet-5-5")] }));
+  const stub = path.join(root, "claude");
+  fs.writeFileSync(stub, `#!/bin/sh
+case "$*" in
+  *"auth status"*) echo '{"loggedIn":true,"authMethod":"claude.ai"}' ;;
+  *) [ -f "${root}/broken" ] && exit 1
+     [ -f "${root}/refuse" ] && { echo '{"is_error":true,"result":"The model claude-sonnet-5-5 does not exist"}'; exit 1; }
+     echo '{"result":"from-claude","modelUsage":{"claude-sonnet-5-5":{}},"usage":{"input_tokens":1,"output_tokens":1}}' ;;
+esac
+`, { mode: 0o755 });
+  process.env.MYOS_CLAUDE_BIN = stub;
+  process.env.PATH = `${root}:${process.env.PATH}`;
+  const codex = [];
+  setCodexExecRunnerForTest(async request => { codex.push(request); return { text: "from-codex", model: "gpt-6.1-terra" }; });
+  const options = { taskClass: "default_automation", prompt: "hello", humanVisible: true, timeoutMs: 20000 };
+
+  const defaultRun = await myOSrunOauth(options);
+  assert.equal(defaultRun.provider, "openai");
+  assert.equal(defaultRun.routingSource, "taskClass");
+  assert.equal(codex.length, 1);
+
+  const preferred = await myOSrunOauth({ ...options, providerPreference: "claude" });
+  assert.equal(preferred.provider, "anthropic");
+  assert.equal(preferred.text, "from-claude");
+  assert.equal(preferred.routingSource, "taskClass");
+  assert.equal(codex.length, 1);
+
+  process.env.MYOS_OAUTH_PROVIDER = "CLAUDE";
+  const envClaude = await myOSrunOauth(options);
+  assert.equal(envClaude.provider, "anthropic");
+  assert.equal(envClaude.routingSource, "taskClass");
+  assert.equal(codex.length, 1);
+
+  const explicitProvider = await myOSrunOauth({ ...options, provider: "openai" });
+  assert.equal(explicitProvider.provider, "openai");
+  assert.equal(explicitProvider.routingSource, "explicit_override");
+  assert.equal(codex.length, 2);
+
+  const pinnedProvider = await myOSrunOauth({ ...options, providerPreference: "claude", pinnedProvider: "openai" });
+  assert.equal(pinnedProvider.provider, "openai");
+  assert.equal(pinnedProvider.routingSource, "explicit_override");
+  assert.equal(codex.length, 3);
+
+  const perCallCodexOverEnv = await myOSrunOauth({ ...options, providerPreference: "openai" });
+  assert.equal(perCallCodexOverEnv.provider, "openai");
+  assert.equal(perCallCodexOverEnv.routingSource, "explicit_override");
+  assert.equal(codex.length, 4);
+
+  for (const value of ["codex", "CODEX", "invalid", ""]) {
+    process.env.MYOS_OAUTH_PROVIDER = value;
+    const res = await myOSrunOauth(options);
+    assert.equal(res.provider, "openai", `expected openai for MYOS_OAUTH_PROVIDER=${JSON.stringify(value)}`);
+    assert.equal(res.routingSource, "taskClass");
+  }
+  assert.equal(codex.length, 8);
+
+  process.env.MYOS_OAUTH_PROVIDER = "claude";
+  fs.writeFileSync(path.join(root, "broken"), "");
+  await assert.rejects(myOSrunOauth(options), /malformed output/);
+  assert.equal(codex.length, 8);
+  fs.rmSync(path.join(root, "broken"));
+
+  fs.writeFileSync(path.join(root, "refuse"), "");
+  const fallback = await myOSrunOauth(options);
+  assert.equal(fallback.provider, "openai");
+  assert.equal(fallback.routingSource, "taskClass");
+  assert.equal(codex.length, 9);
+});
