@@ -511,25 +511,28 @@ test("wraps only the heavy stage of an && chain", () => {
   assert.equal(r.updatedInput.command, `cd /tmp/job && ${HEAVY_BIN} run --class whisper -- whisper rec.m4a --model medium`);
 });
 
-test("blocks backgrounded fan-outs of heavy processes", () => {
-  for (const cmd of [
-    "nohup python3 -m mlx_audio.tts.generate --text a > a.log 2>&1 &",
-    "for v in joe alice; do python3.11 -m mlx_audio.tts.generate --voice $v & done",
-    "ls *.m4a | xargs -P 4 -I{} whisper {} --model medium",
-    "ffmpeg -i a.mp4 a.webm &",
-  ]) {
+test("fan-outs are rewritten stage by stage, never blocked", () => {
+  const cases = [
+    ["nohup python3 -m mlx_audio.tts.generate --text a > a.log 2>&1 &", `nohup ${HEAVY_BIN} run --class tts -- python3 -m mlx_audio.tts.generate --text a > a.log 2>&1 &`],
+    ["for v in joe alice; do python3.11 -m mlx_audio.tts.generate --voice $v & done", `for v in joe alice; do ${HEAVY_BIN} run --class tts -- python3.11 -m mlx_audio.tts.generate --voice $v & done`],
+    ["ls *.m4a | xargs -P 4 -I{} whisper {} --model medium", `ls *.m4a | xargs -P 4 -I{} ${HEAVY_BIN} run --class whisper -- whisper {} --model medium`],
+    ["ffmpeg -i a.mp4 a.webm &", `${HEAVY_BIN} run --class video -- ffmpeg -i a.mp4 a.webm &`],
+    ["whisper a.m4a --model medium | tee log.txt", `${HEAVY_BIN} run --class whisper -- whisper a.m4a --model medium | tee log.txt`],
+    ["cd x; ffmpeg -i a.mp4 b.mp4; echo done", `cd x; ${HEAVY_BIN} run --class video -- ffmpeg -i a.mp4 b.mp4; echo done`],
+    ["python3 -c 'import mlx_audio; print(1)' && echo ok", `${HEAVY_BIN} run --class tts -- python3 -c 'import mlx_audio; print(1)' && echo ok`],
+  ];
+  for (const [cmd, want] of cases) {
     const r = buildHeavyGate(cmd, heavyEnv);
-    assert.ok(r && r.block, `should block: ${cmd}`);
-    assert.match(r.block, /myos-heavy/);
+    assert.ok(r && r.updatedInput && !r.block, `should rewrite: ${cmd}`);
+    assert.equal(r.updatedInput.command, want);
   }
 });
 
-test("already gated, non-heavy, or complex commands are left alone (nudge only for complex)", () => {
+test("already gated and non-heavy commands are left alone", () => {
   assert.equal(buildHeavyGate(`${HEAVY_BIN} run --class tts -- python3 -m mlx_audio.tts.generate`, heavyEnv), null);
   assert.equal(buildHeavyGate("myos-heavy run --class whisper -- whisper a.m4a", heavyEnv), null);
   assert.equal(buildHeavyGate("git status", heavyEnv), null);
-  const piped = buildHeavyGate("whisper a.m4a --model medium | tee log.txt", heavyEnv);
-  assert.ok(piped.context && !piped.updatedInput && !piped.block);
+  assert.equal(buildHeavyGate("echo 'ffmpeg -i a b' > notes.txt", heavyEnv), null, "quoted text is not a launcher");
 });
 
 test("no rewrite when the gate binary is missing on this machine", () => {
@@ -542,8 +545,9 @@ test("applyHeavyGate composes with an rtk rewrite and the tool payload", () => {
   assert.equal(r.updatedInput.command, `${HEAVY_BIN} run --class video -- ffmpeg -i a.mp4 b.mp4`);
   assert.equal(r.updatedInput.description, "encode");
   assert.match(r.context, /class video/);
-  const blocked = applyHeavyGate({ tool_name: "Bash", tool_input: { command: "nohup ffmpeg -i a.mp4 b.mp4 &" } }, null, heavyEnv);
-  assert.ok(blocked.block);
+  const bg = applyHeavyGate({ tool_name: "Bash", tool_input: { command: "nohup ffmpeg -i a.mp4 b.mp4 &" } }, null, heavyEnv);
+  assert.equal(bg.block, undefined);
+  assert.match(bg.updatedInput.command, /nohup .*myos-heavy run --class video -- ffmpeg -i a.mp4 b.mp4 &$/);
   const untouched = applyHeavyGate({ tool_name: "Bash", tool_input: { command: "git status" } }, { command: "rtk git status" }, heavyEnv);
   assert.deepEqual(untouched.updatedInput, { command: "rtk git status" });
 });
