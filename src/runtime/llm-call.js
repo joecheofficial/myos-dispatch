@@ -103,6 +103,36 @@ function ensureWorkspaceEnvLoaded() {
   }
 }
 
+function readWorkspaceOauthProvider() {
+  try {
+    const raw = fs.readFileSync(WORKSPACE_ENV_PATH, "utf8");
+    for (const line of raw.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const idx = trimmed.indexOf("=");
+      if (idx === -1) continue;
+      if (trimmed.slice(0, idx).trim() !== "MYOS_OAUTH_PROVIDER") continue;
+      return trimmed.slice(idx + 1).trim().replace(/^['"]|['"]$/g, "");
+    }
+  } catch {
+    // Best-effort only.
+  }
+  return "";
+}
+
+function prefersClaudeOauth(options = {}) {
+  const envProvider =
+    process.env.MYOS_OAUTH_PROVIDER !== undefined
+      ? process.env.MYOS_OAUTH_PROVIDER
+      : readWorkspaceOauthProvider();
+  for (const value of [options.providerPreference, envProvider]) {
+    const normalized = String(value || "").trim().toLowerCase();
+    if (normalized === "claude") return true;
+    if (normalized === "codex" || normalized === "openai" || normalized === "local-codex") return false;
+  }
+  return false;
+}
+
 function normalizeProvider(value) {
   const normalized = String(value || "").trim().toLowerCase();
   if (!normalized) return "";
@@ -1509,6 +1539,10 @@ async function myosRun(options = {}) {
 
   const caller = resolveCallerContext(options);
 
+  // Subscription Claude is chosen from the registry, so the preference orders
+  // candidates instead of becoming an explicit provider override.
+  const claudeFirst = authMode === "oauth" && !unattendedCodex && prefersClaudeOauth(options);
+  const normalizedPreference = String(options.providerPreference || "").trim().toLowerCase();
   const plan = resolveExecutionPlan({
     taskClass,
     intent,
@@ -1517,7 +1551,10 @@ async function myosRun(options = {}) {
     authMode,
     audio: options.audio,
     pinnedProvider: options.pinnedProvider,
-    providerPreference: options.providerPreference || options.provider,
+    providerPreference:
+      claudeFirst && (!normalizedPreference || normalizedPreference === "claude")
+        ? options.provider
+        : options.providerPreference || options.provider,
     model: unattendedCodex ? codexInstallation.selection.model : options.model,
     profile: options.profile,
     responseMode: options.responseMode,
@@ -1534,9 +1571,12 @@ async function myosRun(options = {}) {
     plan.candidates = selectModels(oauthState, { provider: "codex", taskClass }).map(candidate => ({
       type: "llm", provider: "openai", model: candidate.model, profile: taskClass, authMode: "oauth", effort: candidate.effort,
     }));
-    if (isClaudeTextRequest(options)) plan.candidates.push(...selectModels(oauthState, {provider:"claude",taskClass}).map(candidate => ({
-      type:"llm",provider:"anthropic",model:candidate.model,profile:taskClass,authMode:"oauth",effort:candidate.effort,
-    })));
+    if (isClaudeTextRequest(options)) {
+      const claudeCandidates = selectModels(oauthState, { provider: "claude", taskClass }).map(candidate => ({
+        type: "llm", provider: "anthropic", model: candidate.model, profile: taskClass, authMode: "oauth", effort: candidate.effort,
+      }));
+      plan.candidates = claudeFirst ? [...claudeCandidates, ...plan.candidates] : [...plan.candidates, ...claudeCandidates];
+    }
   }
   const localEnv = oauthState ? {
     ...process.env,
