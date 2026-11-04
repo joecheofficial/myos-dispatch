@@ -1369,6 +1369,14 @@ function applyHeavyGate(payload, updatedInput, env = process.env) {
   return { updatedInput: { ...(updatedInput || readToolInput(payload)), ...gate.updatedInput }, context: `[MyOS heavy jobs] rewritten to run through myos-heavy (class ${gate.cls}); extra processes queue, nothing is blocked.` };
 }
 
+// Surfaces without rewrite ownership (Codex): no updatedInput, but the model gets the exact gated
+// command to run instead, so heavy work still lands in the gate without anyone thinking about it.
+function heavyGateNudge(payload, updatedInput, env = process.env) {
+  const gate = buildHeavyGate(readCommand(payload), env);
+  if (!gate || !gate.updatedInput) return { updatedInput, context: "" };
+  return { updatedInput, context: `[MyOS heavy jobs] run this exact command instead (same command through the memory gate, nothing else changes): ${gate.updatedInput.command}` };
+}
+
 function outputHookContext(hookEventName, context, extra = {}) {
   return {
     hookSpecificOutput: {
@@ -1584,7 +1592,7 @@ function handlePreToolUse(payload, surface, options = {}) {
     ...(route.route?.fastpaths ? { fastpaths: route.route.fastpaths } : {}),
   });
   let updatedInput = options.rewrite ? buildRtkRewrite(payload) : null;
-  const heavy = options.rewrite ? applyHeavyGate(payload, updatedInput) : { updatedInput, context: "" };
+  const heavy = options.rewrite ? applyHeavyGate(payload, updatedInput) : heavyGateNudge(payload, updatedInput);
   updatedInput = heavy.updatedInput;
   // A shell command is not a new user turn. Keep the safety evidence and RTK
   // rewrite, but never inject a task plan, fanout mandate or expansion contract.
@@ -1738,7 +1746,7 @@ function handleTier0(payload, surface, options, text) {
     route: { branch: "tier0" }, jev: jevSummary(jev), intentFidelity, intentHorizon,
     lanesAutoDispatched: 0, agentCallsObserved: 0 });
   const rtkInput = options.rewrite ? buildRtkRewrite(payload) : null;
-  const heavy = options.rewrite ? applyHeavyGate(payload, rtkInput) : { updatedInput: rtkInput, context: "" };
+  const heavy = options.rewrite ? applyHeavyGate(payload, rtkInput) : heavyGateNudge(payload, rtkInput);
   const updatedInput = heavy.updatedInput;
   return updatedInput || heavy.context ? outputHookContext("PreToolUse", heavy.context || "", updatedInput ? { updatedInput } : {}) : null;
 }
