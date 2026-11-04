@@ -32,6 +32,7 @@ All Sorted customer line: v4.4.0-rc.4 plus the support report fixes below. It do
 
 All Sorted customer line: v4.4.0-rc.3-allsorted-8.56 plus the owner-invocation umbrella fix (8.61) and the fixes below. It does not include later main-branch provider and writer routing work.
 
+- Let interactive OAuth runs prefer signed-in Claude models before Codex when `MYOS_OAUTH_PROVIDER=claude` or per-call `providerPreference: "claude"` is set; `codex`, empty, unset, or any other value keeps the default Codex-first order, explicit provider pins still win, and unknown failures still stop rather than fall through.
 - Customer refresh no longer rolls back on the owner-invocation test: recipe manifests resolve beside an explicit capability index (then the workspace), so a clean qualification home routes "run the doctor" to the Doctor's read-only recipes.
 - A fast path needs a meaningful match (score 12, i.e. one 12+ character term or two terms, or any multi-word phrase; `MYOS_FASTPATH_MIN_SCORE` or the fastpaths file's `policy.min_match_score` override it). Stop-after-match is never emitted without a scope, and the hook prints the taken fast path's intent, target, cli and stop rule.
 - Intent Horizon is off by default. Opt in with `MYOS_INTENT_HORIZON_ENABLED=1` or `~/.myos-dispatch/config/orchestration-features.json` `{"intentHorizon":{"enabled":true}}`.
