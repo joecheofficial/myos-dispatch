@@ -1257,6 +1257,101 @@ function buildRtkRewrite(payload) {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// Heavy-job gate (workspace ops/HEAVY-JOBS.md, 2026-11-04). A Bash command that launches a
+// heavy process bare is rewritten to run through bin/myos-heavy (admission + load shedding);
+// a backgrounded fan-out of one (the pattern that hung the Studio) is blocked with the fix.
+// ---------------------------------------------------------------------------
+// Matched against the first word of a stage (path stripped, env assignments / nohup / nice / sudo -u / time
+// / caffeinate removed), so `grep whisper notes.md` or a file called ffmpeg.txt never match.
+const HEAVY_LAUNCHERS = [
+  { re: /^python[0-9.]*$/, argsRe: /(^|\s)-m\s+mlx_audio\b|mlx_audio\b/, cls: "tts" },
+  { re: /^mlx_audio(\.\S+)?$/, cls: "tts" },
+  { re: /^python[0-9.]*$/, argsRe: /(^|\s)-m\s+mlx_lm\b|\bmlx_lm\b/, cls: "mlx-llm" },
+  { re: /^mlx_lm(\.\S+)?$/, cls: "mlx-llm" },
+  { re: /^python[0-9.]*$/, argsRe: /(^|\s)-m\s+mlx_whisper\b|\bmlx_whisper\b/, cls: "mlx-whisper" },
+  { re: /^(mlx_whisper|mlx-whisper|whisper-mlx)$/, cls: "mlx-whisper" },
+  { re: /^(faster-whisper|whisper)$/, cls: "whisper" },
+  { re: /^ffmpeg$/, cls: "video" },
+  { re: /^(hyperframes|remotion)$/, argsRe: /^render\b/, cls: "chrome-render" },
+  { re: /^npx$/, argsRe: /^(hyperframes|remotion)\s+render\b/, cls: "chrome-render" },
+  { re: /^utmctl$/, argsRe: /^start\b/, cls: "vm" },
+];
+const STAGE_PREFIX = /^(?:(?:do|then|else|\{)\s+|(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\S*))\s+|nohup\s+|time\s+|xargs(?:\s+-\S+(?:\s+\d+)?)*\s+|caffeinate(?:\s+-\w+)*\s+|nice(?:\s+-n\s+\S+)?\s+|ionice(?:\s+-\S+)*\s+|sudo(?:\s+-\w+(?:\s+\S+)?)*\s+)*/;
+
+function splitStages(command) {
+  return String(command).split(/\s*(?:&&|\|\||;|\||\n)\s*/).map((stage) => stage.replace(/^[\s(]+/, "").trim()).filter(Boolean);
+}
+
+function detectHeavyStage(stage) {
+  const body = stage.replace(STAGE_PREFIX, "");
+  const m = body.match(/^(\S+)(?:\s+([\s\S]*))?$/);
+  if (!m) return null;
+  const word = m[1].replace(/^.*\//, "");
+  const args = m[2] || "";
+  for (const entry of HEAVY_LAUNCHERS) {
+    if (!entry.re.test(word)) continue;
+    if (entry.argsRe && !entry.argsRe.test(args)) continue;
+    return entry.cls;
+  }
+  return null;
+}
+
+function detectHeavyLauncher(text) {
+  for (const stage of splitStages(text)) {
+    const cls = detectHeavyStage(stage);
+    if (cls) return cls;
+  }
+  return null;
+}
+
+function heavyBinPath(env = process.env) {
+  if (env.MYOS_HEAVY_BIN) return env.MYOS_HEAVY_BIN;
+  return path.join(env.MYOS_WORKSPACE || "/Users/myos/.myos/workspace", "bin", "myos-heavy");
+}
+
+// Wrap one simple stage: leading VAR=val assignments stay in front of myos-heavy.
+function wrapHeavyStage(stage, cls, bin) {
+  const m = stage.match(/^(\s*(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\S*)\s+)*)([\s\S]*)$/);
+  const assigns = m ? m[1] : "";
+  const rest = m ? m[2] : stage;
+  return `${assigns}${bin} run --class ${cls} -- ${rest.trim()}`;
+}
+
+function buildHeavyGate(command, env = process.env) {
+  if (!command || /myos-heavy\b/.test(command)) return null;
+  const cls = detectHeavyLauncher(command);
+  if (!cls) return null;
+  const bin = heavyBinPath(env);
+  if (!fs.existsSync(bin)) return null;
+  const fanout = /\bnohup\b|(^|[^&])&\s*(\n|$|;|done\b)|\bxargs\s+.*-P\s*\d|\bparallel\b|\bfor\b[\s\S]*\bdo\b/.test(command);
+  if (fanout) {
+    return {
+      block: `Heavy process (${cls}) launched in the background without myos-heavy. That is the pattern that hung the Studio on 2026-11-04. ` +
+        `Run each one through the gate instead, one call per process, e.g. ${bin} run --class ${cls} -- <command>; ` +
+        `the gate queues extra calls and sheds them before macOS does. Docs: ops/HEAVY-JOBS.md.`,
+    };
+  }
+  // Simple command or an && chain: wrap each heavy stage. Anything else gets a nudge only.
+  if (/[;|\n]|\$\(|`|\|\|/.test(command)) {
+    return { context: `[MyOS heavy jobs] this command launches a ${cls} process outside the gate; run it as ${bin} run --class ${cls} -- <command> (ops/HEAVY-JOBS.md).` };
+  }
+  const stages = command.split(/\s*&&\s*/);
+  const wrapped = stages.map((stage) => (detectHeavyStage(stage) ? wrapHeavyStage(stage, detectHeavyStage(stage), bin) : stage));
+  return { updatedInput: { command: wrapped.join(" && ") }, cls };
+}
+
+function applyHeavyGate(payload, updatedInput, env = process.env) {
+  const current = updatedInput && typeof updatedInput.command === "string" ? updatedInput.command : readCommand(payload);
+  const gate = buildHeavyGate(current, env);
+  if (!gate) return { updatedInput, context: "" };
+  if (gate.block) return { block: gate.block };
+  if (gate.updatedInput) {
+    return { updatedInput: { ...(updatedInput || readToolInput(payload)), ...gate.updatedInput }, context: `[MyOS heavy jobs] rewritten to run through myos-heavy (class ${gate.cls}).` };
+  }
+  return { updatedInput, context: gate.context || "" };
+}
+
 function outputHookContext(hookEventName, context, extra = {}) {
   return {
     hookSpecificOutput: {
@@ -1471,7 +1566,10 @@ function handlePreToolUse(payload, surface, options = {}) {
     intentFidelity: route.route?.parallelization?.intentFidelity || null,
     ...(route.route?.fastpaths ? { fastpaths: route.route.fastpaths } : {}),
   });
-  const updatedInput = options.rewrite ? buildRtkRewrite(payload) : null;
+  let updatedInput = options.rewrite ? buildRtkRewrite(payload) : null;
+  const heavy = options.rewrite ? applyHeavyGate(payload, updatedInput) : { updatedInput, context: "" };
+  if (heavy.block) return { decision: "block", reason: heavy.block };
+  updatedInput = heavy.updatedInput;
   // A shell command is not a new user turn. Keep the safety evidence and RTK
   // rewrite, but never inject a task plan, fanout mandate or expansion contract.
   const safetyReasons = [...new Set([...toolSafetyLabels(route.route), ...(options.toolSafety?.labels || [])])];
@@ -1481,6 +1579,7 @@ function handlePreToolUse(payload, surface, options = {}) {
   // Route evidence is already logged above. When there is nothing actionable
   // (no rewrite and no context to inject), stay a true no-op so the PreToolUse
   // surface behaves exactly like the bare rewrite hook it replaces.
+  if (heavy.context) route.context = route.context ? `${route.context}\n${heavy.context}` : heavy.context;
   try {
     if (options.contextMode !== "none") {
       const nudge = gitClaimNudge({ command, cwd: safeString(payload.cwd || process.cwd()), sessionId: rawSessionId, stateDir: path.join(preferredHomeRoot(), "state", "git-claim-nudge") });
@@ -1622,8 +1721,11 @@ function handleTier0(payload, surface, options, text) {
     inputLength: text.length, cwd: safeString(payload.cwd || process.cwd()), branch: "tier0",
     route: { branch: "tier0" }, jev: jevSummary(jev), intentFidelity, intentHorizon,
     lanesAutoDispatched: 0, agentCallsObserved: 0 });
-  const updatedInput = options.rewrite ? buildRtkRewrite(payload) : null;
-  return updatedInput ? outputHookContext("PreToolUse", "", { updatedInput }) : null;
+  const rtkInput = options.rewrite ? buildRtkRewrite(payload) : null;
+  const heavy = options.rewrite ? applyHeavyGate(payload, rtkInput) : { updatedInput: rtkInput, context: "" };
+  if (heavy.block) return { decision: "block", reason: heavy.block };
+  const updatedInput = heavy.updatedInput;
+  return updatedInput || heavy.context ? outputHookContext("PreToolUse", heavy.context || "", updatedInput ? { updatedInput } : {}) : null;
 }
 
 function shouldSamplePrompt(text, state, env = process.env) {
@@ -1769,6 +1871,9 @@ if (require.main === module) {
 }
 
 module.exports = {
+  buildHeavyGate,
+  applyHeavyGate,
+  detectHeavyLauncher,
   resolveHookPlan,
   isTier0Command,
   shouldSamplePrompt,
