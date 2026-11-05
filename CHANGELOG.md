@@ -2,6 +2,12 @@
 
 All notable changes to MyOS Dispatch are documented here.
 
+## v4.4.0-rc.9 - 2026-11-06
+
+All Sorted customer line: v4.4.0-rc.8 plus work-order proposals, below.
+
+- Long-running goals: Dispatch can propose an Orchestrator work order, writing a small proposal file and a short pointer. It never submits one, and it stays silent when the Orchestrator work-order tools are not installed.
+
 ## v4.4.0-rc.8 - 2026-11-05
 
 All Sorted customer line: v4.4.0-rc.7 plus owner LLM defaults, below.
