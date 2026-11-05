@@ -2,6 +2,14 @@
 
 All notable changes to MyOS Dispatch are documented here.
 
+## v4.4.0-rc.8 - 2026-11-05
+
+All Sorted customer line: v4.4.0-rc.7 plus owner LLM defaults, below.
+
+- Owners choose their orchestrating LLM and working LLM in `<install root>/config/llm-defaults.json`. The file sits outside this checkout, so changing it is never a local change to Dispatch. Missing, broken or unknown values mean no preference.
+- Foreground text calls try signed-in Claude first when `orchestratingLLM` is `claude`, `MYOS_OAUTH_PROVIDER=claude` is set (process or workspace `.env`), or a call asks for it. An explicit provider, pinned provider or other preference still wins. With none of these, Codex still goes first.
+- The prompt hook names the owner's defaults in one line when they are set. `workingLLM` is guidance to the agent, not hard routing.
+
 ## v4.4.0-rc.7 - 2026-11-03
 
 All Sorted customer line: v4.4.0-rc.6 plus the routing fixes found on a customer install, below. It does not include later main-branch provider and writer routing work.
