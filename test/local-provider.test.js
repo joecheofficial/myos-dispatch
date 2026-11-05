@@ -291,6 +291,21 @@ esac
   assert.equal(preferred.routingSource, "taskClass");
   assert.equal(codex.length, 1);
 
+  // The owner's config file sets the order; the environment still wins over it.
+  process.env.MYOS_HOME_ROOT = root;
+  const defaultsFile = path.join(root, "config", "llm-defaults.json");
+  fs.mkdirSync(path.dirname(defaultsFile), { recursive: true });
+  fs.writeFileSync(defaultsFile, JSON.stringify({ orchestratingLLM: "claude", workingLLM: "claude" }));
+  const fileClaude = await myOSrunOauth(options);
+  assert.equal(fileClaude.provider, "anthropic");
+  assert.equal(codex.length, 1);
+  process.env.MYOS_OAUTH_PROVIDER = "codex";
+  const envOverFile = await myOSrunOauth(options);
+  assert.equal(envOverFile.provider, "openai");
+  assert.equal(codex.length, 2);
+  codex.pop();
+  fs.rmSync(defaultsFile);
+
   process.env.MYOS_OAUTH_PROVIDER = "CLAUDE";
   const envClaude = await myOSrunOauth(options);
   assert.equal(envClaude.provider, "anthropic");
