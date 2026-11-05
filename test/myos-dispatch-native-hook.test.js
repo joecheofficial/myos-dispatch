@@ -69,6 +69,18 @@ test("normalizes Codex snake_case hook event names", () => {
   assert.equal(readHookEventName({ hook_event_name: "pre_tool_use", tool_input: { command: "ls" } }), "PreToolUse");
 });
 
+test("UserPromptSubmit names the owner's LLM defaults only when the config file sets them", () => {
+  const payload = { hook_event_name: "UserPromptSubmit", prompt: "fix dispatch", cwd: process.cwd() };
+  const contextOf = () => handleHookPayload(payload, "claude").hookSpecificOutput.additionalContext;
+  assert.doesNotMatch(contextOf(), /Owner LLM defaults/);
+  const file = path.join(process.env.MYOS_HOME_ROOT, "config", "llm-defaults.json");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ primaryLLM: "claude", codeLLM: "codex" }));
+  assert.match(contextOf(), /\[Owner LLM defaults\] primary claude, code writing codex\./);
+  fs.writeFileSync(file, "{broken");
+  assert.doesNotMatch(contextOf(), /Owner LLM defaults/);
+});
+
 test("UserPromptSubmit (Codex surface) emits bounded lanes with native-thread instruction", () => {
   const output = handleHookPayload({
     hook_event_name: "user_prompt_submit",

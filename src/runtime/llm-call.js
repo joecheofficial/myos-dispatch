@@ -33,6 +33,7 @@ const { readState, updateState } = require("./oauth-state");
 const { selectModels, recordFailure } = require("./oauth-registry");
 const { registryPath, refreshRegistry } = require("./oauth-doctor");
 const { isClaudeTextRequest } = require("./oauth-claude");
+const { readLlmDefaults } = require("../llm-defaults");
 
 const WORKSPACE_ENV_PATH = workspaceEnvPath();
 let workspaceEnvLoaded = false;
@@ -125,7 +126,7 @@ function prefersClaudeOauth(options = {}) {
     process.env.MYOS_OAUTH_PROVIDER !== undefined
       ? process.env.MYOS_OAUTH_PROVIDER
       : readWorkspaceOauthProvider();
-  for (const value of [options.providerPreference, envProvider]) {
+  for (const value of [options.providerPreference, envProvider, readLlmDefaults().primaryLLM]) {
     const normalized = String(value || "").trim().toLowerCase();
     if (normalized === "claude") return true;
     if (normalized === "codex" || normalized === "openai" || normalized === "local-codex") return false;
