@@ -126,7 +126,7 @@ function prefersClaudeOauth(options = {}) {
     process.env.MYOS_OAUTH_PROVIDER !== undefined
       ? process.env.MYOS_OAUTH_PROVIDER
       : readWorkspaceOauthProvider();
-  for (const value of [options.providerPreference, envProvider, readLlmDefaults().primaryLLM]) {
+  for (const value of [options.providerPreference, envProvider, readLlmDefaults().orchestratingLLM]) {
     const normalized = String(value || "").trim().toLowerCase();
     if (normalized === "claude") return true;
     if (normalized === "codex" || normalized === "openai" || normalized === "local-codex") return false;

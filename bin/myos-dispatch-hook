@@ -1549,7 +1549,8 @@ function handleUserPromptSubmit(payload, surface, options = {}) {
     ...(proposalText ? { workOrderProposed: { signals: workOrderProposal.signals, steps: workOrderProposal.workOrder.steps.length } } : {}),
   });
 
-  return outputHookContext("UserPromptSubmit", [routeContextText, llmDefaultsContext()].filter(Boolean).join("\n"));
+  // MYOS_DISPATCH_HOOK_CONTEXT=none leaves the route text empty; add nothing then.
+  return outputHookContext("UserPromptSubmit", routeContextText ? [routeContextText, llmDefaultsContext()].filter(Boolean).join("\n") : routeContextText);
 }
 
 function handlePreToolUse(payload, surface, options = {}) {

@@ -75,8 +75,10 @@ test("UserPromptSubmit names the owner's LLM defaults only when the config file 
   assert.doesNotMatch(contextOf(), /Owner LLM defaults/);
   const file = path.join(process.env.MYOS_HOME_ROOT, "config", "llm-defaults.json");
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify({ primaryLLM: "claude", codeLLM: "codex" }));
-  assert.match(contextOf(), /\[Owner LLM defaults\] primary claude, code writing codex\./);
+  fs.writeFileSync(file, JSON.stringify({ orchestratingLLM: "claude", workingLLM: "codex" }));
+  assert.match(contextOf(), /\[Owner LLM defaults\] orchestrating claude, working \(writes the code\) codex\./);
+  const silent = handleHookPayload(payload, "claude", { contextMode: "none" }).hookSpecificOutput.additionalContext;
+  assert.doesNotMatch(String(silent || ""), /Owner LLM defaults/);
   fs.writeFileSync(file, "{broken");
   assert.doesNotMatch(contextOf(), /Owner LLM defaults/);
 });

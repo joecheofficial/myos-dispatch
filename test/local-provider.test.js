@@ -292,10 +292,10 @@ esac
   assert.equal(codex.length, 1);
 
   // The owner's config file sets the order; the environment still wins over it.
-  assert.ok(process.env.MYOS_HOME_ROOT, "fixture sets the install root");
-  const defaultsFile = path.join(process.env.MYOS_HOME_ROOT, "config", "llm-defaults.json");
+  process.env.MYOS_HOME_ROOT = root;
+  const defaultsFile = path.join(root, "config", "llm-defaults.json");
   fs.mkdirSync(path.dirname(defaultsFile), { recursive: true });
-  fs.writeFileSync(defaultsFile, JSON.stringify({ primaryLLM: "claude", codeLLM: "claude" }));
+  fs.writeFileSync(defaultsFile, JSON.stringify({ orchestratingLLM: "claude", workingLLM: "claude" }));
   const fileClaude = await myOSrunOauth(options);
   assert.equal(fileClaude.provider, "anthropic");
   assert.equal(codex.length, 1);
