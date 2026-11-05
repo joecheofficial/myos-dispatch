@@ -8,6 +8,7 @@ const path = require("node:path");
 const { spawnSync, spawn } = require("node:child_process");
 
 const { createJevClient } = require("../src/runtime/jev-client");
+const { llmDefaultsContext } = require("../src/llm-defaults");
 const { claimNudge: gitClaimNudge } = require("../src/git-claim-nudge");
 const { attachJevShadow, attachJevToolSafety } = require("../src/decision/jev-shadow");
 const { routeWithJev } = require("../src/decision/jev-router");
@@ -1394,7 +1395,7 @@ function handleUserPromptSubmit(payload, surface, options = {}) {
     ...(routeObj.fastpaths ? { fastpaths: routeObj.fastpaths } : {}),
   });
 
-  return outputHookContext("UserPromptSubmit", routeContextText);
+  return outputHookContext("UserPromptSubmit", [routeContextText, llmDefaultsContext()].filter(Boolean).join("\n"));
 }
 
 function handlePreToolUse(payload, surface, options = {}) {
