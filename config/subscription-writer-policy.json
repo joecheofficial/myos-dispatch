@@ -2,7 +2,7 @@
   "version": 1,
   "antigravityModels": {
     "cheap_routing": "gemini-3.8-flash-low",
-    "default_automation": "gemini-4-argon-medium"
+    "default_automation": "gemini-3.8-flash-high"
   },
   "codexModel": "gpt-6.1-sol"
 }

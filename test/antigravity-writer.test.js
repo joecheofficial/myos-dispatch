@@ -1,10 +1,10 @@
 "use strict";
 const test=require("node:test"),assert=require("node:assert/strict");
-const {normalizeWorkerKind,buildBackgroundWorkerInvocation}=require("../src/background/background-agent-runner");
+const {normalizeWorkerKind,buildBackgroundWorkerInvocation,resolveBackgroundModel}=require("../src/background/background-agent-runner");
 test("Antigravity is an explicit human Claude writer with isolated ownership",()=>{
  assert.equal(normalizeWorkerKind("agy"),"antigravity");
  const result=buildBackgroundWorkerInvocation({model:"gemini-4-argon-medium",effectiveMode:"workspace_write",ownershipPaths:["owned.txt"],prompt:"bounded edit",scope:"/tmp"},{command:"agy",cwd:"/tmp",callerProvider:"claude",delegation:{callerProvider:"claude",workerProvider:"antigravity",purpose:"code-write",context:"human-interactive"},env:{}});
- assert.equal(result.kind,"antigravity");assert.equal(result.command,"agy");assert.ok(result.args.includes("--add-dir"));
+ assert.equal(result.kind,"antigravity");assert.equal(result.command,"agy");assert.equal(result.model,"gemini-4-argon-medium");assert.ok(result.args.includes("--add-dir"));
 });
 
 const {writerPlan,runSubscriptionWriter}=require("../src/policy/subscription-writer-policy");
@@ -12,6 +12,27 @@ test("suitable tasks prefer Antigravity and difficult or sensitive work goes str
  assert.deepEqual(writerPlan({ownershipPaths:["src/page.js"]}).map(x=>x.provider),["antigravity","codex"]);
  assert.deepEqual(writerPlan({taskClass:"heavy_synthesis"}).map(x=>x.provider),["codex"]);
  assert.deepEqual(writerPlan({ownershipPaths:["src/auth/session.js"]}).map(x=>x.provider),["codex"]);
+});
+test("default automation selects Flash High while cheap routing stays Flash Low",()=>{
+ for(const options of [{},{taskClass:"default_automation"}]) {
+  assert.equal(writerPlan(options)[0].model,"gemini-3.8-flash-high");
+ }
+ assert.equal(writerPlan({taskClass:"cheap_routing"})[0].model,"gemini-3.8-flash-low");
+ for(const taskClass of ["cheap_routing","default_automation"]) {
+  assert.deepEqual(writerPlan({taskClass,ownershipPaths:["src/auth/session.js"]}),[
+   {provider:"codex",model:"gpt-6.1-sol",taskClass}
+  ]);
+ }
+});
+test("Antigravity background default follows the subscription policy",()=>{
+ const policy=require("../config/subscription-writer-policy.json");
+ const original=policy.antigravityModels.default_automation;
+ try {
+  // A different value proves the runner consults policy rather than duplicating its default.
+  policy.antigravityModels.default_automation="gemini-3.8-flash-low";
+  assert.equal(resolveBackgroundModel({command:"agy"}),policy.antigravityModels.default_automation);
+ } finally {policy.antigravityModels.default_automation=original;}
+ assert.equal(resolveBackgroundModel({command:"agy"}),"gemini-3.8-flash-high");
 });
 test("safe Antigravity failure falls back to Sol then preserves active-Claude continuation",async()=>{
  const providers=[];
@@ -38,7 +59,7 @@ function repository() {
  fs.writeFileSync(path.join(root,"owned.txt"),"before\n");git(["add","owned.txt"]);git(["commit","-qm","fixture"]);return root;
 }
 const report={findings:[{file:"owned.txt",note:"updated"}],risks:[],checks:["checked"],confidence:"high"};
-function quota(off=true) {return {provider:"antigravity",status:"available",paidOveragesOff:off,observedAt:new Date().toISOString(),windows:[{name:"gemini-argon-wtu-weekly",remainingPercent:100,resetsAt:new Date(Date.now()+86400000).toISOString()}]};}
+function quota(off=true) {return {provider:"antigravity",status:"available",paidOveragesOff:off,observedAt:new Date().toISOString(),windows:["gemini-weekly","gemini-argon-wtu-weekly"].map(name=>({name,remainingPercent:100,resetsAt:new Date(Date.now()+86400000).toISOString()}))};}
 test("AGY writer collects a verified isolated patch, or starts zero calls if overages are enabled",async()=>{
  for(const off of [false,true]) {
   const scope=repository(),artifactRoot=fs.mkdtempSync(path.join(os.tmpdir(),"agy-writer-artifacts-"));let calls=0;
