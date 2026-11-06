@@ -606,8 +606,52 @@ function main() {
   );
 }
 
+// Antigravity uses a top-level map of named hooks, not Claude/Codex event arrays.
+function registerAntigravity(args) {
+  args.settings ||= path.join(os.homedir(), ".gemini", "config", "hooks.json");
+  args.node = args.node === "node" ? process.execPath : args.node;
+  args.hook ||= path.resolve(__dirname, "../bin/myos-dispatch-antigravity-hook");
+  // Refuse symlinks in any settings path component, including dangling links.
+  const settingsTarget = process.platform === "darwin"
+    ? path.resolve(args.settings).replace(/^\/(var|tmp|etc)(?=\/|$)/, "/private/$1") : path.resolve(args.settings);
+  for (let target = settingsTarget; ; target = path.dirname(target)) {
+    try {
+      if (fs.lstatSync(target).isSymbolicLink()) throw new Error("Refusing symlink settings path");
+    } catch (error) { if (error.code !== "ENOENT") throw error; }
+    if (target === path.dirname(target)) break;
+  }
+  if (!args.remove) {
+    for (const target of [args.node, args.hook]) {
+      if (!path.isAbsolute(target)) throw new Error("Antigravity requires absolute node and hook paths");
+      const resolved = fs.existsSync(target) ? fs.realpathSync(target) : target;
+      if (/(^|[/\\])\.?worktrees?([/\\]|$)/.test(resolved)) throw new Error("Refusing removable worktree command path");
+      if (isEphemeralPath(resolved) && (!args.allowEphemeralHook || !isEphemeralPath(args.settings))) {
+        throw new Error("Refusing ephemeral command path; use a permanent installation");
+      }
+    }
+  }
+  const previous = readBytes(args.settings);
+  const settings = readSettings(args.settings);
+  const base = `${quote(args.node)} ${quote(args.hook)}`;
+  if (args.remove) delete settings["myos-dispatch"];
+  else settings["myos-dispatch"] = {
+    PreInvocation: [{ type: "command", command: `${base} --event PreInvocation || printf '{}\\n'`, timeout: 30 }],
+    PreToolUse: [{ matcher: "run_command", hooks: [{ type: "command", command: `${base} --event PreToolUse || printf '{"decision":"ask"}\\n'`, timeout: 30 }] }],
+  };
+  const serialized = serializeSettings(previous, settings);
+  if (args.dryRun) {
+    process.stdout.write(`--- Antigravity hook merge (dry run) ---\n${serialized}`);
+    return;
+  }
+  writeRegistration(args, serialized, previous);
+}
+
 if (require.main === module) {
-  try { main(); } catch (error) { process.stderr.write(`${error.message}\n`); process.exitCode = 1; }
+  try {
+    const args = parseArgs(process.argv.slice(2));
+    if (args.surface === "antigravity") registerAntigravity(args);
+    else main();
+  } catch (error) { process.stderr.write(`${error.message}\n`); process.exitCode = 1; }
 }
 
 module.exports = {
