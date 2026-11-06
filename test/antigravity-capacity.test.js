@@ -11,6 +11,7 @@ test("paid overages must be verified off through native zero-turn settings",()=>
 test("quota eligibility uses the selected model's pool and real reset time",()=>{
  const snapshot=normalizeAntigravityCapacity(usage(0),settings(true),now);
  assert.equal(eligibleAntigravityCapacity(snapshot,"gemini-3.8-flash-low",now),false);
+ assert.equal(eligibleAntigravityCapacity(snapshot,"gemini-3.8-flash-high",now),false);
  assert.equal(eligibleAntigravityCapacity(snapshot,"gemini-4-argon-medium",now),true);
  assert.equal(eligibleAntigravityCapacity(snapshot,"gemini-4-argon-medium",now+600000),false);
  assert.equal(eligibleAntigravityCapacity({...snapshot,observedAt:"bogus"},"gemini-4-argon-medium",now),false);
@@ -18,4 +19,11 @@ test("quota eligibility uses the selected model's pool and real reset time",()=>
 test("generated model text or malformed quota is never authoritative metadata",()=>{
  assert.equal(normalizeAntigravityCapacity({...usage(1),num_turns:1},settings(true),now).status,"unknown");
  assert.equal(normalizeAntigravityCapacity(usage(2),settings(true),now).status,"unknown");
+});
+test("Flash High remains eligible when the separate Argon pool is exhausted",()=>{
+ const metadata=usage(1);
+ metadata.command.data.groups[1].buckets[0].remaining_fraction=0;
+ const snapshot=normalizeAntigravityCapacity(metadata,settings(true),now);
+ assert.equal(eligibleAntigravityCapacity(snapshot,"gemini-3.8-flash-high",now),true);
+ assert.equal(eligibleAntigravityCapacity(snapshot,"gemini-4-argon-medium",now),false);
 });

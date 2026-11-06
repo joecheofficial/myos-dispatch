@@ -276,7 +276,7 @@ function assertOauthOnlyWorker(kind, options = {}) {
 
 function resolveBackgroundModel({ provider, profile, command }) {
   const kind = normalizeWorkerKind(command);
-  if (kind === "antigravity") return "gemini-4-argon-medium";
+  if (kind === "antigravity") return require("../../config/subscription-writer-policy.json").antigravityModels.default_automation;
   if (kind === "claude") return process.env.MYOS_BACKGROUND_CLAUDE_MODEL || "haiku";
   if (kind === "gemini") return process.env.MYOS_BACKGROUND_GEMINI_MODEL || null;
 

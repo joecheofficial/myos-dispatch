@@ -142,13 +142,24 @@ test("20 second Dispatch timeout returns ask with exit zero", t => {
 test("registered shell command invokes the real Dispatch hook in an isolated home", t => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "agy-real-flow-"));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  // Registration intentionally rejects worktree paths. Install real files into
+  // this test's temporary home so checkout location cannot affect the command.
+  const install = path.join(home, "dispatch");
+  for (const directory of ["src", "config"]) {
+    fs.cpSync(path.join(ROOT, directory), path.join(install, directory), { recursive: true });
+  }
+  fs.mkdirSync(path.join(install, "bin"), { recursive: true });
+  for (const name of ["myos-dispatch-hook", "myos-dispatch-antigravity-hook"]) {
+    fs.copyFileSync(path.join(ROOT, "bin", name), path.join(install, "bin", name));
+  }
+  const installedHook = path.join(install, "bin/myos-dispatch-antigravity-hook");
   const settings = path.join(home, "hooks.json");
   const env = { HOME: home, PATH: process.env.PATH, MYOS_HOME_ROOT: home,
     MYOS_JEV_MODE: "off", MYOS_BACKGROUND_BACKPRESSURE_ENABLED: "0",
     MYOS_BACKGROUND_AGENTS_ENABLED: "0", MYOS_AUTO_FANOUT: "0" };
   const registered = spawnSync(process.execPath, [path.join(ROOT, "scripts/register-hook.js"),
     "--surface", "antigravity", "--settings", settings, "--node", process.execPath,
-    "--hook", HOOK, "--allow-ephemeral-hook"], { encoding: "utf8", env });
+    "--hook", installedHook, "--allow-ephemeral-hook"], { encoding: "utf8", env });
   assert.equal(registered.status, 0, registered.stderr);
   const hooks = JSON.parse(fs.readFileSync(settings, "utf8"))["myos-dispatch"];
   const invoked = spawnSync("sh", ["-c", hooks.PreInvocation[0].command], {
