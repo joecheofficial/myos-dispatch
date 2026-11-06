@@ -159,6 +159,20 @@ verified by the macOS implementation run; a native Windows rehearsal is required
 The `myos-writer` command requires WSL on Windows; native hook registration does
 not enable native writable workers.
 
+### Antigravity (`agy`)
+
+From a permanent checkout on this Mac, run
+`node scripts/register-hook.js --surface antigravity`. This registers the named
+`myos-dispatch` hook in `~/.gemini/config/hooks.json`, preserving other named hooks
+and backing up changes. Use `--settings <path>` for a different file, `--dry-run`
+to preview, or `--remove` to uninstall. Registration uses absolute Node and hook
+paths; temporary/worktree command paths are refused. PreInvocation routes only
+the first model call of each user turn and injects system context that survives tool calls.
+PreToolUse translates `run_command`, returns `ask` or an explicit Dispatch `deny`,
+and safely returns `ask` on failures. Sidecars and update reviewers bypass routing;
+the wrapper disables child fanout. Shell fallbacks also keep a missing wrapper
+from blocking tools. Restart `agy` after registration.
+
 ### What gets registered and verified
 
 Claude uses `~/.claude/settings.json`: UserPromptSubmit and optional PreToolUse,

@@ -1,0 +1,29 @@
+#!/usr/bin/env node
+"use strict";
+
+const event = process.argv[process.argv.indexOf("--event") + 1];
+const fallback = event === "PreToolUse" ? { decision: "ask" } : {};
+let reply = fallback;
+// Do this before loading Dispatch or reading stdin: unattended writers must
+// never route themselves, including when their input is malformed or absent.
+if (!["MYOS_BACKGROUND_IS_SIDECAR", "MYOS_SIDECAR_RUN_ID", "ALLSORTED_UPDATE_REVIEWER"]
+  .some(key => process.env[key] !== undefined)) {
+  try {
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const { spawnSync } = require("node:child_process");
+    const { toDispatch, fromDispatch } = require("../src/runtime/antigravity-hook-bridge");
+    const payload = JSON.parse(fs.readFileSync(0, "utf8"));
+    const input = toDispatch(event, payload);
+    if (input) {
+      const result = spawnSync(process.execPath, [path.join(__dirname, "myos-dispatch-hook"), "--surface=antigravity"], {
+        input: JSON.stringify(input), encoding: "utf8", timeout: 20000,
+        killSignal: "SIGKILL", maxBuffer: 1024 * 1024,
+        env: { ...process.env, MYOS_BACKGROUND_AGENTS_ENABLED: "0", MYOS_AUTO_FANOUT: "0" },
+      });
+      if (!result.error && result.status === 0) reply = fromDispatch(event, result.stdout);
+    }
+  } catch { reply = fallback; }
+}
+process.stdout.write(`${JSON.stringify(reply)}\n`);
+process.exitCode = 0;

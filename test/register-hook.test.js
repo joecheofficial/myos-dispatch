@@ -614,3 +614,103 @@ test("(issue8) private agents/shared hooks are never treated as Dispatch-owned",
   // Windows legacy registration without --surface.
   assert.strictEqual(isOurHookEntry({ command: '"C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\joe\\myos-dispatch\\bin\\myos-dispatch-hook"' }), true);
 });
+
+
+test("Antigravity registers named hooks and preserves foreign bytes through rerun and removal", () => {
+  const { home, settings } = sandbox();
+  try {
+    const foreign = '"myos-portal-program-boundaries" : { "PreToolUse" : [{"matcher":"run_command","hooks":[{"type":"command","command":"portal", "timeout":1e2}]}] }';
+    const original = `{${foreign}}\n`;
+    fs.writeFileSync(settings, original);
+    const extra = ["--surface", "antigravity", "--hook", "/opt/myos-dispatch/bin/myos-dispatch-antigravity-hook"];
+    const preview = add(settings, [...extra, "--dry-run"]);
+    assert.strictEqual(preview.status, 0, preview.stderr);
+    assert.strictEqual(read(settings), original);
+    assert.strictEqual(add(settings, extra).status, 0);
+    const first = read(settings);
+    const owned = JSON.parse(first)["myos-dispatch"];
+    assert.ok(owned, "named myos-dispatch hook must be registered");
+    assert.ok(first.includes(foreign));
+    assert.match(owned.PreInvocation[0].command, /--event PreInvocation \|\| printf '\{\}\\n'$/);
+    assert.strictEqual(owned.PreToolUse[0].matcher, "run_command");
+    assert.ok(owned.PreToolUse[0].hooks[0].command.endsWith(`|| printf '{"decision":"ask"}\\n'`));
+    assert.strictEqual(owned.PreToolUse[0].hooks[0].timeout, 30);
+    assert.strictEqual(add(settings, extra).status, 0);
+    assert.strictEqual(read(settings), first);
+    assert.strictEqual(add(settings, [...extra, "--remove"]).status, 0);
+    assert.strictEqual(read(settings), original);
+    const backups = fs.readdirSync(path.dirname(settings)).filter(name => name.includes(".bak-"));
+    assert.ok(backups.length >= 2);
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});
+
+test("Antigravity refuses invalid JSON and symlinks without changing settings", () => {
+  const { home, settings } = sandbox();
+  const extra = ["--surface", "antigravity", "--hook", "/opt/myos-dispatch/bin/myos-dispatch-antigravity-hook"];
+  try {
+    for (const original of ["{bad", "[]", "null", "{\"a\":1,\"a\":2}"]) {
+      fs.writeFileSync(settings, original);
+      for (const mode of [[], ["--remove"]]) {
+        assert.notStrictEqual(add(settings, [...extra, ...mode]).status, 0);
+        assert.strictEqual(read(settings), original);
+      }
+    }
+    fs.writeFileSync(settings, "{}");
+    const link = path.join(home, "link.json");
+    fs.symlinkSync(settings, link);
+    assert.notStrictEqual(add(link, extra).status, 0);
+    assert.strictEqual(read(settings), "{}");
+    const linkedDir = path.join(home, "linked-dir");
+    fs.symlinkSync(path.dirname(settings), linkedDir);
+    assert.notStrictEqual(add(path.join(linkedDir, "settings.json"), extra).status, 0);
+    const dangling = path.join(home, "dangling.json");
+    fs.symlinkSync(path.join(home, "missing.json"), dangling);
+    assert.notStrictEqual(add(dangling, extra).status, 0);
+    assert.strictEqual(fs.existsSync(path.join(home, "missing.json")), false);
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});
+
+test("Antigravity defaults to the Gemini named hook file under HOME", () => {
+  const { home } = sandbox();
+  try {
+    const args = [SCRIPT, "--surface", "antigravity", "--hook", "/opt/myos-dispatch/bin/myos-dispatch-antigravity-hook"];
+    const result = spawnSync(NODE, args, { encoding: "utf8", env: { ...process.env, HOME: home } });
+    assert.strictEqual(result.status, 0, result.stderr);
+    const settings = path.join(home, ".gemini/config/hooks.json");
+    assert.ok(JSON.parse(read(settings))["myos-dispatch"]);
+    const removed = spawnSync(NODE, [...args, "--remove"], { encoding: "utf8", env: { ...process.env, HOME: home } });
+    assert.strictEqual(removed.status, 0, removed.stderr);
+    assert.deepStrictEqual(JSON.parse(read(settings)), {});
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});
+
+test("Antigravity shell fallbacks keep missing hook or node from blocking tools", () => {
+  const { home, settings } = sandbox();
+  try {
+    for (const nodePath of [NODE, "/opt/nonexistent-agy-node"]) {
+      const result = add(settings, ["--surface", "antigravity", "--node", nodePath, "--hook", "/opt/nonexistent-agy-hook"]);
+      assert.strictEqual(result.status, 0, result.stderr);
+      const hooks = JSON.parse(read(settings))["myos-dispatch"];
+      for (const [command, expected] of [
+        [hooks.PreInvocation[0].command, {}],
+        [hooks.PreToolUse[0].hooks[0].command, { decision: "ask" }],
+      ]) {
+        const executed = spawnSync("sh", ["-c", command], { encoding: "utf8" });
+        assert.strictEqual(executed.status, 0, executed.stderr);
+        assert.deepStrictEqual(JSON.parse(executed.stdout), expected);
+      }
+    }
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});
+
+test("Antigravity refuses relative and removable command paths", () => {
+  const { home, settings } = sandbox();
+  try {
+    for (const extra of [["--hook", "relative-hook"], ["--node", "relative-node"],
+      ["--hook", "/opt/project/.worktrees/review/bin/hook"], ["--hook", "/tmp/reaped-hook"]]) {
+      const result = add(settings, ["--surface", "antigravity", ...extra]);
+      assert.notStrictEqual(result.status, 0);
+      assert.strictEqual(fs.existsSync(settings), false);
+    }
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});

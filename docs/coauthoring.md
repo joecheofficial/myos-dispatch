@@ -95,7 +95,8 @@ provider-side credit balance. See [subscription capacity](subscription-capacity.
 ## Antigravity-first selection and spending protection
 
 Automatic `cheap_routing` uses Gemini 3.8 Flash Low for small bounded edits; `default_automation`
-uses Gemini 4 Argon Medium for normal bounded implementation. Heavy synthesis, planning, elite
+uses Gemini 3.8 Flash High for normal bounded implementation. Gemini 4 Argon is used only when
+explicitly pinned because its weekly allowance is small and separate. Heavy synthesis, planning, elite
 work and paths identifying auth/security/credentials/payments/migrations/deployment/infrastructure
 go directly to Codex 6.1 Sol. The parent must classify risk honestly and independently review quality;
 a passing fixture does not prove that Antigravity matches Sol on arbitrary projects.
