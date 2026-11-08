@@ -85,3 +85,56 @@ call(['stop',state]);spec.id='blocked';fs.writeFileSync(specfile,JSON.stringify(
 
 
 });
+
+
+test('compressed native evidence survives archival and preserves exact-turn receipts', () => {
+  const fs = require('node:fs'), os = require('node:os'), path = require('node:path'), zlib = require('node:zlib');
+  const { spawnSync } = require('node:child_process');
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'trial-archive-')));
+  const dir = path.join(root, '.codex/sessions'); fs.mkdirSync(dir, { recursive: true });
+  const id = '12345678-1234-1234-1234-123456789abc';
+  const file = path.join(dir, 'rollout-' + id + '.jsonl');
+  const records = [
+    { type: 'session_meta', payload: { id } },
+    { type: 'turn_context', timestamp: '2026-11-01T00:00:01Z', payload: { model: 'gpt-6.1-sol', sandbox_policy: { type: 'read-only' } } },
+    { type: 'event_msg', timestamp: '2026-11-01T00:00:02Z', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 100, cached_input_tokens: 50, output_tokens: 3 } } } }
+  ];
+  const content = records.map(r => JSON.stringify(r)).join('\n') + '\n';
+  fs.writeFileSync(file + '.zst', zlib.zstdCompressSync(Buffer.from(content)));
+  const job = { session: id, sandbox: 'read-only', turns: [{ session: id, code: 0, completed: true, started: '2026-11-01T00:00:00Z', finished: '2026-11-01T00:00:03Z' }] };
+  const moduleFile = path.join(__dirname, 'real-trial.js');
+  const run = job => {
+    const code = `const m=require(${JSON.stringify(moduleFile)});console.log(JSON.stringify(m.collectTelemetry(${JSON.stringify(job)},${JSON.stringify(root)})))`;
+    return spawnSync(process.execPath, ['-e', code], { env: { PATH: process.env.PATH, HOME: root }, encoding: 'utf8' });
+  };
+  let r = run(job); assert.equal(r.status, 0, r.stderr);
+  assert.equal(JSON.parse(r.stdout).telemetry.usage.input_tokens, 100);
+  assert.equal(JSON.parse(r.stdout).telemetrySource.kind, 'compressed');
+  fs.renameSync(file + '.zst', file + '.archived');
+  r = run(job); assert.equal(JSON.parse(r.stdout).telemetrySource.kind, 'snapshot');
+  const next = { ...job, turns: [...job.turns, { ...job.turns[0], started: '2026-11-02T00:00:00Z' }] };
+  assert.equal(JSON.parse(run(next).stdout).telemetry, null);
+  assert.equal(JSON.parse(run({ ...job, status: 'running' }).stdout).telemetry, null);
+  assert.equal(JSON.parse(run({ ...job, turns: [{ ...job.turns[0], monitorStopped: false }] }).stdout).telemetrySource.kind, 'snapshot');
+  fs.renameSync(file + '.archived', file + '.zst');
+  fs.writeFileSync(file, content); assert.equal(run(job).status, 0);
+  fs.appendFileSync(file, JSON.stringify({ type: 'compacted' }) + '\n');
+  assert.notEqual(run(job).status, 0, 'conflicting copies must not silently choose stale evidence');
+  fs.renameSync(file, file + '.conflict');
+  fs.writeFileSync(file + '.zst', zlib.zstdCompressSync(Buffer.from(content + '{invalid json}\n')));
+  assert.notEqual(run(job).status, 0, 'malformed archived JSON must not silently drop records');
+  fs.writeFileSync(file + '.zst', 'corrupt archive');
+  assert.notEqual(run(job).status, 0, 'corruption must not silently reuse a snapshot');
+});
+
+test('missing accounting is null, never represented as free work', () => {
+  const report = realTrialReport({ started: new Date().toISOString() }, [{ arm: 'default', turns: [], reviews: [] }]);
+  assert.equal(report.arms.default.input, null);
+  assert.equal(report.arms.default.uncachedInput, null);
+  assert.equal(report.telemetryStatus, 'INCOMPLETE');
+});
+
+test('partial counters cannot become zero cost', () => {
+ const r = realTrialReport({started:new Date().toISOString()},[{arm:'default',turns:[],reviews:[],telemetry:{usage:{input_tokens:5}}}]);
+ assert.equal(r.arms.default.input,null); assert.equal(r.telemetryStatus,'INCOMPLETE');
+});

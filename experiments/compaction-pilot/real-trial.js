@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
+const zlib = require('node:zlib');
 const { spawn, spawnSync } = require('node:child_process');
 const { telemetry } = require('./metrics');
 const { codexExecutionSettings } = require('../../src/policy/codex-execution-policy');
@@ -12,11 +13,21 @@ const DAY = 86400000;
 const MODEL = 'gpt-6.1-sol';
 const read = file => JSON.parse(fs.readFileSync(file, 'utf8'));
 const digest = file => fs.existsSync(file) ? crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex') : null;
-const lines = file => fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).flatMap(s => { try { return [JSON.parse(s)]; } catch { return []; } });
+const lines = (file, strict = false) => {
+  let data = fs.readFileSync(file);
+  if (file.endsWith('.zst')) {
+    if (typeof zlib.zstdDecompressSync !== 'function') throw new Error('Compressed telemetry requires Node 22.15+ or Node 24+');
+    data = zlib.zstdDecompressSync(data, { maxOutputLength: 256 * 1024 * 1024 });
+  }
+  return data.toString('utf8').split('\n').filter(Boolean).flatMap(s => { try { return [JSON.parse(s)]; } catch (error) { if (strict) throw new Error('Malformed native telemetry record: ' + file); return []; } });
+};
 function save(file, value) {
   const temp = `${file}.${crypto.randomUUID()}.tmp`;
   fs.writeFileSync(temp, JSON.stringify(value, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
   fs.renameSync(temp, file);
+}
+function validUsage(usage) {
+  return Boolean(usage && ['input_tokens', 'cached_input_tokens', 'output_tokens'].every(k => Number.isFinite(usage[k]) && usage[k] >= 0) && usage.cached_input_tokens <= usage.input_tokens);
 }
 function acceptanceEligible(job) {
   const t = job.turns.at(-1), usage = job.telemetry?.usage;
@@ -31,17 +42,17 @@ function realTrialReport(trial, jobs, now = Date.now()) {
   for (const arm of ['default', '150k']) {
     const group = jobs.filter(j => j.arm === arm && !j.instrumentationOnly);
     const accepted = group.filter(j => j.status !== 'awaiting_review' && j.reviews.at(-1)?.accepted && acceptanceEligible(j));
-    const sum = key => group.reduce((n, j) => n + (j.telemetry?.usage?.[key] || 0), 0);
+    const sum = key => group.some(j => !validUsage(j.telemetry?.usage)) ? null : group.reduce((n, j) => n + (j.telemetry.usage[key] || 0), 0);
     arms[arm] = { enrolled: group.length, accepted: accepted.length,
       unreviewed: group.filter(j => !j.reviews.length || j.status === 'awaiting_review').length,
       completionRate: group.length ? accepted.length / group.length : null,
       failedAttempts: group.flatMap(j => j.turns).filter(t => t.code !== 0 || !t.completed || t.timedOut || t.configurationDrift || t.quotaOrAuthFailure).length,
       input: sum('input_tokens'), cachedInput: sum('cached_input_tokens'),
-      uncachedInput: sum('input_tokens') - sum('cached_input_tokens'), output: sum('output_tokens'),
+      uncachedInput: sum('input_tokens') === null ? null : sum('input_tokens') - sum('cached_input_tokens'), output: sum('output_tokens'),
       compactedJobs: group.filter(j => j.telemetry?.compactions?.length).length,
       elapsedMs: group.flatMap(j => j.turns).reduce((n, t) => n + (t.elapsedMs || 0), 0),
-      missingUsage: group.filter(j => !j.telemetry?.usage).length,
-      reportedInputPerAcceptedJob: accepted.length ? sum('input_tokens') / accepted.length : null };
+      missingUsage: group.filter(j => !validUsage(j.telemetry?.usage)).length,
+      reportedInputPerAcceptedJob: accepted.length && sum('input_tokens') !== null ? sum('input_tokens') / accepted.length : null };
   }
   const sufficient = arms.default.accepted >= 10 && arms['150k'].accepted >= 10 && arms['150k'].compactedJobs >= 5;
   const ageDays = (now - Date.parse(trial.started)) / DAY;
@@ -50,11 +61,12 @@ function realTrialReport(trial, jobs, now = Date.now()) {
     initialReviewAt: new Date(Date.parse(trial.started) + 7 * DAY).toISOString(),
     hardExpiry: new Date(Date.parse(trial.started) + 14 * DAY).toISOString(), arms,
     instrumentationJobs: jobs.filter(j => j.instrumentationOnly).length,
+    telemetryStatus: jobs.some(j => !validUsage(j.telemetry?.usage)) ? 'INCOMPLETE' : jobs.some(j => j.telemetrySource?.kind === 'snapshot') ? 'PRESERVED_SNAPSHOT' : 'LIVE',
     completeCostAccounting: false, actualDollarSavings: null, promotion: 'NOT_AUTHORIZED',
     comparison: 'Observed usage only. Compare prospectively matched task/model/config strata; raw cohorts are not causal savings.',
     jobs: jobs.map(j => ({ id: j.id, arm: j.arm, taskClass: j.taskClass, instrumentationOnly: j.instrumentationOnly,
       status: j.status, session: j.session, model: MODEL, effort: 'medium', sandbox: j.sandbox,
-      peakInput: j.telemetry?.peakInput, compactions: j.telemetry?.compactions?.length || 0,
+      telemetrySource: j.telemetrySource, peakInput: j.telemetry?.peakInput, compactions: j.telemetry?.compactions?.length || 0,
       usage: j.telemetry?.usage, counterReset: j.telemetry?.counterReset, turns: j.turns,
       reviews: j.reviews, configHashes: j.configHashes, launcherError: j.launcherError,
       unaccountedSessionIds: j.turns.map(t => t.session).filter(id => id && id !== j.session) })) };
@@ -66,32 +78,53 @@ function validId(id) {
   if (!/^[a-z0-9][a-z0-9-]{0,80}$/.test(id || '')) throw new Error('Invalid job ID');
   return id;
 }
-function findSession(id) {
-  if (!/^[0-9a-f-]{36}$/.test(id || '')) return null;
+function findSession(id, root = path.join(os.homedir(), '.codex/sessions')) {
+  if (!/^[0-9a-f-]{36}$/.test(id || '') || !fs.existsSync(root)) return null;
+  const hits = [];
   const visit = dir => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const file = path.join(dir, entry.name);
-      if (entry.isDirectory()) { const hit = visit(file); if (hit) return hit; }
-      else if (entry.name.endsWith(`${id}.jsonl`)) return file;
+      if (entry.isDirectory()) visit(file);
+      else if (entry.isFile() && [ `${id}.jsonl`, `${id}.jsonl.zst` ].some(suffix => entry.name.endsWith(suffix))) hits.push(file);
     }
-    return null;
   };
-  return visit(path.join(os.homedir(), '.codex/sessions'));
+  visit(root);
+  if (hits.length > 1) {
+    const signatures = hits.map(file => crypto.createHash('sha256').update(JSON.stringify(lines(file, true))).digest('hex'));
+    if (new Set(signatures).size !== 1) throw new Error('Conflicting native telemetry sources for session ' + id);
+  }
+  // Identical archive/plain copies are safe; prefer the newest source.
+  return hits.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs || Number(a.endsWith('.zst')) - Number(b.endsWith('.zst')))[0] || null;
+}
+function turnIdentity(job) {
+  return crypto.createHash('sha256').update(JSON.stringify({ session: job.session, turns: job.turns.map(t => ({ session: t.session, started: t.started, finished: t.finished, code: t.code, completed: t.completed, timedOut: t.timedOut, configurationDrift: t.configurationDrift, quotaOrAuthFailure: t.quotaOrAuthFailure })) })).digest('hex');
+}
+function collectTelemetry(job, dir) {
+  const file = findSession(job.session);
+  const snapshotFile = path.join(dir, 'telemetry-receipt.json');
+  const turnKey = turnIdentity(job);
+  if (file) {
+    const records = lines(file, true), result = telemetry(records);
+    const declared = records.find(r => r.type === 'session_meta')?.payload?.id;
+    if (declared && declared !== job.session) throw new Error('Native telemetry session identity mismatch');
+    result.lastUsageAt = records.findLast(r => r.type === 'event_msg' && r.payload?.type === 'token_count' && r.payload.info)?.timestamp;
+    result.lastContextAt = records.findLast(r => r.type === 'turn_context')?.timestamp;
+    const source = { kind: file.endsWith('.zst') ? 'compressed' : 'native', file, size: fs.statSync(file).size, sha256: digest(file), parserVersion: 1, capturedAt: new Date().toISOString() };
+    if (acceptanceEligible({ ...job, telemetry: result })) save(snapshotFile, { version: 1, session: job.session, turnKey, telemetry: result, source });
+    return { telemetry: result, telemetrySource: source };
+  }
+  if (job.status !== 'running' && fs.existsSync(snapshotFile)) {
+    const saved = read(snapshotFile);
+    if (saved.version === 1 && saved.session === job.session && saved.turnKey === turnKey && acceptanceEligible({ ...job, telemetry: saved.telemetry })) return { telemetry: saved.telemetry, telemetrySource: { ...saved.source, kind: 'snapshot', warning: 'Native source unavailable; same completed-turn receipt retained.' } };
+  }
+  return { telemetry: null, telemetrySource: { kind: 'missing' } };
 }
 function collect(state) {
   return fs.readdirSync(path.join(state, 'jobs'), { withFileTypes: true }).filter(e => e.isDirectory()).map(e => {
-    const job = read(path.join(state, 'jobs', e.name, 'job.json'));
-    job.telemetry = sessionTelemetry(job.session);
-    return job;
+    const dir = path.join(state, 'jobs', e.name);
+    const job = read(path.join(dir, 'job.json'));
+    return Object.assign(job, collectTelemetry(job, dir));
   });
-}
-function sessionTelemetry(id) {
-  const session = findSession(id);
-  if (!session) return null;
-  const records = lines(session), result = telemetry(records);
-  result.lastUsageAt = records.findLast(r => r.type === 'event_msg' && r.payload?.type === 'token_count' && r.payload.info)?.timestamp;
-  result.lastContextAt = records.findLast(r => r.type === 'turn_context')?.timestamp;
-  return result;
 }
 function monitor(state) {
   const trial = read(path.join(state, 'trial.json'));
@@ -104,7 +137,7 @@ function monitor(state) {
   save(path.join(state, 'report.json'), report);
   save(path.join(state, 'checks', `${new Date().toISOString().replace(/[:.]/g, '-')}.json`), report);
   const table = Object.entries(report.arms).map(([arm, a]) => `| ${arm} | ${a.enrolled} | ${a.accepted} | ${a.unreviewed} | ${a.compactedJobs} | ${a.input} | ${a.uncachedInput} | ${a.failedAttempts} |`).join('\n');
-  fs.writeFileSync(path.join(state, 'REPORT.md'), `# MyOS real-work compaction trial\n\nStatus: ${report.status}. Checked: ${report.checkedAt}.\n\nInitial review: ${report.initialReviewAt}. Hard expiry: ${report.hardExpiry}.\n\n| Arm | Enrolled | Accepted | Unreviewed | Compacted jobs | Input | Uncached input | Failed attempts |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n${table}\n\nInstrumentation canaries excluded: ${report.instrumentationJobs}.\n\nComplete cost accounting is unavailable. These are observed native tokens, not dollar savings. No promotion is automatic. Daily collection is deterministic, not a quality review. Jobs need independent acceptance evidence.\n`, { mode: 0o600 });
+  fs.writeFileSync(path.join(state, 'REPORT.md'), `# MyOS real-work compaction trial\n\nStatus: ${report.status}. Telemetry: ${report.telemetryStatus}. Checked: ${report.checkedAt}.\n\nInitial review: ${report.initialReviewAt}. Hard expiry: ${report.hardExpiry}.\n\n| Arm | Enrolled | Accepted | Unreviewed | Compacted jobs | Input | Uncached input | Failed attempts |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n${table}\n\nInstrumentation canaries excluded: ${report.instrumentationJobs}.\n\nComplete cost accounting is unavailable. These are observed native tokens, not dollar savings. No promotion is automatic. Daily collection is deterministic, not a quality review. Jobs need independent acceptance evidence.\n`, { mode: 0o600 });
   return report;
 }
 function enroll(state, spec) {
@@ -206,7 +239,7 @@ function review(state, id, decision) {
   const file = path.join(state, 'jobs', validId(id), 'job.json'), job = read(file);
   if (job.status === 'running' || !job.turns.length || typeof decision.accepted !== 'boolean' || typeof decision.criticalFailure !== 'boolean' ||
       !decision.reviewer || !decision.notes || !decision.evidenceFiles?.length) throw new Error('Independent review and evidence required');
-  job.telemetry = sessionTelemetry(job.session);
+  Object.assign(job, collectTelemetry(job, path.dirname(file)));
   if (decision.accepted && (!acceptanceEligible(job) || decision.criticalFailure)) throw new Error('Failed or unmeasured turn cannot be accepted');
   const evidence = decision.evidenceFiles.map(file => { if (!path.isAbsolute(file) || !fs.statSync(file).isFile()) throw new Error('Missing evidence file'); return { file, sha256: digest(file) }; });
   job.reviews.push({ ...decision, evidence, at: new Date().toISOString(), timeToReviewMs: Date.now() - Date.parse(job.enrolled) });
@@ -239,4 +272,4 @@ async function main() {
   }
 }
 if (require.main === module) main().catch(error => { console.error(error.message); process.exitCode = 1; });
-module.exports = { realTrialReport, assertActive, launchArgs, enroll, review, runJob, monitor, acceptanceEligible };
+module.exports = { findSession, collectTelemetry, realTrialReport, assertActive, launchArgs, enroll, review, runJob, monitor, acceptanceEligible };
