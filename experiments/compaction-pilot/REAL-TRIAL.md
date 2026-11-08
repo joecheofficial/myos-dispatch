@@ -80,3 +80,58 @@ Tests must reject unreviewed exits as success, retain failed attempts, separate
 cache usage correctly, exclude instrumentation canaries from efficacy counts,
 and refuse expiry/stop. Exercise an actual enrolled MyOS review job and verify
 native session identity, launch arguments, report generation and reviewer evidence.
+
+
+## November 8 evidence repair and matched reliability audit
+
+### What / why
+
+Archived native sessions use `.jsonl.zst`. The original collector only located
+`.jsonl`, so archival made reviewed jobs appear unmeasured. Read compressed evidence
+in memory and retain validated same-turn receipts. Unknown counters are null, never
+zero-cost work.
+
+### Approach
+
+`findSession` accepts plain and compressed native logs, verifies duplicate copies
+agree, and rejects malformed native JSON. `collectTelemetry` records source path,
+size, hash, parser version, capture time, native session and stable completed-turn
+identity. A missing native source can reuse a validated receipt for exactly that
+completed turn, labeled `snapshot`. Running jobs, new turns, corruption and identity
+conflicts cannot silently reuse it. Preserve originals and historical checks.
+This uses native compaction instead of implementing a second compaction controller.
+
+The real-work exposure is a matched, staged audit of false completion and unsafe
+recovery across Dispatch. Freeze the relevant source/test/doc bytes and hashes
+before launch; use identical six-stage prompts and alternate arm order. Four source
+review stages cover completion/persistence, orchestration/worktrees, launch policy,
+and recovery/accounting. Then use a no-reread retention probe followed by a final
+useful audit with measured rereads allowed. Compare oracle cases against exported
+pure functions independently, and verify each alleged defect against frozen source.
+No required bug count. Include unsuccessful attempts and unproven findings.
+
+### Acceptance criteria
+
+- Original accepted jobs and usage survive native log archival.
+- Corrupt archives, corrupt JSON, conflicting copies and partial counters fail visibly.
+- A preserved receipt cannot qualify a later or currently running turn.
+- Both arms receive the same prospectively frozen source and questions.
+- Report actual compactions, cumulative/cache/uncached/output tokens, latency,
+  deterministic accuracy, independently checked audit quality and rereads.
+- Do not call a non-triggering run proof of compaction efficacy. Do not claim dollar
+  savings or promote the setting from a single matched workload.
+
+### The check
+
+Run `node --test experiments/compaction-pilot/real-trial.test.js`, the full repository
+suite, and `monitor` against the existing archived trial. Complete the matched audit
+and independently review final answers plus the deterministic retention probe.
+
+### Out of scope
+
+Global defaults, Claude, All Sorted, Uni/Juno, live credentials, production writes,
+automatic enrollment of unrelated chats, and fabricated context padding.
+
+Compressed telemetry requires a Node runtime with `zlib.zstdDecompressSync` (the
+installed daily monitor uses Node 24). If unsupported, fail explicitly. Daily
+monitoring collects evidence; it does not create or carry out productive tasks.
