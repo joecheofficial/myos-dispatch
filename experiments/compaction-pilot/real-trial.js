@@ -136,8 +136,10 @@ function monitor(state) {
   if (report.status === 'REVIEW_DUE') stop(state, 'seven_day_review_due');
   save(path.join(state, 'report.json'), report);
   save(path.join(state, 'checks', `${new Date().toISOString().replace(/[:.]/g, '-')}.json`), report);
+  const matchedReport = path.join(state, 'MATCHED-RESULTS.md');
+  const matchedLink = fs.existsSync(matchedReport) ? `\n\n[Completed matched-workload results and quality review](${matchedReport})` : '';
   const table = Object.entries(report.arms).map(([arm, a]) => `| ${arm} | ${a.enrolled} | ${a.accepted} | ${a.unreviewed} | ${a.compactedJobs} | ${a.input} | ${a.uncachedInput} | ${a.failedAttempts} |`).join('\n');
-  fs.writeFileSync(path.join(state, 'REPORT.md'), `# MyOS real-work compaction trial\n\nStatus: ${report.status}. Telemetry: ${report.telemetryStatus}. Checked: ${report.checkedAt}.\n\nInitial review: ${report.initialReviewAt}. Hard expiry: ${report.hardExpiry}.\n\n| Arm | Enrolled | Accepted | Unreviewed | Compacted jobs | Input | Uncached input | Failed attempts |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n${table}\n\nInstrumentation canaries excluded: ${report.instrumentationJobs}.\n\nComplete cost accounting is unavailable. These are observed native tokens, not dollar savings. No promotion is automatic. Daily collection is deterministic, not a quality review. Jobs need independent acceptance evidence.\n`, { mode: 0o600 });
+  fs.writeFileSync(path.join(state, 'REPORT.md'), `# MyOS real-work compaction trial\n\nStatus: ${report.status}. Telemetry: ${report.telemetryStatus}. Checked: ${report.checkedAt}.\n\nInitial review: ${report.initialReviewAt}. Hard expiry: ${report.hardExpiry}.\n\n| Arm | Enrolled | Accepted | Unreviewed | Compacted jobs | Input | Uncached input | Failed attempts |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n${table}\n\nInstrumentation canaries excluded: ${report.instrumentationJobs}.\n\nComplete cost accounting is unavailable. These are observed native tokens, not dollar savings. No promotion is automatic. Daily collection is deterministic, not a quality review. Jobs need independent acceptance evidence.${matchedLink}\n`, { mode: 0o600 });
   return report;
 }
 function enroll(state, spec) {
