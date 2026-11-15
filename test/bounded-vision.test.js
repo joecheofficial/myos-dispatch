@@ -25,6 +25,10 @@ function png({ width = 1, height = 1, color = 6, depth = 8, interlace = 0,
   return Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), chunk('IHDR', header),
     ...extra, chunk('IDAT', compressed || zlib.deflateSync(raw)), ...(end ? [chunk('IEND', Buffer.alloc(0))] : [])]);
 }
+test.beforeEach(t => {
+  t.mock.method(Date, 'now', () => POLICY.expiresAt - 86400000);
+});
+
 test('valid PNG bytes are copied and only digest and dimensions become receipt metadata', () => {
   for (const [color, channels] of [[0, 1], [2, 3], [4, 2], [6, 4]]) {
     const image = pin(png({ color, raw: Buffer.alloc(channels + 1) }));

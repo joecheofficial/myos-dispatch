@@ -417,7 +417,16 @@ test('signal and deadline are checked again after a synchronous guard', async ()
 });
 const tinyPng = () => Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==', 'base64');
 const pinnedImage = () => { const bytes = tinyPng(); return { bytes, sha256: crypto.createHash('sha256').update(bytes).digest('hex') }; };
-test('one pinned PNG reaches the provider with a reserved image bound and safe receipts', async () => {
+// Run the image fixtures inside the reviewed policy window while letting elapsed
+// time advance for the cancellation and deadline checks.
+const { POLICY: VISION_POLICY } = require('../src/runtime/bounded-vision');
+const visionTest = (name, run) => test(name, async t => {
+  const wallNow = Date.now;
+  const started = wallNow();
+  t.mock.method(Date, 'now', () => VISION_POLICY.expiresAt - 86400000 + wallNow() - started);
+  await run(t);
+});
+visionTest('one pinned PNG reaches the provider with a reserved image bound and safe receipts', async () => {
   const image = pinnedImage();
   let descriptor, calls = 0;
   global.fetch = async (_url, init) => {
@@ -444,7 +453,7 @@ test('one pinned PNG reaches the provider with a reserved image bound and safe r
 });
 const visionOptions = () => ({ ...options(), model: 'gpt-5.4-mini', image: pinnedImage(), maxInputTokens: 5000 });
 const visionResponse = async () => new Response(JSON.stringify({ ...await response().json(), model: 'gpt-5.4-mini' }));
-test('invalid image contracts refuse reservation and transport, including insufficient input and spend bounds', async () => {
+visionTest('invalid image contracts refuse reservation and transport, including insufficient input and spend bounds', async () => {
   let reservations = 0, calls = 0;
   global.fetch = async () => { calls++; return visionResponse(); };
   for (const patch of [{ model: 'gpt-5-mini' }, { image: { ...pinnedImage(), sha256: '0'.repeat(64) } },
@@ -455,7 +464,7 @@ test('invalid image contracts refuse reservation and transport, including insuff
   }
   assert.equal(reservations, 0); assert.equal(calls, 0);
 });
-test('PNG copy survives caller mutation and its digest is bound into the reservation', async () => {
+visionTest('PNG copy survives caller mutation and its digest is bound into the reservation', async () => {
   const image = pinnedImage(), original = image.bytes.toString('base64');
   let descriptor;
   global.fetch = async (_url, init) => {
@@ -482,7 +491,7 @@ test('PNG copy survives caller mutation and its digest is bound into the reserva
     assert.notEqual(d.requestDigest, descriptor.requestDigest); return reserve(d);
   } });
 });
-test('image guard rejection and cancellation retain safe metadata without launching', async () => {
+visionTest('image guard rejection and cancellation retain safe metadata without launching', async () => {
   let calls = 0;
   global.fetch = async () => { calls++; return visionResponse(); };
   for (const kind of ['throw', 'async', 'abort']) {
@@ -501,7 +510,7 @@ test('image guard rejection and cancellation retain safe metadata without launch
   }
   assert.equal(calls, 0);
 });
-test('image request in-flight cancellation aborts the one transport and retains the reservation', async () => {
+visionTest('image request in-flight cancellation aborts the one transport and retains the reservation', async () => {
   const controller = new AbortController(); let calls = 0;
   global.fetch = (_url, init) => { calls++; controller.abort();
     assert.equal(init.signal.aborted, true); return new Promise(() => {}); };
@@ -510,7 +519,7 @@ test('image request in-flight cancellation aborts the one transport and retains 
     e.reservationId === 'reservation-test' && e.image.sha256 === pinnedImage().sha256 && e.usage === null);
   assert.equal(calls, 1);
 });
-test('expired image policy before or during reservation cannot launch', async () => {
+visionTest('expired image policy before or during reservation cannot launch', async () => {
   const { POLICY } = require('../src/runtime/bounded-vision');
   const now = Date.now; let calls = 0, reservations = 0;
   global.fetch = async () => { calls++; return visionResponse(); };
@@ -527,7 +536,7 @@ test('expired image policy before or during reservation cannot launch', async ()
     assert.equal(reservations, 1); assert.equal(calls, 0);
   } finally { Date.now = now; }
 });
-test('image policy expiry inside the final synchronous guard refuses transport', async () => {
+visionTest('image policy expiry inside the final synchronous guard refuses transport', async () => {
   const { POLICY } = require('../src/runtime/bounded-vision');
   const now = Date.now; let calls = 0;
   global.fetch = async () => { calls++; return visionResponse(); };
@@ -584,7 +593,7 @@ test('absolute deadline reached in reservation prevents final guard and fetch', 
     assert.equal(calls, 0); assert.equal(guards, 0);
   } finally { Date.now = now; }
 });
-test('explicit API auth works without a process auth-mode override', async () => {
+visionTest('explicit API auth works without a process auth-mode override', async () => {
   const previous = process.env.MYOS_AUTH_MODE;
   let calls = 0, reservations = 0;
   global.fetch = async () => { calls++; return visionResponse(); };
