@@ -80,8 +80,10 @@ function queryIndex(index, text, { limit = 3 } = {}) {
   });
 }
 
-const SAFE_PATH = /^[A-Za-z0-9._\- /]{1,160}$/;
-const clean = (list) => list.filter((p) => SAFE_PATH.test(p) && !p.includes(".."));
+// No spaces: a folder or file named like a sentence must never become a sentence in the prompt.
+const SAFE_PATH = /^[A-Za-z0-9._\-/]{1,120}$/;
+const safe = (p) => typeof p === "string" && SAFE_PATH.test(p) && !p.includes("..");
+const clean = (list) => list.filter(safe);
 
 // One short line of advisory context, or "" when there is nothing worth saying.
 function estateHintsContext(text, options = {}) {
@@ -93,7 +95,9 @@ function estateHintsContext(text, options = {}) {
     if (!file) return "";
     const index = loadIndex(file, options.now || started);
     if (!index) return "";
-    const results = queryIndex(index, text).filter((r) => r.score >= MIN_SCORE && SAFE_PATH.test(r.path));
+    const results = queryIndex(index, text).filter((r) => r.score >= MIN_SCORE && safe(r.path));
+    // Not a guard (the work is done by now; the size cap bounds the cost). A lookup that
+    // ran long means the machine is struggling, so say nothing rather than add to the prompt.
     if (!results.length || Date.now() - started > (options.budgetMs || BUDGET_MS)) return "";
     const top = results[0];
     const parts = [`likely ${top.path}`];
