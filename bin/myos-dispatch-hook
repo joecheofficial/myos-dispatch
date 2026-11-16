@@ -9,6 +9,7 @@ const { spawnSync, spawn } = require("node:child_process");
 
 const { createJevClient } = require("../src/runtime/jev-client");
 const { llmDefaultsContext } = require("../src/llm-defaults");
+const { estateHintsContext } = require("../src/estate-hints");
 const { claimNudge: gitClaimNudge } = require("../src/git-claim-nudge");
 const { attachJevShadow, attachJevToolSafety } = require("../src/decision/jev-shadow");
 const { routeWithJev } = require("../src/decision/jev-router");
@@ -1550,7 +1551,7 @@ function handleUserPromptSubmit(payload, surface, options = {}) {
   });
 
   // MYOS_DISPATCH_HOOK_CONTEXT=none leaves the route text empty; add nothing then.
-  return outputHookContext("UserPromptSubmit", routeContextText ? [routeContextText, llmDefaultsContext()].filter(Boolean).join("\n") : routeContextText);
+  return outputHookContext("UserPromptSubmit", routeContextText ? [routeContextText, estateHintsContext(text), llmDefaultsContext()].filter(Boolean).join("\n") : routeContextText);
 }
 
 function handlePreToolUse(payload, surface, options = {}) {
