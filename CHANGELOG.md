@@ -2,6 +2,10 @@
 
 All notable changes to MyOS Dispatch are documented here.
 
+## Unreleased
+
+- Estate hints: an optional, private, fail-open advisory line that names the folder most likely to own what a prompt is about. Evidence only, never routing authority. See docs/estate-hints.md.
+
 ## Unreleased (issue #8 customer install fixes)
 
 - Let interactive OAuth runs prefer signed-in Claude models before Codex when `MYOS_OAUTH_PROVIDER=claude` or per-call `providerPreference: "claude"` is set; `codex`, empty, unset, or any other value keeps the default Codex-first order, explicit provider pins still win, and unknown failures still stop rather than fall through.
