@@ -81,6 +81,7 @@ function queryIndex(index, text, { limit = 3 } = {}) {
 }
 
 // No spaces: a folder or file named like a sentence must never become a sentence in the prompt.
+const HARNESS_EVENT = /<task-notification>|<system-reminder>|\[SYSTEM NOTIFICATION|<side-sessions-event>|<ci-monitor-event>/;
 const SAFE_PATH = /^[A-Za-z0-9._\-/]{1,120}$/;
 const safe = (p) => typeof p === "string" && SAFE_PATH.test(p) && !p.includes("..");
 const clean = (list) => list.filter(safe);
@@ -89,6 +90,9 @@ const clean = (list) => list.filter(safe);
 function estateHintsContext(text, options = {}) {
   const env = options.env || process.env;
   if (env.MYOS_ESTATE_HINTS === "0") return "";
+  // Harness events (background task results, automated notices) are not requests; their
+  // file paths and ids would only produce a confident wrong guess.
+  if (HARNESS_EVENT.test(String(text))) return "";
   const started = Date.now();
   try {
     const file = options.indexPath || resolveIndexPath(env);

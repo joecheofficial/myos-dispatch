@@ -69,6 +69,12 @@ test("a folder named like a sentence is never echoed", (t) => {
   assert.equal(/ignore|obey|do this/.test(line), false);
 });
 
+test("harness notifications get no hint", (t) => {
+  const { env } = fixture(t);
+  assert.equal(estateHintsContext("[SYSTEM NOTIFICATION - NOT USER INPUT] <task-notification><summary>billing webhook build finished</summary></task-notification>", { env }), "");
+  assert.equal(estateHintsContext("<system-reminder>billing webhook</system-reminder>", { env }), "");
+});
+
 test("ranking prefers the fuller name match and is bounded", (t) => {
   const { index } = fixture(t);
   const results = queryIndex(index, "billing webhook is failing");
