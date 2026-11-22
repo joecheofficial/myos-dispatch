@@ -19,6 +19,8 @@ const { buildPromptPack, buildToolPack } = require("../src/decision/jev-packs");
 const WORKSPACE_ROOT = path.resolve(__dirname, "..");
 const {
   fastpathGuidance,
+  formatDataSourceList,
+  dataSourceLocations,
   finalizeDispatchPlan,
   hasMatchScope,
   isAuthoringRequest,
@@ -331,6 +333,7 @@ function formatFastpathGuidance(fastpath) {
     fastpath.path && fastpath.path !== fastpath.targetId ? `Fast path location: ${fastpath.path}` : "",
     fastpath.cli ? `Fast path cli: ${fastpath.cli}` : "",
     fastpath.stopRule ? `Fast path stop rule: ${fastpath.stopRule}` : "",
+    Array.isArray(fastpath.lookupOrder) && fastpath.lookupOrder.length ? `Fast path lookup order: ${fastpath.lookupOrder.join(" -> ")}` : "",
   ].filter(Boolean);
 }
 
@@ -420,7 +423,7 @@ function formatDispatchContext({ surface, hookEventName, targetKind, text, plan,
     `Goal: ${route.goalScale || "n/a"} ${route.goalMode || ""}`.trim(),
     `Project: ${route.projectSlug || "none"}`,
     route.searchScope ? `Search scope: ${route.searchScope}` : "",
-    route.dataSources.length ? `Data sources: ${formatList(route.dataSources)}` : "",
+    route.dataSources.length ? `Data sources: ${formatDataSourceList(route.dataSources)}` : "",
     ...formatFastpathGuidance(route.fastpath),
     plan.stepContract ? `Read-only step: run node ${JSON.stringify(path.join(__dirname, 'myos-step.js'))} with JSON stdin ${JSON.stringify(plan.stepContract)}. Reuse verified evidence; do not repeat this lookup with a model.` : "",
     plan.stepHandoff ? `Read-only lookup handoff: ${plan.stepHandoff}. No verified answer was produced; use the normal scoped worker fallback.` : "",
@@ -572,14 +575,18 @@ function formatLeanDispatchContext(args) {
     return formatDispatchContext(args);
   }
   const policy = buildGoalPolicy(args.text, args.plan);
+  const sourceLocations = route.dataSources.length ? dataSourceLocations(route.dataSources) : {};
   const context = {
     action: route.actionType, lane: route.route.lane || 'worker_skill',
     ...(route.projectSlug ? { project: route.projectSlug } : {}),
     ...(route.searchScope ? { scope: route.searchScope } : {}),
     ...(route.dataSources.length ? { sources: route.dataSources } : {}),
+    ...(Object.keys(sourceLocations).length ? { sourcePaths: sourceLocations } : {}),
     ...(route.fastpath ? { fastpath: {
       intent: route.fastpath.intent,
       target: [route.fastpath.targetType, route.fastpath.targetId].filter(Boolean).join(" "),
+      ...(route.fastpath.path && route.fastpath.path !== route.fastpath.targetId ? { path: route.fastpath.path } : {}),
+      ...(route.fastpath.lookupOrder?.length ? { lookupOrder: route.fastpath.lookupOrder } : {}),
       ...(route.fastpath.cli ? { cli: route.fastpath.cli } : {}),
       ...(route.fastpath.stopRule ? { stopRule: route.fastpath.stopRule } : {}),
     } } : {}),

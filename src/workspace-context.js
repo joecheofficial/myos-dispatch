@@ -452,7 +452,37 @@ function fastpathGuidance(match) {
     path: clip(firstFastpathPath(fastpath), 240),
     cli: clip(fastpath.cli || fastpath.tool_hint || "", 400),
     stopRule: clip(fastpath.stop_rule || "", 600),
+    lookupOrder: Array.isArray(fastpath.lookup_order)
+      ? fastpath.lookup_order.filter((step) => typeof step === "string" && step.trim()).slice(0, 8).map((step) => clip(step, 240))
+      : [],
   };
+}
+
+// Names each selected data source with its configured location, so every
+// request (not only a directive one) knows where the data lives. Never reads
+// the source itself, and an unreadable config only drops the locations.
+function dataSourceLocations(sourceIds = [], options = {}) {
+  const ids = Array.isArray(sourceIds) ? sourceIds.filter(Boolean).map(String) : [];
+  let catalog = {};
+  try { catalog = getDataSourceCatalog(options) || {}; } catch { catalog = {}; }
+  const clip = (value, max) => {
+    const text = String(value || "").replace(/\s+/g, " ").trim();
+    return text.length > max ? `${text.slice(0, max - 3)}...` : text;
+  };
+  const locations = {};
+  for (const id of ids.slice(0, 6)) {
+    const location = clip(catalog[id]?.path, 200);
+    if (location) locations[id] = location;
+  }
+  return locations;
+}
+
+function formatDataSourceList(sourceIds = [], options = {}) {
+  const ids = Array.isArray(sourceIds) ? sourceIds.filter(Boolean).map(String) : [];
+  const locations = dataSourceLocations(ids, options);
+  const shown = ids.slice(0, 6).map((id) => (locations[id] ? `\`${id}\` (${locations[id]})` : `\`${id}\``));
+  if (ids.length > shown.length) shown.push(`and ${ids.length - shown.length} more`);
+  return shown.join(", ");
 }
 
 function inferFastpathTargetType(fastpath = {}) {
@@ -1287,7 +1317,7 @@ function buildDispatchPlanSection(plan) {
     plan.projectSlug ? `Project slug: ${plan.projectSlug}` : "",
     `Project recipe first: ${plan.projectRecipeFirst ? "yes" : "no"}`,
     plan.serviceAgents?.length ? `Project service agents: ${plan.serviceAgents.join(", ")}` : "",
-    plan.dataSources?.length ? `Data sources: ${plan.dataSources.map((source) => `\`${source}\``).join(", ")}` : "",
+    plan.dataSources?.length ? `Data sources: ${formatDataSourceList(plan.dataSources)}` : "",
     plan.searchScope ? `Scoped search root: ${plan.searchScope}` : "",
     plan.usedLastDispatchHint ? "Follow-up branch hint: yes" : "",
     process.env.MYOS_DISPATCH_SHOW_SHADOW === "1" && shadow
@@ -1659,6 +1689,8 @@ module.exports = {
   matchFastpaths,
   fastpathMinScore,
   fastpathGuidance,
+  formatDataSourceList,
+  dataSourceLocations,
   hasMatchScope,
   DEFAULT_FASTPATH_MIN_SCORE,
   scoreProject,
