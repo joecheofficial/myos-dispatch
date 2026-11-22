@@ -381,7 +381,7 @@ test("/System/Volumes/Data, /System/Volumes/Data/Users, /private/var, another us
   }
 });
 
-test("stored config with a refused root gives rootRefused for that root and search on another root still works", async (t) => {
+test("stored config with a refused root puts it in refusedRoots and search on another root still works", async (t) => {
   const base = temporaryDirectory(t);
   const validDir = path.join(base, "valid-docs");
   fs.mkdirSync(validDir, { recursive: true });
@@ -402,28 +402,31 @@ test("stored config with a refused root gives rootRefused for that root and sear
   fs.writeFileSync(cfgPath, `${JSON.stringify(storedPayload, null, 2)}\n`, { mode: 0o600 });
 
   const loaded = loadConfig(cfgPath);
-  assert.equal(loaded.roots.length, 2);
-  const refused = loaded.roots.find((r) => r.id === "refused-sys");
-  const valid = loaded.roots.find((r) => r.id === "valid-docs");
-
-  assert.ok(refused);
-  assert.equal(refused.status, "rootRefused");
+  assert.equal(loaded.roots.length, 1);
+  assert.equal(loaded.roots[0].id, "valid-docs");
+  assert.equal(loaded.refusedRoots.length, 1);
+  const refused = loaded.refusedRoots[0];
+  assert.equal(refused.id, "refused-sys");
+  assert.equal(refused.path, "/System/Volumes/Data");
   assert.ok(typeof refused.reason === "string" && refused.reason.length > 0);
 
-  assert.ok(valid);
-  assert.notEqual(valid.status, "rootRefused");
-
-  // Status does not crash and reports status
+  // Status does not crash and reports status, refusedRoots, and note
   const stat = await api.status(cfgPath);
   assert.equal(stat.enabled, true);
+  assert.equal(stat.refusedRoots.length, 1);
+  assert.equal(stat.refusedRoots[0].id, "refused-sys");
+  assert.match(stat.note, /1 folder is not searched: \/System\/Volumes\/Data/);
 
-  // Search on the valid root works
+  // Search on the valid root works and includes refusedRoots
   const searchResult = await api.search(cfgPath, { query: "dispatch", roots: ["valid-docs"] });
   assert.equal(searchResult.ok, true);
+  assert.equal(searchResult.refusedRoots.length, 1);
+  assert.equal(searchResult.refusedRoots[0].id, "refused-sys");
 
-  // Search without explicit roots also does not crash
+  // Search without explicit roots also does not crash and includes refusedRoots
   const searchAll = await api.search(cfgPath, { query: "dispatch" });
   assert.equal(searchAll.ok, true);
+  assert.equal(searchAll.refusedRoots.length, 1);
 
   // Configure still refuses it with existing error style
   await assert.rejects(
