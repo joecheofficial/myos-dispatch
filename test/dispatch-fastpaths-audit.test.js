@@ -83,6 +83,23 @@ test("dispatch fastpath audit follows MYOS_HOME_ROOT instead of a fixed ~/.myos"
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
+test("dispatch fastpath audit accepts a qualified SQLite data path", () => {
+  const { tmpDir, doc } = auditFixture(
+    "dispatch-audit-sqlite-table-",
+    "agents/whatsapp/server/messages.db:wa_triage",
+  );
+  const workspace = path.join(tmpDir, ".myos", "workspace");
+  fs.mkdirSync(path.join(workspace, "agents", "whatsapp", "server"), { recursive: true });
+  fs.writeFileSync(path.join(workspace, "agents", "whatsapp", "server", "messages.db"), "");
+  fs.writeFileSync(path.join(workspace, "DISPATCH-FASTPATHS.json"), JSON.stringify(doc));
+
+  const result = runAudit([], auditEnv(tmpDir));
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /1 active/);
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
 test("dispatch fastpath audit takes --workspace, and resolves ~ against --home like the runtime", () => {
   const { tmpDir, doc } = auditFixture("dispatch-audit-flags-", "~/brain/topics");
   const workspace = path.join(tmpDir, "elsewhere", "workspace");

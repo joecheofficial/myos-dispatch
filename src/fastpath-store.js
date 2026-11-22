@@ -67,7 +67,9 @@ function workspacePath(relPath, workspaceRoot = WORKSPACE_ROOT, homeDir = "") {
 function existsInWorkspace(relPath, workspaceRoot = WORKSPACE_ROOT, homeDir = "") {
   if (!relPath || typeof relPath !== "string") return false;
   if (/^[a-z]+:/i.test(relPath)) return true;
-  return fs.existsSync(workspacePath(relPath, workspaceRoot, homeDir));
+  const sqliteTable = relPath.match(/^(.*\.(?:db|sqlite|sqlite3)):[A-Za-z_][A-Za-z0-9_]*$/i);
+  const filePath = sqliteTable ? sqliteTable[1] : relPath;
+  return fs.existsSync(workspacePath(filePath, workspaceRoot, homeDir));
 }
 
 function isRequireResolvable(filePath) {
@@ -229,6 +231,7 @@ function auditFastpathsDoc(fastpathsDoc, options = {}) {
   let probationCount = 0;
   let retiredCount = 0;
   let retiredWithoutMetadata = 0;
+  let tombstoneCount = 0;
 
   for (const [idx, entry] of fastpaths.entries()) {
     const label = entry && entry.intent ? entry.intent : `entry[${idx}]`;
@@ -257,6 +260,7 @@ function auditFastpathsDoc(fastpathsDoc, options = {}) {
     }
     if (status === "retired") {
       retiredCount += 1;
+      if (entry.archived === true) tombstoneCount += 1;
       if (!entry.retired_at || !entry.retired_reason) retiredWithoutMetadata += 1;
     } else {
       activeCount += 1;
@@ -317,7 +321,7 @@ function auditFastpathsDoc(fastpathsDoc, options = {}) {
     ok: errors.length === 0,
     errors,
     warnings,
-    counts: { activeCount, stableCount, probationCount, retiredCount, retiredWithoutMetadata, maxActive },
+    counts: { activeCount, stableCount, probationCount, retiredCount, retiredWithoutMetadata, tombstoneCount, maxActive },
   };
 }
 
@@ -379,11 +383,171 @@ function writeFastpathsWithSnapshot(file, nextDoc, options = {}) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Retired archive. Retired entries never match, so their full records are dead
+// weight in the file every hook and agent reads. They move to a sibling archive
+// (DISPATCH-FASTPATHS.retired.json). By default a thin tombstone stays in the
+// live file: lifecycle writers that only read the live file use retired intents
+// and capability ids to avoid re-adding a route that was already retired.
+// Pass { tombstones: false } only when every writer reads the archive too.
+// ---------------------------------------------------------------------------
+const RETIRED_ARCHIVE_SUFFIX = ".retired.json";
+const TOMBSTONE_KEEP_FIELDS = Object.freeze(["intent", "status", "capability_id", "added_at", "retired_at", "retired_reason"]);
+
+function retiredArchivePathFor(file) {
+  const dir = path.dirname(file);
+  const base = path.basename(file).replace(/\.json$/i, "");
+  return path.join(dir, `${base}${RETIRED_ARCHIVE_SUFFIX}`);
+}
+
+function isTombstone(entry) {
+  return Boolean(entry && entry.status === "retired" && entry.archived === true);
+}
+
+function buildTombstone(entry, archiveName) {
+  const tombstone = {};
+  for (const field of TOMBSTONE_KEEP_FIELDS) {
+    if (entry[field] !== undefined) tombstone[field] = entry[field];
+  }
+  const terms = Array.isArray(entry.match_terms) ? entry.match_terms.filter((term) => typeof term === "string" && term.trim()) : [];
+  tombstone.match_terms = terms.slice(0, 1);
+  if (!AUTHORITATIVE_ROUTE_FIELDS.some((field) => Boolean(tombstone[field]))) {
+    const field = AUTHORITATIVE_ROUTE_FIELDS.find((name) => Boolean(entry[name]));
+    if (field) tombstone[field] = entry[field];
+  }
+  tombstone.archived = true;
+  tombstone.archive_file = archiveName;
+  return tombstone;
+}
+
+function readRetiredArchive(archiveFile) {
+  if (!fs.existsSync(archiveFile)) return { version: 1, retired: [] };
+  const doc = readJson(archiveFile);
+  if (!doc || !Array.isArray(doc.retired)) {
+    throw new Error(`Retired fastpath archive is not valid (expected a "retired" array): ${archiveFile}`);
+  }
+  return doc;
+}
+
+// Pure. Returns the next live doc and the next archive doc; never drops an
+// entry: every retired intent ends up in the archive with its full record.
+function splitRetiredFastpaths(doc, archiveDoc = { version: 1, retired: [] }, options = {}) {
+  if (!doc || !Array.isArray(doc.fastpaths)) throw new Error("fastpaths must be an array");
+  const keepTombstones = options.tombstones !== false;
+  const archiveName = options.archiveName || `DISPATCH-FASTPATHS${RETIRED_ARCHIVE_SUFFIX}`;
+  const archived = new Map();
+  for (const entry of Array.isArray(archiveDoc.retired) ? archiveDoc.retired : []) {
+    if (entry && typeof entry.intent === "string") archived.set(entry.intent, entry);
+  }
+  const live = [];
+  let moved = 0;
+  const seenRetired = new Set();
+  for (const entry of doc.fastpaths) {
+    if (entry && entry.status === "retired") {
+      // The archive is keyed by intent; two retired records with one intent would overwrite each other.
+      if (seenRetired.has(entry.intent)) throw new Error(`Two retired fastpaths share the intent "${entry.intent}"; fix the duplicate before archiving`);
+      seenRetired.add(entry.intent);
+    }
+    if (!entry || entry.status !== "retired") {
+      live.push(entry);
+      continue;
+    }
+    if (isTombstone(entry)) {
+      if (!archived.has(entry.intent)) {
+        throw new Error(`Tombstone has no archived record, refusing to continue: ${entry.intent}`);
+      }
+      if (keepTombstones) live.push(entry);
+      continue;
+    }
+    // A full retired record in the live file is newer than any archived copy.
+    archived.set(entry.intent, entry);
+    moved += 1;
+    if (keepTombstones) live.push(buildTombstone(entry, archiveName));
+  }
+  const nextArchive = {
+    version: 1,
+    description: "Full records of retired fast paths. Not read by routing. Restore an entry by moving its record back into the live file's fastpaths array with a non-retired status.",
+    updated_at: options.now || new Date().toISOString(),
+    source_file: options.sourceName || "DISPATCH-FASTPATHS.json",
+    retired: [...archived.values()],
+  };
+  return {
+    doc: { ...doc, fastpaths: live },
+    archive: nextArchive,
+    moved,
+    removedTombstones: doc.fastpaths.length - live.length - (keepTombstones ? 0 : moved),
+    liveRetired: live.filter((entry) => entry && entry.status === "retired").length,
+    archivedTotal: nextArchive.retired.length,
+  };
+}
+
+// Intents and capability ids of everything ever retired, from the live file
+// and the archive. Writers use this so a retired route is not silently re-added.
+function collectRetiredKeys(doc, archiveDoc = { retired: [] }) {
+  const intents = new Set();
+  const capabilityIds = new Set();
+  const all = [
+    ...((doc && Array.isArray(doc.fastpaths)) ? doc.fastpaths.filter((entry) => entry && entry.status === "retired") : []),
+    ...(Array.isArray(archiveDoc.retired) ? archiveDoc.retired : []),
+  ];
+  for (const entry of all) {
+    if (entry && entry.intent) intents.add(entry.intent);
+    if (entry && entry.capability_id) capabilityIds.add(entry.capability_id);
+  }
+  return { intents, capabilityIds };
+}
+
+// Archive first, then the live file. A crash between the two leaves the full
+// records in both places, which the next run folds together without loss.
+function archiveRetiredFastpaths(file, options = {}) {
+  const archiveFile = options.archiveFile || retiredArchivePathFor(file);
+  const doc = readJson(file);
+  const result = splitRetiredFastpaths(doc, readRetiredArchive(archiveFile), {
+    ...options,
+    archiveName: path.basename(archiveFile),
+    sourceName: path.basename(file),
+  });
+  const before = new Set(doc.fastpaths.filter((entry) => entry && entry.status === "retired").map((entry) => entry.intent));
+  const after = new Set(result.archive.retired.map((entry) => entry.intent));
+  const lost = [...before].filter((intent) => !after.has(intent));
+  if (lost.length > 0) throw new Error(`Refusing to write: ${lost.length} retired fastpath(s) would be lost (${lost.slice(0, 3).join(", ")})`);
+  const summary = {
+    file,
+    archiveFile,
+    moved: result.moved,
+    removedTombstones: result.removedTombstones,
+    liveRetired: result.liveRetired,
+    archivedTotal: result.archivedTotal,
+    liveEntries: result.doc.fastpaths.length,
+    bytesBefore: fs.statSync(file).size,
+    bytesAfter: Buffer.byteLength(`${JSON.stringify(result.doc, null, 2)}\n`),
+    applied: false,
+  };
+  if (options.dryRun || (result.moved === 0 && result.removedTombstones === 0)) return summary;
+
+  const archiveTmp = `${archiveFile}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(archiveTmp, `${JSON.stringify(result.archive, null, 2)}\n`, "utf8");
+  fs.renameSync(archiveTmp, archiveFile);
+  const write = writeFastpathsWithSnapshot(file, result.doc, {
+    ...options,
+    source: options.source || "retired-archive",
+    reason: options.reason || "move retired records to archive",
+    candidate: {},
+  });
+  return { ...summary, applied: true, snapshotPath: write.snapshotPath };
+}
+
 module.exports = {
   DEFAULT_FASTPATHS_FILE,
   DEFAULT_SNAPSHOT_DIR,
+  archiveRetiredFastpaths,
   auditFastpathsDoc,
   collectCapabilityIds,
+  collectRetiredKeys,
+  isTombstone,
+  readRetiredArchive,
+  retiredArchivePathFor,
+  splitRetiredFastpaths,
   getFastpathWriteBlockers,
   readJson,
   sha256,
