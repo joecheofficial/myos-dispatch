@@ -24,7 +24,7 @@ const path = require("node:path");
 const ROOT = path.resolve(__dirname, "..");
 const TIMEOUT_FAILURE_TYPES = new Set(["testTimeoutFailure", "cancelledByParent"]);
 const TIMEOUT_TEXT = /\b(?:timed out|timeout|ETIMEDOUT)\b/i;
-const { scrubCallerContext } = require("../test/helpers/hermetic-env");
+const { SUITE_DEFAULT_ENV, scrubCallerContext } = require("../test/helpers/suite-env");
 
 function defaultConcurrency(env = process.env) {
   const requested = Number(env.MYOS_TEST_CONCURRENCY);
@@ -88,8 +88,7 @@ function retryFiles(failures, root = ROOT) {
 // unattended bridge or a sidecar worker carries session markers that change
 // routing, auth mode and trust class; they are dropped for the test processes.
 function testEnv(base = process.env) {
-  return scrubCallerContext({ MYOS_OAUTH_RECOVERY: "0", MYOS_BACKGROUND_BACKPRESSURE_ENABLED: "0",
-    MYOS_LOCAL_SEARCH_PROBE_TIMEOUT_MS: "30000", ...base });
+  return scrubCallerContext({ ...SUITE_DEFAULT_ENV, MYOS_LOCAL_SEARCH_PROBE_TIMEOUT_MS: "30000", ...base });
 }
 
 function runNodeTest(args, env) {
