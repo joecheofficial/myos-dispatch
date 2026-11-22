@@ -67,7 +67,9 @@ function workspacePath(relPath, workspaceRoot = WORKSPACE_ROOT, homeDir = "") {
 function existsInWorkspace(relPath, workspaceRoot = WORKSPACE_ROOT, homeDir = "") {
   if (!relPath || typeof relPath !== "string") return false;
   if (/^[a-z]+:/i.test(relPath)) return true;
-  return fs.existsSync(workspacePath(relPath, workspaceRoot, homeDir));
+  const sqliteTable = relPath.match(/^(.*\.(?:db|sqlite|sqlite3)):[A-Za-z_][A-Za-z0-9_]*$/i);
+  const filePath = sqliteTable ? sqliteTable[1] : relPath;
+  return fs.existsSync(workspacePath(filePath, workspaceRoot, homeDir));
 }
 
 function isRequireResolvable(filePath) {
