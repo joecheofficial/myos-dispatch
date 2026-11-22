@@ -103,3 +103,20 @@ rates and 1.5x output rates to the full request. Source:
 Astra is included without replacing existing profile assignments. Published model
 metadata and availability on one Codex account do not verify access for every
 installation. Its local verification status remains unverified until tested.
+
+## Output caps and reasoning tokens
+
+`maxOutputTokens` means room for the visible answer. Several providers count hidden reasoning tokens against the same cap, so a small cap can be spent on reasoning and the answer arrives cut. Measured on 2026-11-23 with gemini-2.5-flash at a 500 token cap: 476 reasoning tokens, 20 visible tokens, 42 characters, provider finish reason `MAX_TOKENS`. The layer used to report that as `stop`.
+
+`src/runtime/output-truncation.js` holds the rules and `llmCallAsync` applies them for every API provider:
+
+- Finish reasons are read from each provider's own field and reduced to one vocabulary: `stop`, `length`, `content_filter`, `tool_calls`, `unknown`. A missing reason is never assumed to be a clean stop when the token accounting says otherwise.
+- gemini-2.5-flash and gemini-2.5-pro on `cheap_routing` and `default_automation` get an explicit thinking budget of 512 tokens, and the provider cap is raised by the same amount. gemini-2.5-flash-lite does not think by default and is left alone. Other task classes and other models keep the provider default. `thinkingBudget` and `disableThinking` on the call override this and are clamped to what the model accepts (pro cannot go below 128, flash-lite accepts 0 or at least 512, `-1` keeps dynamic thinking).
+- An answer is truncated when the provider reports a length stop, or when reasoning took at least half the cap, the visible answer is a quarter of the requested cap or less, and together they filled the cap.
+- A cut caused by reasoning is retried once with headroom: the provider cap becomes the requested cap plus twice the reasoning tokens seen (minimum 1024, maximum 8192). A cut where the visible answer itself filled the cap is not retried, because that would ignore the caller's cap. `truncationRetry: false` turns the retry off. The retry stays inside the caller's limits: it is skipped when less than a quarter of `timeoutMs` (or 2 seconds) is left, or when its worst-case cost could exceed `budgetCapUsd`; `truncation.retrySkipped` says which. A retry that fails keeps the first attempt as a truncated result (`truncation.retryError`) and never becomes a retryable provider error.
+- In JSON mode a cut answer returns the truncated result with `json: null` instead of an invalid JSON error. Function-call responses are never assessed as truncated answers.
+- Results with metadata carry `status` (`complete` or `truncated`), `truncated`, `truncation` (cause, token counts, whether a retry ran), `truncationRetry`, `providerFinishReason`, and `finishReason` is `length` whenever the answer is cut. `usage.reasoningTokens` is reported, both attempts of a retry are summed, and the cost estimate counts Gemini reasoning tokens (billed as output).
+- Callers that receive plain text get a thrown `LlmOutputTruncatedError` (`code: "LLM_OUTPUT_TRUNCATED"`, `partialText`, `truncation`, `retryable: false`) instead of the cut text. It is not retryable, so it never moves a call down the fallback chain to another provider.
+- Rollback without a code change: `allowTruncated: true` on one call, or `MYOS_LLM_TRUNCATION_MODE=legacy` in the environment, returns the cut text as before. Detection, the retry and the metadata flags stay on.
+
+A finish reason of `stop` is not proof of a complete answer. Callers that act on model text should check `truncated` or catch the typed error.

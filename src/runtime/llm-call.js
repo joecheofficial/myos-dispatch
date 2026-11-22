@@ -34,6 +34,16 @@ const { selectModels, recordFailure } = require("./oauth-registry");
 const { registryPath, refreshRegistry } = require("./oauth-doctor");
 const { isClaudeTextRequest } = require("./oauth-claude");
 const { readLlmDefaults } = require("../llm-defaults");
+const {
+  LlmOutputTruncatedError,
+  assessTruncation,
+  hasToolCallOutput,
+  normalizeFinishReason,
+  planGoogleOutput,
+  readOutputAccounting,
+  retryHeadroomTokens,
+  textOrThrowIfTruncated,
+} = require("./output-truncation");
 
 const WORKSPACE_ENV_PATH = workspaceEnvPath();
 let workspaceEnvLoaded = false;
@@ -243,7 +253,10 @@ function estimateCostUsd(modelMeta, usage) {
   if (!pricing) return null;
 
   const inputTokens = Number(usage?.inputTokens || 0);
-  const outputTokens = Number(usage?.outputTokens || 0);
+  // Gemini reports reasoning ("thoughts") outside candidatesTokenCount but bills
+  // it at the output rate. OpenAI-shaped usage already folds it into output.
+  const outputTokens = Number(usage?.outputTokens || 0) +
+    (usage?.reasoningIncludedInOutput === false ? Number(usage?.reasoningTokens || 0) : 0);
   const inputUsd = (inputTokens / 1_000_000) * Number(pricing.input_usd || 0);
   const outputUsd = (outputTokens / 1_000_000) * Number(pricing.output_usd || 0);
 
@@ -645,9 +658,25 @@ async function callGoogle({
   temperature,
   searchGrounding,
   tools,
+  taskClass,
+  disableThinking,
+  thinkingBudget,
+  headroomTokens,
 }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  // maxOutputTokens is the room the caller wants for the visible answer.
+  // Gemini counts thinking against the same cap, so the provider cap is the
+  // visible room plus an explicit thinking budget (see output-truncation.js).
+  const outputPlan = planGoogleOutput({
+    model,
+    taskClass,
+    maxOutputTokens,
+    searchGrounding,
+    disableThinking,
+    thinkingBudget,
+    headroomTokens,
+  });
 
   // Separate system instruction from user/model messages
   const systemParts = messages
@@ -664,8 +693,11 @@ async function callGoogle({
   const body = {
     contents,
     generationConfig: {
-      maxOutputTokens,
+      maxOutputTokens: outputPlan.providerMaxOutputTokens,
       ...(temperature != null ? { temperature } : {}),
+      ...(outputPlan.thinkingBudget !== null
+        ? { thinkingConfig: { thinkingBudget: outputPlan.thinkingBudget } }
+        : {}),
     },
   };
 
@@ -680,10 +712,6 @@ async function callGoogle({
   // resolves this. If you need thinking + live data, use two calls: grounding first, then thinking.
   if (searchGrounding) {
     body.tools = [{ google_search: {} }];
-    body.generationConfig = {
-      ...body.generationConfig,
-      thinkingConfig: { thinkingBudget: 0 },
-    };
   } else if (Array.isArray(tools) && tools.length > 0) {
     body.tools = tools;
   }
@@ -729,6 +757,8 @@ async function callGoogle({
         inputTokens: json?.usageMetadata?.promptTokenCount || 0,
         outputTokens: json?.usageMetadata?.candidatesTokenCount || 0,
       },
+      providerMaxOutputTokens: outputPlan.providerMaxOutputTokens,
+      thinkingBudget: outputPlan.thinkingBudget,
       groundingSources,
       searchQueries,
     };
@@ -1371,14 +1401,17 @@ function maybeParseJson(text, responseMode) {
 async function llmCallAsync(options = {}) {
   const provider = normalizeProvider(options.provider || resolveProvider());
   const authMode = options.authMode || "api";
-  const timeoutMs = Number(options.timeoutMs || 180000);
+  const totalTimeoutMs = Number(options.timeoutMs || 180000);
+  const startedAt = Date.now();
   const maxOutputTokens = Number(options.maxOutputTokens || 4000);
   const responseMode = options.responseMode === "json" ? "json" : "text";
   const temperature = options.temperature;
   const messages = buildMessages(options);
   const { model, meta } = resolveModelForProvider(provider, options.profile, options.model);
 
+  const callProvider = async (headroomTokens = 0, timeoutMs = totalTimeoutMs) => {
   let result;
+  const providerMaxOutputTokens = maxOutputTokens + headroomTokens;
   if (provider === "openai") {
     if (authMode === "oauth" && !options.audio?.buffer) {
       result = await callOpenAIViaCodexOauth({
@@ -1404,7 +1437,7 @@ async function llmCallAsync(options = {}) {
             model,
             messages,
             timeoutMs,
-            maxOutputTokens,
+            maxOutputTokens: providerMaxOutputTokens,
             responseMode,
             temperature,
           });
@@ -1417,7 +1450,7 @@ async function llmCallAsync(options = {}) {
       model,
       messages,
       timeoutMs,
-      maxOutputTokens,
+      maxOutputTokens: providerMaxOutputTokens,
       responseMode,
       temperature,
     });
@@ -1429,7 +1462,7 @@ async function llmCallAsync(options = {}) {
       model,
       messages,
       timeoutMs,
-      maxOutputTokens,
+      maxOutputTokens: providerMaxOutputTokens,
       responseMode,
       temperature,
       reasoningEffort: options.reasoningEffort,
@@ -1446,14 +1479,113 @@ async function llmCallAsync(options = {}) {
       temperature,
       searchGrounding: options.searchGrounding,
       tools: options.tools,
+      taskClass: options.taskClass,
+      disableThinking: options.disableThinking,
+      thinkingBudget: options.thinkingBudget,
+      headroomTokens,
     });
   } else {
     throw new Error(`Unsupported provider: ${provider}`);
   }
+  return { ...result, providerMaxOutputTokens: result.providerMaxOutputTokens || providerMaxOutputTokens };
+  };
+
+  // A cut answer must never be handed back as a complete one. Read what the
+  // provider really reported, and when reasoning ate the cap retry once with
+  // headroom so the visible answer gets the room the caller asked for.
+  const inspect = (attempt) => {
+    const accounting = readOutputAccounting(provider, attempt.raw);
+    const providerFinishReason = normalizeFinishReason(provider, attempt.raw);
+    const truncation = options.audio?.buffer ? null : assessTruncation({
+      finishReason: providerFinishReason,
+      requestedMaxOutputTokens: maxOutputTokens,
+      providerMaxOutputTokens: attempt.providerMaxOutputTokens,
+      visibleTokens: accounting.visibleTokens,
+      reasoningTokens: accounting.reasoningTokens,
+      hasToolCalls: (Array.isArray(attempt.toolCalls) && attempt.toolCalls.length > 0) || hasToolCallOutput(attempt.raw),
+    });
+    return { accounting, providerFinishReason, truncation };
+  };
+  const withAccounting = (attempt, accounting) => ({
+    ...attempt,
+    usage: {
+      ...attempt.usage,
+      reasoningTokens: accounting.reasoningTokens,
+      reasoningIncludedInOutput: accounting.reasoningIncludedInOutput,
+    },
+  });
+
+  let result = await callProvider(0);
+  let inspected = inspect(result);
+  result = withAccounting(result, inspected.accounting);
+  let truncationRetry = null;
+  let retrySkipped = null;
+  let retryError = null;
+  let headroomTokens = options.truncationRetry === false ? 0 : retryHeadroomTokens(inspected.truncation);
+  if (headroomTokens > 0) {
+    // The retry stays inside the caller's own limits: the time left of
+    // timeoutMs (so sync wrappers cannot be killed mid-retry) and budgetCapUsd
+    // (worst case: the retry fills its whole provider cap).
+    const remainingMs = totalTimeoutMs - (Date.now() - startedAt);
+    const firstCostUsd = estimateCostUsd(meta, result.usage);
+    const worstRetryCostUsd = estimateCostUsd(meta, {
+      inputTokens: result.usage.inputTokens,
+      outputTokens: maxOutputTokens + headroomTokens,
+    });
+    if (remainingMs < Math.max(2000, totalTimeoutMs * 0.25)) {
+      retrySkipped = "deadline";
+    } else if (
+      options.budgetCapUsd != null && firstCostUsd != null &&
+      firstCostUsd + worstRetryCostUsd > Number(options.budgetCapUsd)
+    ) {
+      retrySkipped = "budget_cap";
+    }
+    if (retrySkipped) headroomTokens = 0;
+  }
+  if (headroomTokens > 0) {
+    const first = { result, inspected };
+    try {
+      const second = await callProvider(headroomTokens, totalTimeoutMs - (Date.now() - startedAt));
+      truncationRetry = {
+        headroomTokens,
+        firstAttempt: { ...first.inspected.truncation },
+        firstAttemptUsage: first.result.usage,
+      };
+      inspected = inspect(second);
+      result = withAccounting(second, inspected.accounting);
+      // Both attempts were billed. Report the sum so the ledger stays truthful.
+      result.usage = {
+        ...result.usage,
+        inputTokens: Number(result.usage.inputTokens || 0) + Number(first.result.usage.inputTokens || 0),
+        outputTokens: Number(result.usage.outputTokens || 0) + Number(first.result.usage.outputTokens || 0),
+        reasoningTokens: Number(result.usage.reasoningTokens || 0) + Number(first.result.usage.reasoningTokens || 0),
+      };
+    } catch (error) {
+      // A failed retry must not discard the billed first attempt, and must not
+      // turn a cut answer into a retryable provider error that moves the call
+      // to another provider. Keep the first attempt and report it as truncated.
+      retryError = String(error?.message || error).slice(0, 200);
+    }
+  }
+  const truncation = inspected.truncation
+    ? {
+        ...inspected.truncation,
+        retried: Boolean(truncationRetry),
+        ...(retrySkipped ? { retrySkipped } : {}),
+        ...(retryError ? { retryError } : {}),
+      }
+    : null;
 
   const estimatedCostUsd = estimateCostUsd(meta, result.usage);
   enforceBudgetCap(estimatedCostUsd, options.budgetCapUsd);
-  const json = maybeParseJson(result.text, responseMode);
+  // A cut JSON answer rarely parses. The typed truncated result is the signal
+  // the caller needs, so a parse failure must not replace it.
+  let json = null;
+  try {
+    json = maybeParseJson(result.text, responseMode);
+  } catch (error) {
+    if (!truncation) throw error;
+  }
 
   const enriched = {
     ...result,
@@ -1461,14 +1593,22 @@ async function llmCallAsync(options = {}) {
     model,
     meta,
     estimatedCostUsd,
-    finishReason: result.raw?.stop_reason || result.raw?.choices?.[0]?.finish_reason || "stop",
+    // "length" whenever the answer is cut, including when the provider said
+    // "stop". providerFinishReason keeps what the provider reported.
+    finishReason: truncation ? "length" : inspected.providerFinishReason === "unknown" ? "stop" : inspected.providerFinishReason,
+    providerFinishReason: inspected.providerFinishReason,
+    status: truncation ? "truncated" : "complete",
+    truncated: Boolean(truncation),
+    truncation,
+    truncationRetry,
+    requestedMaxOutputTokens: maxOutputTokens,
     json,
     groundingSources: result.groundingSources || [],
     providerRequestId: extractProviderRequestId(result),
     searchQueries: result.searchQueries || [],
   };
 
-  return options.includeMetadata ? enriched : result.text;
+  return options.includeMetadata ? enriched : textOrThrowIfTruncated(enriched, options);
 }
 
 async function myosRun(options = {}) {
@@ -1690,6 +1830,9 @@ async function myosRun(options = {}) {
               humanVisible: complianceLane === "interactive_oauth" ? true : Boolean(options.humanVisible),
               searchGrounding: options.searchGrounding,
               tools: options.tools,
+              disableThinking: options.disableThinking,
+              thinkingBudget: options.thinkingBudget,
+              truncationRetry: options.truncationRetry,
             });
 
       const finalResult = {
@@ -1773,6 +1916,10 @@ async function myosRun(options = {}) {
         estimatedCostUsd: unattendedCodex ? null : Number(finalResult.estimatedCostUsd || 0),
         inputTokens: Number(result.usage?.inputTokens || 0),
         outputTokens: Number(result.usage?.outputTokens || 0),
+        reasoningTokens: Number(result.usage?.reasoningTokens || 0),
+        truncated: result.truncated === true,
+        truncationCause: result.truncation?.cause || null,
+        truncationRetried: Boolean(result.truncationRetry),
         totalLatencyMs: Date.now() - runStartedAt,
         deterministicBypassReason: plan.deterministicBypassReason,
         providerRequestId: finalResult.providerRequestId,
@@ -1942,7 +2089,7 @@ function llmCall(options = {}) {
   });
 
   const parsed = JSON.parse(output);
-  return options.includeMetadata ? parsed : parsed.text;
+  return options.includeMetadata ? parsed : textOrThrowIfTruncated(parsed, options);
 }
 
 function myosRunSync(options = {}) {
@@ -2060,7 +2207,7 @@ async function claudeCallAsync(promptOrOptions, model, timeoutMs = 180000) {
     pinnedProvider: undefined,
   });
   const result = await myosRun(routed);
-  return options.includeMetadata ? result : result.text;
+  return options.includeMetadata ? result : textOrThrowIfTruncated(result, options);
 }
 
 function claudeCall(promptOrOptions, model, timeoutMs = 180000) {
@@ -2074,7 +2221,7 @@ function claudeCall(promptOrOptions, model, timeoutMs = 180000) {
     pinnedProvider: undefined,
   });
   const result = myosRunSync(routed);
-  return options.includeMetadata ? result : result.text;
+  return options.includeMetadata ? result : textOrThrowIfTruncated(result, options);
 }
 
 async function runTaskModelAsync(promptOrOptions, model, timeoutMs = 180000) {
@@ -2088,7 +2235,7 @@ async function runTaskModelAsync(promptOrOptions, model, timeoutMs = 180000) {
     pinnedProvider: undefined,
   });
   const result = await myosRun(routed);
-  return options.includeMetadata ? result : result.text;
+  return options.includeMetadata ? result : textOrThrowIfTruncated(result, options);
 }
 
 function runTaskModel(promptOrOptions, model, timeoutMs = 180000) {
@@ -2102,7 +2249,7 @@ function runTaskModel(promptOrOptions, model, timeoutMs = 180000) {
     pinnedProvider: undefined,
   });
   const result = myosRunSync(routed);
-  return options.includeMetadata ? result : result.text;
+  return options.includeMetadata ? result : textOrThrowIfTruncated(result, options);
 }
 
 async function codexCallAsync(promptOrOptions, model, timeoutMs = 180000) {
@@ -2110,7 +2257,7 @@ async function codexCallAsync(promptOrOptions, model, timeoutMs = 180000) {
   if (!options.providerPreference && !options.provider) options.providerPreference = "openai";
   const routed = applyLegacyAuthRoute(options);
   const result = await myosRun(routed);
-  return options.includeMetadata ? result : result.text;
+  return options.includeMetadata ? result : textOrThrowIfTruncated(result, options);
 }
 
 function codexCall(promptOrOptions, model, timeoutMs = 180000) {
@@ -2118,7 +2265,7 @@ function codexCall(promptOrOptions, model, timeoutMs = 180000) {
   if (!options.providerPreference && !options.provider) options.providerPreference = "openai";
   const routed = applyLegacyAuthRoute(options);
   const result = myosRunSync(routed);
-  return options.includeMetadata ? result : result.text;
+  return options.includeMetadata ? result : textOrThrowIfTruncated(result, options);
 }
 
 async function geminiCallAsync(promptOrOptions, model, timeoutMs = 180000) {
@@ -2126,7 +2273,7 @@ async function geminiCallAsync(promptOrOptions, model, timeoutMs = 180000) {
   if (!options.providerPreference && !options.provider) options.providerPreference = "google";
   const routed = applyLegacyAuthRoute(options);
   const result = await myosRun(routed);
-  return options.includeMetadata ? result : result.text;
+  return options.includeMetadata ? result : textOrThrowIfTruncated(result, options);
 }
 
 function geminiCall(promptOrOptions, model, timeoutMs = 180000) {
@@ -2134,7 +2281,7 @@ function geminiCall(promptOrOptions, model, timeoutMs = 180000) {
   if (!options.providerPreference && !options.provider) options.providerPreference = "google";
   const routed = applyLegacyAuthRoute(options);
   const result = myosRunSync(routed);
-  return options.includeMetadata ? result : result.text;
+  return options.includeMetadata ? result : textOrThrowIfTruncated(result, options);
 }
 
 async function myosRunBoundedAPI(options = {}) {
@@ -2197,6 +2344,8 @@ function prepareBoundedApiLaunch(options) {
 }
 
 module.exports = {
+  LlmOutputTruncatedError,
+  textOrThrowIfTruncated,
   myosRunBoundedCodex,
   myosRunBoundedAPI,
   CODEX_OAUTH_CHEAP_MODEL,
