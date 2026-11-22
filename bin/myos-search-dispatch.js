@@ -35,6 +35,12 @@ const OPERATION_PHRASES = Object.freeze({
 });
 const LOCAL_STATUS_VALUES = new Set(["disabled", "notStarted", "partial", "passive", "degraded", "runtimeUnavailable", "statusUnavailable", "malformedStatus"]);
 const MAX_SETTINGS_BYTES = 16_384;
+const OWNER_LINE = "Local search is set up in chat. Tell your assistant which folders to include and it will do the rest.";
+const KNOWN_ARGV_FLAGS = new Set(["configure", "status", "index", "search", "--config"]);
+
+function isValidArgvElement(element) {
+  return typeof element === "string" && (KNOWN_ARGV_FLAGS.has(element) || isNormalizedAbsolute(element));
+}
 
 function response(status, extra = {}) {
   return { ok: false, status, taskClass: TASK_CLASS, complianceLane: COMPLIANCE_LANE, ...extra };
@@ -217,18 +223,19 @@ function validatedLauncherOutput(operation, value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   if (operation === "describe") {
     const expectedCommands = ["describe", "status", "open"];
+    const descriptorCommands = value["commands"];
     if (value.id !== "local-search" || value.version !== 1 || value.optional !== true
       || value.taskClass !== TASK_CLASS || value.resultExport !== "none/local_ui_only"
       || value.automaticRouting !== false || value.entrypoint !== "myos-search"
-      || value.localInterface !== "native_terminal"
-      || !Array.isArray(value.commands) || value.commands.length !== expectedCommands.length
-      || value.commands.some((command, index) => command !== expectedCommands[index])) return null;
+      || value.localInterface !== "assistant_chat"
+      || !Array.isArray(descriptorCommands) || descriptorCommands.length !== expectedCommands.length
+      || descriptorCommands.some((cmd, index) => cmd !== expectedCommands[index])) return null;
     return success("described", { descriptor: {
       id: value.id,
       version: value.version,
       optional: value.optional,
       taskClass: value.taskClass,
-      commands: [...value.commands],
+      commands: [...descriptorCommands],
       resultExport: value.resultExport,
       automaticRouting: value.automaticRouting,
       entrypoint: value.entrypoint,
@@ -247,8 +254,28 @@ function validatedLauncherOutput(operation, value) {
       status: value.status,
     } });
   }
-  if (operation === "open" && value.ok === true && value.status === "launchRequested") {
-    return success("openRequested", { openAck: { ok: true, status: "launchRequested" } });
+  if (operation === "open") {
+    if (value.ok !== true || value.status !== "assistantSetup") return null;
+    if (typeof value.ownerLine !== "string" || value.ownerLine !== OWNER_LINE) return null;
+    if (!value.assistant || typeof value.assistant !== "object" || Array.isArray(value.assistant)) return null;
+    const expectedKeys = ["configure", "index", "search", "status"];
+    const actualKeys = Object.keys(value.assistant).sort();
+    if (actualKeys.length !== expectedKeys.length || actualKeys.some((k, i) => k !== expectedKeys[i])) {
+      return null;
+    }
+    const assistant = {};
+    for (const key of expectedKeys) {
+      const argv = value.assistant[key];
+      if (!Array.isArray(argv) || argv.length === 0) return null;
+      for (const element of argv) {
+        if (!isValidArgvElement(element)) return null;
+      }
+      assistant[key] = [...argv];
+    }
+    return success("setupInChat", {
+      ownerLine: value.ownerLine,
+      assistant,
+    });
   }
   return null;
 }

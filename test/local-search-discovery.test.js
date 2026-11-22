@@ -20,7 +20,7 @@ test("local-search discovery descriptor is available without runtime configurati
     resultExport: "none/local_ui_only",
     automaticRouting: false,
     entrypoint: "myos-search",
-    localInterface: "native_terminal",
+    localInterface: "assistant_chat",
   });
 });
 
@@ -62,32 +62,66 @@ test("agent-safe discovery rejects content operations before starting a child", 
   assert.equal(starts, 0);
 });
 
-test("macOS launcher keeps spaces, quotes, and shell metacharacters literal", () => {
+test("open never calls runProcess or osascript and returns assistantSetup with absolute argv arrays", () => {
   const { open } = require(modulePath);
-  const node24 = "/Applications/Node '24;$HOME/bin/node";
+  const node24 = "/Applications/Node 24/bin/node";
   const configPath = "/private/tmp/search config '$(touch NO).json";
-  let call;
+  let processCalls = 0;
   const result = open(
     { node24, configPath },
     {
       platform: "darwin",
       verifyRuntime() {},
       fileExists() { return true; },
-      runProcess(command, args, options) {
-        call = { command, args, options };
-        return { status: 0, stdout: "private", stderr: "private" };
+      runProcess() {
+        processCalls += 1;
+        return { status: 0, stdout: "", stderr: "" };
       },
     },
   );
-  assert.deepEqual(result, { ok: true, status: "launchRequested" });
-  assert.equal(call.command, "/usr/bin/osascript");
-  assert.equal(call.options.shell, false);
-  assert.equal(
-    call.args.at(-1),
-    "'/Applications/Node '\"'\"'24;$HOME/bin/node' '" +
-      path.resolve(__dirname, "../packages/local-search/local-ui.js") +
-      "' --config '/private/tmp/search config '\"'\"'$(touch NO).json'",
+  assert.equal(processCalls, 0);
+  assert.equal(result.ok, true);
+  assert.equal(result.status, "assistantSetup");
+  assert.equal(result.ownerLine, "Local search is set up in chat. Tell your assistant which folders to include and it will do the rest.");
+  const nestedCli = path.resolve(__dirname, "../packages/local-search/bin/local-search.js");
+  assert.deepEqual(result.assistant, {
+    configure: [node24, nestedCli, "configure", "--config", configPath],
+    status: [node24, nestedCli, "status", "--config", configPath],
+    index: [node24, nestedCli, "index", "--config", configPath],
+    search: [node24, nestedCli, "search", "--config", configPath],
+  });
+  // Verify configPath with quote or space stays one single argv element
+  assert.equal(result.assistant.configure[4], configPath);
+  assert.equal(result.assistant.configure.length, 5);
+});
+
+test("open returns all expected failure statuses unchanged", () => {
+  const { open } = require(modulePath);
+  const validNode24 = "/opt/node24/bin/node";
+  const validConfig = "/private/tmp/config.json";
+
+  // unsupportedPlatform
+  const linux = open({ node24: validNode24, configPath: validConfig }, { platform: "linux" });
+  assert.deepEqual(linux, { ok: false, status: "unsupportedPlatform" });
+
+  // invalidArguments: missing or relative paths
+  assert.deepEqual(open(null, { platform: "darwin" }), { ok: false, status: "invalidArguments" });
+  assert.deepEqual(open({ node24: "relative/node", configPath: validConfig }, { platform: "darwin" }), { ok: false, status: "invalidArguments" });
+  assert.deepEqual(open({ node24: validNode24, configPath: "relative/config.json" }, { platform: "darwin" }), { ok: false, status: "invalidArguments" });
+
+  // runtimeUnavailable: verifyRuntime throws
+  const badRuntime = open(
+    { node24: validNode24, configPath: validConfig },
+    { platform: "darwin", verifyRuntime() { throw new Error("bad runtime"); } },
   );
+  assert.deepEqual(badRuntime, { ok: false, status: "runtimeUnavailable" });
+
+  // launchUnavailable: engine bin missing
+  const missingEngine = open(
+    { node24: validNode24, configPath: validConfig },
+    { platform: "darwin", verifyRuntime() {}, fileExists() { return false; } },
+  );
+  assert.deepEqual(missingEngine, { ok: false, status: "launchUnavailable" });
 });
 
 test("optional capability descriptor matches the static discovery contract", () => {
@@ -118,10 +152,23 @@ test("installed myos-search help states the optional local-only boundary", () =>
   assert.deepEqual(help.boundary, {
     optional: true,
     defaultEnabled: false,
-    localTerminalOnly: true,
+    assistantChatOnly: true,
     automaticRouting: false,
     hostedOperations: ["describe", "status", "open"],
     universalSameAccountContainment: false,
     watchMode: "manual_foreground_not_daemon",
   });
+});
+
+test("source scan: discovery.js and bin/myos-search-dispatch.js contain no Terminal, osascript or .command", () => {
+  const files = [
+    path.resolve(__dirname, "../packages/local-search/discovery.js"),
+    path.resolve(__dirname, "../bin/myos-search-dispatch.js"),
+  ];
+  for (const filePath of files) {
+    const content = fs.readFileSync(filePath, "utf8");
+    assert.equal(/terminal/i.test(content), false, `${filePath} contains "terminal"`);
+    assert.equal(/osascript/i.test(content), false, `${filePath} contains "osascript"`);
+    assert.equal(/\.command/i.test(content), false, `${filePath} contains ".command"`);
+  }
 });
