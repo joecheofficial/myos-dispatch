@@ -11,5 +11,5 @@
   "resultExport": "none/local_ui_only",
   "automaticRouting": false,
   "entrypoint": "myos-search",
-  "localInterface": "native_terminal"
+  "localInterface": "assistant_chat"
 }

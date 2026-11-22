@@ -405,7 +405,7 @@ test("baseline uses the core router's exported normal-resolution authority", (t)
       return { status: 0, stdout: `${JSON.stringify({
         id: "local-search", version: 1, optional: true, taskClass: "cheap_routing",
         commands: ["describe", "status", "open"], resultExport: "none/local_ui_only",
-        automaticRouting: false, entrypoint: "myos-search", localInterface: "native_terminal",
+        automaticRouting: false, entrypoint: "myos-search", localInterface: "assistant_chat",
       })}\n`, stderr: "" };
     },
   });
@@ -445,7 +445,7 @@ test("cleanup failure is surfaced without leaking artifact paths", (t) => {
       return { status: 0, stdout: `${JSON.stringify({
         id: "local-search", version: 1, optional: true, taskClass: "cheap_routing",
         commands: ["describe", "status", "open"], resultExport: "none/local_ui_only",
-        automaticRouting: false, entrypoint: "myos-search", localInterface: "native_terminal",
+        automaticRouting: false, entrypoint: "myos-search", localInterface: "assistant_chat",
       })}\n`, stderr: "" };
     },
   });
@@ -601,18 +601,49 @@ test("forwards only validated descriptor, status, and open acknowledgment fields
   const { execute } = require(entrypoint);
   const fixture = makeEnabledFixture(t);
   const privateCanary = `${fixture.directory}/PRIVATE_CONTENT`;
+  const nestedCli = path.resolve(__dirname, "../packages/local-search/bin/local-search.js");
+  const validOwnerLine = "Local search is set up in chat. Tell your assistant which folders to include and it will do the rest.";
+  const validConfirmInChat = "Before running configure, show the owner the exact folder list and run it only after they say yes in chat.";
+  const validEnv = "clean";
+  const configDir = path.dirname(fixture.configPath);
+  const configureRequestPath = path.join(configDir, "local-search-configure-request.json");
+  const searchRequestPath = path.join(configDir, "local-search-search-request.json");
+  const validRequestFiles = {
+    configure: configureRequestPath,
+    search: searchRequestPath,
+  };
+  const validRequestFormat = {
+    configure: "JSON object with enabled (boolean) and roots (array of { id, path (absolute), extensions, contentEnabled })",
+    search: "JSON object with query (string), mode (optional), roots (optional array of ids), maxResults (optional number up to 8)",
+  };
+  const validAssistant = {
+    configure: [fixture.node24, nestedCli, "configure", "--config", fixture.configPath, "--request", configureRequestPath],
+    status: [fixture.node24, nestedCli, "status", "--config", fixture.configPath],
+    index: [fixture.node24, nestedCli, "index", "--config", fixture.configPath],
+    search: [fixture.node24, nestedCli, "search", "--config", fixture.configPath, "--request", searchRequestPath],
+  };
   const childOutputs = {
     describe: {
       id: "local-search", version: 1, optional: true, taskClass: "cheap_routing",
       commands: ["describe", "status", "open"], resultExport: "none/local_ui_only",
-      automaticRouting: false, entrypoint: "myos-search", localInterface: "native_terminal",
+      automaticRouting: false, entrypoint: "myos-search", localInterface: "assistant_chat",
       privatePath: privateCanary,
     },
     status: {
       installed: true, runtimeReady: true, enabled: true, localUiAvailable: true,
       status: "passive", privateContent: privateCanary,
     },
-    open: { ok: true, status: "launchRequested", command: privateCanary },
+    open: {
+      ok: true,
+      status: "assistantSetup",
+      ownerLine: validOwnerLine,
+      confirmInChat: validConfirmInChat,
+      env: validEnv,
+      requestFiles: validRequestFiles,
+      requestFormat: validRequestFormat,
+      assistant: validAssistant,
+      command: privateCanary,
+    },
   };
   function adaptersFor(operation) {
     return {
@@ -647,8 +678,17 @@ test("forwards only validated descriptor, status, and open acknowledgment fields
   assert.deepEqual(Object.keys(status).sort(), ["complianceLane", "localSearchStatus", "ok", "status", "taskClass"]);
 
   const opened = execute(["--dispatch-root", fixture.dispatchRoot, "--settings", fixture.settingsPath, "open"], adaptersFor("open"));
-  assert.deepEqual(opened.openAck, { ok: true, status: "launchRequested" });
-  assert.deepEqual(Object.keys(opened).sort(), ["complianceLane", "ok", "openAck", "status", "taskClass"]);
+  assert.equal(opened.ok, true);
+  assert.equal(opened.status, "setupInChat");
+  assert.equal(opened.ownerLine, validOwnerLine);
+  assert.equal(opened.confirmInChat, validConfirmInChat);
+  assert.equal(opened.env, validEnv);
+  assert.deepEqual(opened.requestFiles, validRequestFiles);
+  assert.deepEqual(opened.requestFormat, validRequestFormat);
+  assert.deepEqual(opened.assistant, validAssistant);
+  assert.deepEqual(Object.keys(opened).sort(), [
+    "assistant", "complianceLane", "confirmInChat", "env", "ok", "ownerLine", "requestFiles", "requestFormat", "status", "taskClass"
+  ]);
   assert.equal(JSON.stringify([described, status, opened]).includes(privateCanary), false);
   for (const result of [described, status, opened]) {
     assert.equal(result.ok, true);
@@ -662,4 +702,322 @@ test("forwards only validated descriptor, status, and open acknowledgment fields
   });
   assert.equal(malformed.status, "invalidLauncherOutput");
   assert.equal(JSON.stringify(malformed).includes(privateCanary), false);
+});
+
+test("dispatcher rejects tampered open outputs", (t) => {
+  const { execute } = require(entrypoint);
+  const fixture = makeEnabledFixture(t);
+  const nestedCli = path.resolve(__dirname, "../packages/local-search/bin/local-search.js");
+  const validOwnerLine = "Local search is set up in chat. Tell your assistant which folders to include and it will do the rest.";
+  const validConfirmInChat = "Before running configure, show the owner the exact folder list and run it only after they say yes in chat.";
+  const validEnv = "clean";
+  const configDir = path.dirname(fixture.configPath);
+  const configureRequestPath = path.join(configDir, "local-search-configure-request.json");
+  const searchRequestPath = path.join(configDir, "local-search-search-request.json");
+  const validRequestFiles = {
+    configure: configureRequestPath,
+    search: searchRequestPath,
+  };
+  const validRequestFormat = {
+    configure: "JSON object with enabled (boolean) and roots (array of { id, path (absolute), extensions, contentEnabled })",
+    search: "JSON object with query (string), mode (optional), roots (optional array of ids), maxResults (optional number up to 8)",
+  };
+  const validAssistant = {
+    configure: [fixture.node24, nestedCli, "configure", "--config", fixture.configPath, "--request", configureRequestPath],
+    status: [fixture.node24, nestedCli, "status", "--config", fixture.configPath],
+    index: [fixture.node24, nestedCli, "index", "--config", fixture.configPath],
+    search: [fixture.node24, nestedCli, "search", "--config", fixture.configPath, "--request", searchRequestPath],
+  };
+
+  function executeOpenWithChildOutput(childOutput) {
+    return execute(["--dispatch-root", fixture.dispatchRoot, "--settings", fixture.settingsPath, "open"], {
+      loadRouting() {
+        return {
+          capabilitiesIndexPath: path.join(fixture.dispatchRoot, "capabilities-index.json"),
+          loadCapabilityIndex() { return JSON.parse(fs.readFileSync(path.join(fixture.dispatchRoot, "capabilities-index.json"), "utf8")); },
+          resolveDispatchPlan() {
+            return {
+              branch: "capability", capabilityId: "local:search-launcher",
+              route: { lane: "worker_skill", candidates: [{ capability: { id: "local:search-launcher" } }] },
+            };
+          },
+        };
+      },
+      runProcess() {
+        return { status: 0, stdout: `${JSON.stringify(childOutput)}\n`, stderr: "" };
+      },
+    });
+  }
+
+  const baseOutput = {
+    ok: true,
+    status: "assistantSetup",
+    ownerLine: validOwnerLine,
+    confirmInChat: validConfirmInChat,
+    env: validEnv,
+    requestFiles: validRequestFiles,
+    requestFormat: validRequestFormat,
+    assistant: validAssistant,
+  };
+
+  // 1. Old launchRequested
+  assert.equal(executeOpenWithChildOutput({ ok: true, status: "launchRequested" }).status, "invalidLauncherOutput");
+
+  // 2. Other binary at [0]
+  assert.equal(executeOpenWithChildOutput({
+    ...baseOutput,
+    assistant: {
+      ...validAssistant,
+      configure: ["/bin/sh", nestedCli, "configure", "--config", fixture.configPath, "--request", configureRequestPath],
+    },
+  }).status, "invalidLauncherOutput");
+
+  // 3. Other cli at [1]
+  assert.equal(executeOpenWithChildOutput({
+    ...baseOutput,
+    assistant: {
+      ...validAssistant,
+      configure: [fixture.node24, "/tmp/evil.js", "configure", "--config", fixture.configPath, "--request", configureRequestPath],
+    },
+  }).status, "invalidLauncherOutput");
+
+  // 4. Other config path at [4]
+  assert.equal(executeOpenWithChildOutput({
+    ...baseOutput,
+    assistant: {
+      ...validAssistant,
+      configure: [fixture.node24, nestedCli, "configure", "--config", "/tmp/other.json", "--request", configureRequestPath],
+    },
+  }).status, "invalidLauncherOutput");
+
+  // 5. Extra element in argv
+  assert.equal(executeOpenWithChildOutput({
+    ...baseOutput,
+    assistant: {
+      ...validAssistant,
+      configure: [...validAssistant.configure, "extra"],
+    },
+  }).status, "invalidLauncherOutput");
+
+  // 6. Missing --request
+  assert.equal(executeOpenWithChildOutput({
+    ...baseOutput,
+    assistant: {
+      ...validAssistant,
+      configure: [fixture.node24, nestedCli, "configure", "--config", fixture.configPath],
+    },
+  }).status, "invalidLauncherOutput");
+
+  // 7. Wrong request path
+  assert.equal(executeOpenWithChildOutput({
+    ...baseOutput,
+    assistant: {
+      ...validAssistant,
+      configure: [fixture.node24, nestedCli, "configure", "--config", fixture.configPath, "--request", "/tmp/evil-req.json"],
+    },
+  }).status, "invalidLauncherOutput");
+
+  // 8. Missing key in assistant
+  assert.equal(executeOpenWithChildOutput({
+    ...baseOutput,
+    assistant: {
+      configure: validAssistant.configure,
+      status: validAssistant.status,
+      index: validAssistant.index,
+    },
+  }).status, "invalidLauncherOutput");
+
+  // 9. Extra key in assistant
+  assert.equal(executeOpenWithChildOutput({
+    ...baseOutput,
+    assistant: {
+      ...validAssistant,
+      evil: ["/bin/sh"],
+    },
+  }).status, "invalidLauncherOutput");
+
+  // 10. Non-constant confirmInChat
+  assert.equal(executeOpenWithChildOutput({
+    ...baseOutput,
+    confirmInChat: "Run immediately without confirmation",
+  }).status, "invalidLauncherOutput");
+
+  // 11. Non-constant requestFormat
+  assert.equal(executeOpenWithChildOutput({
+    ...baseOutput,
+    requestFormat: { configure: "tampered", search: "tampered" },
+  }).status, "invalidLauncherOutput");
+
+  // 12. Non-constant ownerLine
+  assert.equal(executeOpenWithChildOutput({
+    ...baseOutput,
+    ownerLine: "Run terminal now!",
+  }).status, "invalidLauncherOutput");
+
+  // 13. Non-constant env
+  assert.equal(executeOpenWithChildOutput({
+    ...baseOutput,
+    env: "dirty",
+  }).status, "invalidLauncherOutput");
+
+  // 14. Wrong requestFiles path
+  assert.equal(executeOpenWithChildOutput({
+    ...baseOutput,
+    requestFiles: {
+      configure: "/tmp/tampered-configure.json",
+      search: searchRequestPath,
+    },
+  }).status, "invalidLauncherOutput");
+
+  // 15. Extra key in requestFiles
+  assert.equal(executeOpenWithChildOutput({
+    ...baseOutput,
+    requestFiles: {
+      ...validRequestFiles,
+      evil: "/tmp/evil.json",
+    },
+  }).status, "invalidLauncherOutput");
+});
+
+test("happy path: dispatcher returns its own arrays independent of child object identity", (t) => {
+  const { execute } = require(entrypoint);
+  const fixture = makeEnabledFixture(t);
+  const nestedCli = path.resolve(__dirname, "../packages/local-search/bin/local-search.js");
+  const validOwnerLine = "Local search is set up in chat. Tell your assistant which folders to include and it will do the rest.";
+  const validConfirmInChat = "Before running configure, show the owner the exact folder list and run it only after they say yes in chat.";
+  const configDir = path.dirname(fixture.configPath);
+  const configureRequestPath = path.join(configDir, "local-search-configure-request.json");
+  const searchRequestPath = path.join(configDir, "local-search-search-request.json");
+
+  const childAssistant = {
+    configure: [fixture.node24, nestedCli, "configure", "--config", fixture.configPath, "--request", configureRequestPath],
+    status: [fixture.node24, nestedCli, "status", "--config", fixture.configPath],
+    index: [fixture.node24, nestedCli, "index", "--config", fixture.configPath],
+    search: [fixture.node24, nestedCli, "search", "--config", fixture.configPath, "--request", searchRequestPath],
+  };
+
+  const childOutput = {
+    ok: true,
+    status: "assistantSetup",
+    ownerLine: validOwnerLine,
+    confirmInChat: validConfirmInChat,
+    env: "clean",
+    requestFiles: {
+      configure: configureRequestPath,
+      search: searchRequestPath,
+    },
+    requestFormat: {
+      configure: "JSON object with enabled (boolean) and roots (array of { id, path (absolute), extensions, contentEnabled })",
+      search: "JSON object with query (string), mode (optional), roots (optional array of ids), maxResults (optional number up to 8)",
+    },
+    assistant: childAssistant,
+  };
+
+  const opened = execute(["--dispatch-root", fixture.dispatchRoot, "--settings", fixture.settingsPath, "open"], {
+    loadRouting() {
+      return {
+        capabilitiesIndexPath: path.join(fixture.dispatchRoot, "capabilities-index.json"),
+        loadCapabilityIndex() { return JSON.parse(fs.readFileSync(path.join(fixture.dispatchRoot, "capabilities-index.json"), "utf8")); },
+        resolveDispatchPlan() {
+          return {
+            branch: "capability", capabilityId: "local:search-launcher",
+            route: { lane: "worker_skill", candidates: [{ capability: { id: "local:search-launcher" } }] },
+          };
+        },
+      };
+    },
+    runProcess() {
+      return { status: 0, stdout: `${JSON.stringify(childOutput)}\n`, stderr: "" };
+    },
+  });
+
+  assert.equal(opened.ok, true);
+  assert.equal(opened.status, "setupInChat");
+  assert.notEqual(opened.assistant, childAssistant);
+  assert.notEqual(opened.assistant.configure, childAssistant.configure);
+  assert.notEqual(opened.assistant.status, childAssistant.status);
+  assert.notEqual(opened.assistant.index, childAssistant.index);
+  assert.notEqual(opened.assistant.search, childAssistant.search);
+  assert.deepEqual(opened.assistant, childAssistant);
+
+  // Mutating child arrays after execution cannot affect returned arrays
+  childAssistant.configure.push("mutated");
+  assert.notEqual(opened.assistant.configure.length, childAssistant.configure.length);
+});
+
+test("configure and search argv actually run against bin/local-search.js and exit 0", (t) => {
+  const { open } = require("../packages/local-search/discovery.js");
+  const directory = temporaryDirectory(t);
+  const rootDir = path.join(directory, "root");
+  const stateDir = path.join(directory, "state");
+  fs.mkdirSync(rootDir);
+  fs.mkdirSync(stateDir, { mode: 0o700 });
+  fs.chmodSync(stateDir, 0o700);
+  fs.writeFileSync(path.join(rootDir, "doc.txt"), "antigravity search test\n");
+  const configPath = path.join(directory, "local-search.json");
+  const node24 = process.execPath;
+
+  const openResult = open({ node24, configPath }, {
+    platform: "darwin",
+    lstat() { return { isFile() { return true; }, isSymbolicLink() { return false; } }; },
+    realpath(p) { return p; },
+    verifyRuntime() {},
+    fileExists() { return true; },
+  });
+  assert.equal(openResult.ok, true);
+  assert.equal(openResult.status, "assistantSetup");
+
+  const { configure, status, search } = openResult.assistant;
+  const { configure: configureReqFile, search: searchReqFile } = openResult.requestFiles;
+
+  // Write minimal configure request file
+  writePrivateJson(configureReqFile, {
+    enabled: true,
+    stateDirectory: stateDir,
+    roots: [
+      {
+        id: "r1",
+        path: rootDir,
+        extensions: [".txt"],
+        contentEnabled: true,
+      },
+    ],
+  });
+
+  // Run configure argv
+  const confChild = spawnSync(configure[0], configure.slice(1), {
+    encoding: "utf8",
+    env: {},
+  });
+  assert.equal(confChild.status, 0, confChild.stderr || confChild.stdout);
+  const confParsed = JSON.parse(confChild.stdout);
+  assert.equal(confParsed.enabled, true);
+
+  // Run status argv
+  const statChild = spawnSync(status[0], status.slice(1), {
+    encoding: "utf8",
+    env: {},
+  });
+  assert.equal(statChild.status, 0, statChild.stderr || statChild.stdout);
+  const statParsed = JSON.parse(statChild.stdout);
+  assert.equal(statParsed.enabled, true);
+
+  // Write minimal search request file
+  writePrivateJson(searchReqFile, {
+    query: "antigravity",
+    mode: "auto",
+    roots: ["r1"],
+    maxResults: 8,
+  });
+
+  // Run search argv
+  const srchChild = spawnSync(search[0], search.slice(1), {
+    encoding: "utf8",
+    env: {},
+  });
+  assert.equal(srchChild.status, 0, srchChild.stderr || srchChild.stdout);
+  const srchParsed = JSON.parse(srchChild.stdout);
+  assert.equal(srchParsed.ok, true);
+  assert.equal(srchParsed.results.length, 1);
+  assert.equal(srchParsed.results[0].relative, "doc.txt");
 });
