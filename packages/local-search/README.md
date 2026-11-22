@@ -58,9 +58,9 @@ The current companion implementation is `packages/local-search/desktop-find.js` 
 }
 ```
 
-`myos-find search` defaults to 3 results, 1024 snippet bytes, and a 4096-byte whole response. These are defaults, not hard limits: validated requests may ask for up to 8 results and larger bounded byte budgets. With `exportToAssistant: false`, `myos-find search` refuses with `notOptedIn`. The direct CLI and local Terminal UI remain independently available because they are separate commands, not a local mode of `myos-find`.
+`myos-find search` defaults to 3 results, 1024 snippet bytes, and a 4096-byte whole response. These are defaults, not hard limits: validated requests may ask for up to 8 results and larger bounded byte budgets. With `exportToAssistant: false`, `myos-find search` refuses with `notOptedIn`. The direct CLI and developer tools remain independently available because they are separate commands, not a local mode of `myos-find`.
 
-### Optional Dispatch launcher and local Terminal UI
+### Optional Dispatch launcher and assistant setup
 
 The distribution includes `myos-search-dispatch`, a disabled-by-default discovery and launcher bridge. It requires a separate Dispatch core and an owner-only regular settings file. Use portable absolute paths and create the file disabled first:
 
@@ -81,17 +81,44 @@ myos-search-dispatch --dispatch-root /absolute/separate/dispatch-core --settings
 
 After reviewing both absolute paths, change only `enabled` to `true` to opt in. The enabled settings are exactly `{ "version": 1, "enabled": true, "node24": "/absolute/path/to/node24", "configPath": "/absolute/private/local-search.json" }`. Disabled or invalid settings fail before local-search configuration loads, writes, or child-process creation. The bridge reads the normal Dispatch capability authority, adds a private ephemeral overlay containing only `local:search-launcher`, and uses the real `resolveDispatchPlan` path to select that fixed capability. There is no automatic or global route, hook, or hosted-content path. The launched child is always the packaged sibling `myos-search.js`; Dispatch core is not bundled inside this local-search module.
 
-`describe`, `status`, and `open` are the only bridge operations. `open` starts the interactive UI in macOS Terminal; searches and their results remain there. Setup records no root until metadata consent is explicit, and content indexing has its own consent. QMD setup asks only for the embedding model used by semantic search. The UI can run lexical-only without a model.
+`describe`, `status`, and `open` are the only bridge operations. `open` sets up local search directly in assistant chat; owners and teammates are never sent to Terminal. The assistant receives the exact argv commands to configure roots, check status, index content, and run searches, alongside `requestFiles` and `requestFormat`. Tell your assistant which folders to include and it will do the rest. Setup records no root until metadata consent is explicit, and content indexing has its own consent. Before running configure, show the owner the exact folder list and run it only after they say yes in chat. No code path runs configure itself. The assistant runs the argv with an empty environment (the result says `env: "clean"`). QMD setup asks only for the embedding model used by semantic search. Search can run lexical-only without a model.
 
-Each search prints its packet status, scan budget, unavailable-source count, semantic state, and negative-result qualification. A partial or unavailable zero-result response is not presented as proof that a file is absent. Before opening a content hit, the UI reads it again and compares its SHA-256 hash with the displayed result. A changed file requires a fresh search and selection. Metadata-only hits use exact-path metadata verification inside the configured root and do not ingest file content.
+The configure request JSON (`local-search-configure-request.json`) specifies `enabled` and approved `roots` with their identifiers, absolute paths, extensions, and content indexing preferences:
 
-`watchstart` runs a manual foreground watcher owned by the current Terminal session. Closing the session, EOF, SIGINT, SIGTERM, or SIGHUP cancels active work and drains an owned watcher before exit. It does not install a service or persistent daemon. `status` checks prerequisites and saved state only; it is not proof of successful inference or current search coverage.
+```json
+{
+  "enabled": true,
+  "roots": [
+    {
+      "id": "docs",
+      "path": "/absolute/path/to/docs",
+      "extensions": [".md", ".txt"],
+      "contentEnabled": true
+    }
+  ]
+}
+```
 
-Watcher startup, filesystem signals, and periodic ticks run serialized reconcile/stage/update/embed maintenance rather than trusting saved readiness. Default maintenance is one bounded network-denied Node 24 worker; that worker owns a stable SQLite `BEGIN IMMEDIATE` mutex while it publishes pending state, stages, calls the QMD SDK `update`/`embed` methods, closes the store, disposes model state, and only then publishes readiness. SQLite crash recovery releases ownership without lock-file deletion. Process execution has a configured timeout, but after termination `stop()` waits for the owned process group to disappear and that cleanup wait has no absolute terminal bound. `status` is passive: it reports persisted catalogue freshness without reconciling, while its QMD status performs prerequisite probes only; it does not establish successful inference. Queries reconcile only selected roots within deadline, file-count, and aggregate content-byte budgets, and never publish over maintenance state. Every selected source is opened and verified again immediately before packet emission. QMD paths are accepted only through opaque content-bound staging names in a manifest; stale hashes and arbitrary QMD paths are discarded. A snapshot only describes what was verified through packet emission and cannot guarantee a file stays unchanged afterward.
+The search request JSON (`local-search-search-request.json`) provides the query string, optional search mode, optional root scoping, and optional maximum result limit:
+
+```json
+{
+  "query": "deployment guide",
+  "mode": "auto",
+  "roots": ["docs"],
+  "maxResults": 8
+}
+```
+
+Each search prints its packet status, scan budget, unavailable-source count, semantic state, and negative-result qualification. A partial or unavailable zero-result response is not presented as proof that a file is absent. Before opening a content hit, the search engine reads it again and compares its SHA-256 hash with the displayed result. A changed file requires a fresh search and selection. Metadata-only hits use exact-path metadata verification inside the configured root and do not ingest file content.
+
+`watchstart` runs a manual foreground watcher owned by the current process session. Closing the session, EOF, SIGINT, SIGTERM, or SIGHUP cancels active work and drains an owned watcher before exit. It does not install a service or persistent daemon. `status` checks prerequisites and saved state only; it is not proof of successful inference or current search coverage.
+
+Watcher startup, filesystem signals, and periodic ticks run serialized reconcile/stage/update/embed maintenance rather than trusting saved readiness. Default maintenance is one bounded network-denied Node 24 worker; that worker owns a stable SQLite `BEGIN IMMEDIATE` mutex while it publishes pending state, stages, calls the QMD SDK `update`/`embed` methods, closes the store, disposes model state, and only then publishes readiness. SQLite crash recovery releases ownership without lock-file deletion. Process execution has a configured timeout, but after termination `stop()` waits for the owned process group to disappear and that cleanup wait has no absolute termination bound. `status` is passive: it reports persisted catalogue freshness without reconciling, while its QMD status performs prerequisite probes only; it does not establish successful inference. Queries reconcile only selected roots within deadline, file-count, and aggregate content-byte budgets, and never publish over maintenance state. Every selected source is opened and verified again immediately before packet emission. QMD paths are accepted only through opaque content-bound staging names in a manifest; stale hashes and arbitrary QMD paths are discarded. A snapshot only describes what was verified through packet emission and cannot guarantee a file stays unchanged afterward.
 
 ### Experimental opt-in persistent service API
 
-The implemented persistent-service interface is experimental and opt-in. It is not part of the default foreground `watch` or Terminal UI behavior:
+The implemented persistent-service interface is experimental and opt-in. It is not part of the default foreground `watch` behavior:
 
 ```sh
 myos-search-service --node24 /absolute/path/to/node24 enable --config /absolute/local-search.json --confirm
