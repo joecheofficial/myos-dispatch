@@ -8,6 +8,9 @@
 // that check the expiry itself still move Date.now to POLICY.expiresAt.
 const { POLICY } = require("../../src/runtime/bounded-vision");
 
+// A malformed review date must fail here, not as unrelated deadline errors.
+if (!Number.isSafeInteger(POLICY.expiresAt)) throw new Error("bounded-vision POLICY.expiresAt is not a valid timestamp");
+
 const realNow = Date.now;
 const offset = POLICY.expiresAt - 24 * 60 * 60 * 1000 - realNow();
 Date.now = () => realNow() + offset;
