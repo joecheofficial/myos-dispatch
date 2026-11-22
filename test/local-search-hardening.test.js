@@ -6,8 +6,9 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
-const { containsSensitiveRoot, normalizeConfig } = require("../packages/local-search/config");
+const { containsSensitiveRoot, loadConfig, normalizeConfig } = require("../packages/local-search/config");
 const { readRequest, runCli } = require("../packages/local-search/bin/local-search");
+const api = require("../packages/local-search");
 
 function temporaryDirectory(t) {
   const base = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "local-search-hardening-"));
@@ -52,7 +53,7 @@ test("request file read rejects request in group-writable parent directory", (t)
 
   assert.throws(() => readRequest(requestFile), {
     code: "INVALID_ARGUMENT",
-    message: /group or other writable/i,
+    message: /request file folder is writable by other users|group or other writable/i,
   });
 });
 
@@ -80,7 +81,7 @@ test("request file read rejects group-writable request file", (t) => {
 
   assert.throws(() => readRequest(requestFile), {
     code: "INVALID_ARGUMENT",
-    message: /group or other writable/i,
+    message: /request file folder is writable by other users|group or other writable/i,
   });
 });
 
@@ -275,4 +276,158 @@ test("offline or nonexistent non-sensitive root is accepted in config for offlin
   });
   assert.equal(config.roots[0].id, "offline");
   assert.equal(config.roots[0].path, missing);
+});
+
+test("relative --request paths are refused with clear error text", (t) => {
+  const base = temporaryDirectory(t);
+  assert.throws(() => readRequest("relative/path/request.json"), {
+    code: "INVALID_ARGUMENT",
+    message: /request path must be absolute/i,
+  });
+
+  let output = "";
+  process.exitCode = 0;
+  return runCli(["configure", "--config", path.join(base, "cfg.json"), "--request", "relative/path/request.json"], {
+    writeOutput: (data) => { output += data; },
+  }).then(() => {
+    assert.equal(process.exitCode, 1);
+    const parsed = JSON.parse(output.trim());
+    assert.equal(parsed.ok, false);
+    assert.equal(parsed.status, "INVALID_ARGUMENT");
+    assert.match(parsed.error, /request path must be absolute/i);
+    process.exitCode = 0;
+  });
+});
+
+test("/Volumes/X/Library, ~/Documents/Library, /tmp/proj/Library allowed; ~/Library/Mail refused", (t) => {
+  const base = temporaryDirectory(t);
+  const homeDocsLib = path.join(os.homedir(), "Documents", "Library");
+  const tmpProjLib = path.join(base, "proj", "Library");
+  fs.mkdirSync(tmpProjLib, { recursive: true });
+
+  assert.equal(containsSensitiveRoot("/Volumes/X/Library"), false);
+  assert.equal(containsSensitiveRoot(homeDocsLib), false);
+  assert.equal(containsSensitiveRoot(tmpProjLib), false);
+  assert.equal(containsSensitiveRoot(path.join(os.homedir(), "Library", "Mail")), true);
+
+  const cfg = normalizeConfig({
+    enabled: true,
+    stateDirectory: path.join(base, "state"),
+    roots: [
+      { id: "vols", path: "/Volumes/X/Library", extensions: [".txt"] },
+      { id: "docs-lib", path: homeDocsLib, extensions: [".txt"] },
+      { id: "tmp-lib", path: tmpProjLib, extensions: [".txt"] },
+    ],
+  });
+  assert.equal(cfg.roots.length, 3);
+
+  assert.throws(() => normalizeConfig({
+    enabled: true,
+    stateDirectory: path.join(base, "state-2"),
+    roots: [{ id: "mail", path: path.join(os.homedir(), "Library", "Mail"), extensions: [".txt"] }],
+  }), /sensitive|browser/i);
+});
+
+test("project with .env allowed; .env file root refused", (t) => {
+  const base = temporaryDirectory(t);
+  const projDir = path.join(base, "my-app");
+  fs.mkdirSync(projDir, { recursive: true });
+  fs.writeFileSync(path.join(projDir, ".env"), "SECRET=abc\n");
+  fs.writeFileSync(path.join(projDir, "notes.txt"), "hello app\n");
+
+  assert.equal(containsSensitiveRoot(projDir), false);
+
+  const cfg = normalizeConfig({
+    enabled: true,
+    stateDirectory: path.join(base, "state"),
+    roots: [{ id: "app", path: projDir, extensions: [".txt"] }],
+  });
+  assert.equal(cfg.roots[0].id, "app");
+
+  const envFile = path.join(projDir, ".env");
+  assert.equal(containsSensitiveRoot(envFile), true);
+  assert.equal(containsSensitiveRoot(path.join(projDir, ".env.local")), true);
+
+  assert.throws(() => normalizeConfig({
+    enabled: true,
+    stateDirectory: path.join(base, "state-env"),
+    roots: [{ id: "env", path: envFile, extensions: [".txt"] }],
+  }), /sensitive|browser/i);
+
+  assert.throws(() => normalizeConfig({
+    enabled: true,
+    stateDirectory: path.join(base, "state-env2"),
+    roots: [{ id: "env-local", path: path.join(projDir, ".env.local"), extensions: [".txt"] }],
+  }), /sensitive|browser/i);
+});
+
+test("/System/Volumes/Data, /System/Volumes/Data/Users, /private/var, another user's /Users/<name> refused", (t) => {
+  const base = temporaryDirectory(t);
+  const refusedRoots = [
+    "/System/Volumes/Data",
+    "/System/Volumes/Data/Users",
+    "/private/var",
+    "/Users/some_other_user_xyz",
+    "/System/Volumes/Data/Users/some_other_user_xyz",
+  ];
+
+  for (const rootPath of refusedRoots) {
+    assert.equal(containsSensitiveRoot(rootPath), true, `Expected sensitive root: ${rootPath}`);
+    assert.throws(() => normalizeConfig({
+      enabled: true,
+      stateDirectory: path.join(base, "state"),
+      roots: [{ id: "bad", path: rootPath, extensions: [".txt"] }],
+    }), /sensitive|browser|firmlink|ancestor/i, `Expected rejection for: ${rootPath}`);
+  }
+});
+
+test("stored config with a refused root gives rootRefused for that root and search on another root still works", async (t) => {
+  const base = temporaryDirectory(t);
+  const validDir = path.join(base, "valid-docs");
+  fs.mkdirSync(validDir, { recursive: true });
+  fs.writeFileSync(path.join(validDir, "guide.txt"), "dispatch search guide content\n");
+
+  const stateDir = path.join(base, "state");
+  const cfgPath = path.join(base, "stored-config.json");
+  const storedPayload = {
+    version: 1,
+    enabled: true,
+    stateDirectory: stateDir,
+    roots: [
+      { id: "refused-sys", path: "/System/Volumes/Data", extensions: [".txt"] },
+      { id: "valid-docs", path: validDir, extensions: [".txt"] },
+    ],
+  };
+
+  fs.writeFileSync(cfgPath, `${JSON.stringify(storedPayload, null, 2)}\n`, { mode: 0o600 });
+
+  const loaded = loadConfig(cfgPath);
+  assert.equal(loaded.roots.length, 2);
+  const refused = loaded.roots.find((r) => r.id === "refused-sys");
+  const valid = loaded.roots.find((r) => r.id === "valid-docs");
+
+  assert.ok(refused);
+  assert.equal(refused.status, "rootRefused");
+  assert.ok(typeof refused.reason === "string" && refused.reason.length > 0);
+
+  assert.ok(valid);
+  assert.notEqual(valid.status, "rootRefused");
+
+  // Status does not crash and reports status
+  const stat = await api.status(cfgPath);
+  assert.equal(stat.enabled, true);
+
+  // Search on the valid root works
+  const searchResult = await api.search(cfgPath, { query: "dispatch", roots: ["valid-docs"] });
+  assert.equal(searchResult.ok, true);
+
+  // Search without explicit roots also does not crash
+  const searchAll = await api.search(cfgPath, { query: "dispatch" });
+  assert.equal(searchAll.ok, true);
+
+  // Configure still refuses it with existing error style
+  await assert.rejects(
+    async () => api.configure({ configPath: cfgPath, config: storedPayload }),
+    /sensitive|browser|firmlink|ancestor/i,
+  );
 });

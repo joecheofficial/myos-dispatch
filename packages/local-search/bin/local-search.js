@@ -39,7 +39,7 @@ function parse(argv) {
     if (!Number.isSafeInteger(bytes) || bytes < 512 || bytes > 16384) usage("--context-bytes must be an integer from 512 to 16384");
   } else if (values["--context-bytes"] !== undefined || values["--receipt-dir"] !== undefined) usage("context options require --format context");
   if (!values["--config"] || !path.isAbsolute(values["--config"])) usage("--config must be absolute");
-  if (values["--request"] && !path.isAbsolute(values["--request"])) usage("--request must be absolute");
+  if (values["--request"] && !path.isAbsolute(values["--request"])) usage("request path must be absolute");
   return { operation, values };
 }
 
@@ -65,7 +65,7 @@ function readRequest(filePath, dependencies = {}) {
   if (!parentStat.isDirectory()) usage("request parent directory must be a directory");
   const currentUid = getuid ? getuid() : null;
   if (currentUid !== null && parentStat.uid !== currentUid) usage("request parent directory must be owned by the current user");
-  if ((parentStat.mode & 0o022) !== 0) usage("request parent directory must not be group or other writable");
+  if ((parentStat.mode & 0o022) !== 0) usage("request file folder is writable by other users");
 
   const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0);
   let fd;

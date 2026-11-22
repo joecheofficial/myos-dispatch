@@ -72,51 +72,148 @@ function isAncestor(ancestor, descendant) {
   return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
 }
 
-const SENSITIVE_SEQUENCES = Object.freeze([
-  [".ssh"], [".aws"], [".azure"], [".gnupg"],
-  [".config", "gcloud"],
-  [".myos", "secrets"], [".myos", "state"], [".myos", "agent-chrome"],
-  ["library", "keychains"], ["library", "mail"], ["library", "messages"],
-  ["library", "application support"], ["library", "cookies"],
-  ["library", "containers"], ["library", "group containers"],
-  ["library", "cloudstorage"], ["library", "mobile documents"], ["library", "safari"],
+const SYSTEM_REFUSED_ROOTS = new Set([
+  "/",
+  "/system",
+  "/system/volumes",
+  "/system/volumes/data",
+  "/system/volumes/data/users",
+  "/users",
+  "/private",
+  "/private/var",
+  "/var",
+]);
+
+function getProtectedHomeForms() {
+  const rawHome = os.homedir();
+  if (!rawHome) return [];
+  const forms = new Set();
+  const home = path.resolve(rawHome);
+  forms.add(home);
+  try {
+    const real = fs.realpathSync(home);
+    forms.add(path.resolve(real));
+  } catch {}
+
+  const FIRMLINK_PREFIX = "/System/Volumes/Data";
+  if (home.startsWith(`${FIRMLINK_PREFIX}/`)) {
+    const stripped = home.slice(FIRMLINK_PREFIX.length);
+    forms.add(path.resolve(stripped));
+  } else if (home.startsWith("/")) {
+    forms.add(path.resolve(path.join(FIRMLINK_PREFIX, home)));
+  }
+
+  for (const f of [...forms]) {
+    try {
+      forms.add(path.resolve(fs.realpathSync(f)));
+    } catch {}
+  }
+  return [...forms];
+}
+
+function isProtectedHomeOrAncestor(targetPath) {
+  const norm = path.resolve(targetPath).toLowerCase();
+  if (SYSTEM_REFUSED_ROOTS.has(norm)) return true;
+
+  const homeForms = getProtectedHomeForms();
+  for (const home of homeForms) {
+    const normHome = home.toLowerCase();
+    if (norm === normHome) return true;
+    if (isAncestor(norm, normHome)) return true;
+  }
+  return false;
+}
+
+function isOtherUserHome(targetPath) {
+  const norm = path.resolve(targetPath).toLowerCase();
+  const parent = path.dirname(norm);
+  if (parent === "/users" || parent === "/system/volumes/data/users") {
+    return true;
+  }
+  return false;
+}
+
+const SENSITIVE_ANYWHERE_COMPONENTS = new Set([
+  ".ssh",
+  ".aws",
+  ".azure",
+  ".gnupg",
+  "keychains",
+]);
+
+const SENSITIVE_ANYWHERE_SEQUENCES = Object.freeze([
+  [".myos", "agent-chrome"],
   ["application support", "google", "chrome"],
   ["application support", "chromium"],
   ["application support", "microsoft edge"],
   ["application support", "firefox", "profiles"],
-  ["dropbox"], ["onedrive"], ["google drive"],
+  ["dropbox"],
+  ["onedrive"],
+  ["google drive"],
+]);
+
+const HOME_LISTED_LIBRARY_SUBFOLDERS = Object.freeze([
+  "keychains",
+  "mail",
+  "messages",
+  "application support",
+  "cookies",
+  "containers",
+  "group containers",
+  "cloudstorage",
+  "mobile documents",
+  "safari",
 ]);
 
 function containsSensitiveRoot(rootPath) {
   if (typeof rootPath !== "string") return false;
+  const resolved = path.resolve(rootPath);
   const normalized = path.normalize(rootPath).replaceAll("\\", "/");
+  const normLower = resolved.toLowerCase();
+
+  if (isProtectedHomeOrAncestor(resolved)) return true;
+  if (isOtherUserHome(resolved)) return true;
+
   const components = normalized.split("/").filter(Boolean);
   const lowerComponents = components.map((c) => c.toLowerCase());
 
-  if (lowerComponents.some((part) =>
-    part === ".ssh" || part === ".aws" || part === ".azure" || part === ".gnupg" ||
-    part === "keychains" || /^\.env(?:\.|$)/.test(part)
-  )) return true;
+  if (lowerComponents.some((part) => SENSITIVE_ANYWHERE_COMPONENTS.has(part))) return true;
 
-  for (const seq of SENSITIVE_SEQUENCES) {
+  if (lowerComponents.length > 0 && /^\.env(?:\.|$)/i.test(lowerComponents[lowerComponents.length - 1])) {
+    return true;
+  }
+
+  for (const seq of SENSITIVE_ANYWHERE_SEQUENCES) {
     if (containsSequence(lowerComponents, seq)) return true;
   }
 
-  const homedir = os.homedir();
-  if (homedir) {
-    const normHome = path.resolve(homedir);
-    for (const seq of SENSITIVE_SEQUENCES) {
-      if (isAncestor(normalized, path.join(normHome, ...seq))) return true;
+  const homeForms = getProtectedHomeForms();
+  for (const home of homeForms) {
+    const homeLower = home.toLowerCase();
+
+    const libraryPath = path.join(homeLower, "library");
+    if (normLower === libraryPath) return true;
+
+    for (const sub of HOME_LISTED_LIBRARY_SUBFOLDERS) {
+      const subPath = path.join(libraryPath, sub);
+      if (normLower === subPath || isAncestor(subPath, normLower)) return true;
+    }
+
+    const configPath = path.join(homeLower, ".config");
+    if (normLower === configPath) return true;
+    const gcloudPath = path.join(configPath, "gcloud");
+    if (normLower === gcloudPath || isAncestor(gcloudPath, normLower)) return true;
+
+    const myosPath = path.join(homeLower, ".myos");
+    if (normLower === myosPath) return true;
+    for (const sub of ["secrets", "state", "agent-chrome"]) {
+      const myosSub = path.join(myosPath, sub);
+      if (normLower === myosSub || isAncestor(myosSub, normLower)) return true;
     }
   }
 
-  if (lowerComponents.length > 0) {
-    const last = lowerComponents[lowerComponents.length - 1];
-    if (last === ".config" || last === ".myos" || last === "library") return true;
-  }
-
   try {
-    for (const item of [".ssh", ".aws", ".azure", ".gnupg", ".env"]) {
+    for (const item of [".ssh", ".aws", ".azure", ".gnupg"]) {
       if (fs.existsSync(path.join(normalized, item))) return true;
     }
   } catch {}
@@ -136,9 +233,24 @@ function positiveInteger(value, fallback, label) {
   return candidate;
 }
 
-function normalizeRoot(root) {
+function getRootRefusalReason(targetPath) {
+  if (targetPath === path.parse(targetPath).root) return "filesystem root cannot be approved";
+  if (isProtectedHomeOrAncestor(targetPath)) {
+    const norm = path.resolve(targetPath).toLowerCase();
+    const homeForms = getProtectedHomeForms().map((h) => h.toLowerCase());
+    if (homeForms.includes(norm)) return "the whole home directory cannot be approved";
+    const parent = path.dirname(norm);
+    if (parent === "/users" || parent === "/system/volumes/data/users") return "other user home directory cannot be approved";
+    return "system or firmlink ancestor path cannot be approved";
+  }
+  if (isOtherUserHome(targetPath)) return "other user home directory cannot be approved";
+  if (containsSensitiveRoot(targetPath)) return "root is a sensitive or browser profile path";
+  return null;
+}
+
+function normalizeRoot(root, options = {}) {
   if (!root || typeof root !== "object" || Array.isArray(root)) fail("each root must be an object");
-  rejectUnknown(root, new Set(["id", "path", "contentEnabled", "extensions", "maxFiles", "maxFileBytes", "admissionManifest", "admissionPolicySha256", "admissionRefreshPolicy", "admissionExcludePaths"]), "root");
+  rejectUnknown(root, new Set(["id", "path", "contentEnabled", "extensions", "maxFiles", "maxFileBytes", "admissionManifest", "admissionPolicySha256", "admissionRefreshPolicy", "admissionExcludePaths", "status", "reason", "validatedRealPath"]), "root");
   if (typeof root.id !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(root.id)) fail("root id is malformed");
   const extensions = root.extensions;
   if (!Array.isArray(extensions) || extensions.length === 0 || extensions.some((item) => typeof item !== "string" || !/^\.[a-z0-9]+$/i.test(item))) fail(`extensions for ${root.id} are malformed`);
@@ -168,25 +280,90 @@ function normalizeRoot(root) {
     || !admissionManifest || admissionPolicySha256 !== ADMISSION_REFRESH_POLICY_SHA256)) {
     fail(`root ${root.id} refresh opt-in requires Markdown content, a private manifest, and the stable policy hash`);
   }
-  if (rootPath === path.parse(rootPath).root) fail("filesystem root cannot be approved");
-  if (rootPath === path.resolve(os.homedir())) fail("the whole home directory cannot be approved");
-  if (containsSensitiveRoot(rootPath)) fail(`root ${root.id} is a sensitive or browser profile path`);
+
+  const allowRefused = options.allowRefusedRoots === true || (root.status === "rootRefused" && options.allowRefusedRoots !== false);
+
+  const refusalReason = getRootRefusalReason(rootPath);
+  if (refusalReason) {
+    if (allowRefused) {
+      return Object.freeze({
+        id: root.id,
+        path: rootPath,
+        validatedRealPath: rootPath,
+        contentEnabled: false,
+        extensions: Object.freeze([...new Set(extensions.map((item) => item.toLowerCase()))]),
+        maxFiles: 0,
+        maxFileBytes: 0,
+        admissionManifest: null,
+        admissionPolicySha256: null,
+        admissionRefreshPolicy: null,
+        admissionExcludePaths: Object.freeze([]),
+        status: "rootRefused",
+        reason: refusalReason,
+      });
+    }
+    if (refusalReason === "filesystem root cannot be approved") fail("filesystem root cannot be approved");
+    if (refusalReason === "the whole home directory cannot be approved") fail("the whole home directory cannot be approved");
+    fail(`root ${root.id} is a sensitive or browser profile path`);
+  }
 
   let realRootPath = rootPath;
   try {
     const stat = fs.lstatSync(rootPath);
     if (stat.isSymbolicLink()) {
       const linkTarget = path.resolve(path.dirname(rootPath), fs.readlinkSync(rootPath));
-      if (containsSensitiveRoot(linkTarget)) fail(`root ${root.id} is a sensitive or browser profile path`);
+      const linkRefusal = getRootRefusalReason(linkTarget);
+      if (linkRefusal) {
+        if (allowRefused) {
+          return Object.freeze({
+            id: root.id,
+            path: rootPath,
+            validatedRealPath: linkTarget,
+            contentEnabled: false,
+            extensions: Object.freeze([...new Set(extensions.map((item) => item.toLowerCase()))]),
+            maxFiles: 0,
+            maxFileBytes: 0,
+            admissionManifest: null,
+            admissionPolicySha256: null,
+            admissionRefreshPolicy: null,
+            admissionExcludePaths: Object.freeze([]),
+            status: "rootRefused",
+            reason: linkRefusal,
+          });
+        }
+        if (linkRefusal === "filesystem root cannot be approved") fail("filesystem root cannot be approved");
+        if (linkRefusal === "the whole home directory cannot be approved") fail("the whole home directory cannot be approved");
+        fail(`root ${root.id} is a sensitive or browser profile path`);
+      }
     }
     realRootPath = fs.realpathSync(rootPath);
   } catch (error) {
     if (error.code === "INVALID_CONFIG") throw error;
   }
 
-  if (realRootPath === path.parse(realRootPath).root) fail("filesystem root cannot be approved");
-  if (realRootPath === path.resolve(os.homedir())) fail("the whole home directory cannot be approved");
-  if (containsSensitiveRoot(realRootPath)) fail(`root ${root.id} is a sensitive or browser profile path`);
+  const realRefusal = getRootRefusalReason(realRootPath);
+  if (realRefusal) {
+    if (allowRefused) {
+      return Object.freeze({
+        id: root.id,
+        path: rootPath,
+        validatedRealPath: realRootPath,
+        contentEnabled: false,
+        extensions: Object.freeze([...new Set(extensions.map((item) => item.toLowerCase()))]),
+        maxFiles: 0,
+        maxFileBytes: 0,
+        admissionManifest: null,
+        admissionPolicySha256: null,
+        admissionRefreshPolicy: null,
+        admissionExcludePaths: Object.freeze([]),
+        status: "rootRefused",
+        reason: realRefusal,
+      });
+    }
+    if (realRefusal === "filesystem root cannot be approved") fail("filesystem root cannot be approved");
+    if (realRefusal === "the whole home directory cannot be approved") fail("the whole home directory cannot be approved");
+    fail(`root ${root.id} is a sensitive or browser profile path`);
+  }
 
   // A root whose realpath differs from its given path is stored as the given path
   // but validated on the realpath, so a later symlink swap is caught at index time
@@ -194,6 +371,7 @@ function normalizeRoot(root) {
   return Object.freeze({
     id: root.id,
     path: rootPath,
+    validatedRealPath: realRootPath,
     contentEnabled: root.contentEnabled === true,
     extensions: Object.freeze([...new Set(extensions.map((item) => item.toLowerCase()))]),
     maxFiles: positiveInteger(root.maxFiles, 10_000, `root ${root.id} maxFiles`),
@@ -250,31 +428,35 @@ function normalizeParser(parser) {
   return Object.freeze(normalized);
 }
 
-function normalizeConfig(input) {
+function normalizeConfig(input, options = {}) {
   if (!input || typeof input !== "object" || Array.isArray(input)) fail("configuration must be an object");
   rejectUnknown(input, new Set(["version", "enabled", "stateDirectory", "roots", "budgets", "qmd", "parser", "resourcePolicy"]), "configuration");
   if (input.version !== undefined && input.version !== 1) fail("configuration version must be 1");
   if (typeof input.enabled !== "boolean") fail("enabled must be a boolean");
-  const roots = (input.roots || []).map(normalizeRoot);
+  const effectiveOptions = (options.allowRefusedRoots === undefined && Object.isFrozen(input) && Array.isArray(input.roots) && input.roots.some((r) => r && r.status === "rootRefused"))
+    ? { ...options, allowRefusedRoots: true }
+    : options;
+  const roots = (input.roots || []).map((root) => normalizeRoot(root, effectiveOptions));
   if (input.enabled && roots.length === 0) fail("enabled configuration requires at least one root");
   if (new Set(roots.map((root) => root.id)).size !== roots.length) fail("duplicate root id");
   const stateDirectory = absolute(input.stateDirectory, "stateDirectory");
-  for (const root of roots) {
+  const activeRoots = roots.filter((root) => root.status !== "rootRefused");
+  for (const root of activeRoots) {
     const rel = path.relative(root.path, stateDirectory);
     const reverse = path.relative(stateDirectory, root.path);
     const stateInsideRoot = rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
     const rootInsideState = reverse === "" || (!reverse.startsWith("..") && !path.isAbsolute(reverse));
     if (stateInsideRoot || rootInsideState) fail("stateDirectory must not overlap approved roots");
-    if (root.admissionManifest) for (const approved of roots) {
+    if (root.admissionManifest) for (const approved of activeRoots) {
       const manifestRelative = path.relative(approved.path, root.admissionManifest);
       if (manifestRelative === "" || (!manifestRelative.startsWith("..") && !path.isAbsolute(manifestRelative))) {
         fail(`root ${root.id} admissionManifest must be outside every approved root`);
       }
     }
   }
-  for (let index = 0; index < roots.length; index += 1) for (let other = index + 1; other < roots.length; other += 1) {
-    const rel = path.relative(roots[index].path, roots[other].path);
-    const reverse = path.relative(roots[other].path, roots[index].path);
+  for (let index = 0; index < activeRoots.length; index += 1) for (let other = index + 1; other < activeRoots.length; other += 1) {
+    const rel = path.relative(activeRoots[index].path, activeRoots[other].path);
+    const reverse = path.relative(activeRoots[other].path, activeRoots[index].path);
     if (rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel)) || (!reverse.startsWith("..") && !path.isAbsolute(reverse))) fail("approved roots must not overlap");
   }
   const budgets = input.budgets || {};
@@ -340,7 +522,7 @@ function assertOwnerOnly(filePath) {
 function loadConfig(configPath) {
   absolute(configPath, "config path");
   assertOwnerOnly(configPath);
-  return normalizeConfig(JSON.parse(fs.readFileSync(configPath, "utf8")));
+  return normalizeConfig(JSON.parse(fs.readFileSync(configPath, "utf8")), { allowRefusedRoots: true });
 }
 
 function writeConfig(configPath, input) {
