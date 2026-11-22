@@ -439,7 +439,13 @@ function splitRetiredFastpaths(doc, archiveDoc = { version: 1, retired: [] }, op
   }
   const live = [];
   let moved = 0;
+  const seenRetired = new Set();
   for (const entry of doc.fastpaths) {
+    if (entry && entry.status === "retired") {
+      // The archive is keyed by intent; two retired records with one intent would overwrite each other.
+      if (seenRetired.has(entry.intent)) throw new Error(`Two retired fastpaths share the intent "${entry.intent}"; fix the duplicate before archiving`);
+      seenRetired.add(entry.intent);
+    }
     if (!entry || entry.status !== "retired") {
       live.push(entry);
       continue;
@@ -467,6 +473,7 @@ function splitRetiredFastpaths(doc, archiveDoc = { version: 1, retired: [] }, op
     doc: { ...doc, fastpaths: live },
     archive: nextArchive,
     moved,
+    removedTombstones: doc.fastpaths.length - live.length - (keepTombstones ? 0 : moved),
     liveRetired: live.filter((entry) => entry && entry.status === "retired").length,
     archivedTotal: nextArchive.retired.length,
   };
@@ -506,6 +513,7 @@ function archiveRetiredFastpaths(file, options = {}) {
     file,
     archiveFile,
     moved: result.moved,
+    removedTombstones: result.removedTombstones,
     liveRetired: result.liveRetired,
     archivedTotal: result.archivedTotal,
     liveEntries: result.doc.fastpaths.length,
@@ -513,7 +521,7 @@ function archiveRetiredFastpaths(file, options = {}) {
     bytesAfter: Buffer.byteLength(`${JSON.stringify(result.doc, null, 2)}\n`),
     applied: false,
   };
-  if (options.dryRun || result.moved === 0) return summary;
+  if (options.dryRun || (result.moved === 0 && result.removedTombstones === 0)) return summary;
 
   const archiveTmp = `${archiveFile}.${process.pid}.${Date.now()}.tmp`;
   fs.writeFileSync(archiveTmp, `${JSON.stringify(result.archive, null, 2)}\n`, "utf8");

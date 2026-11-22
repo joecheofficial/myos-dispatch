@@ -127,3 +127,17 @@ test("CLI is a dry run unless --apply is given", () => {
   assert.equal(JSON.parse(applied.stdout).applied, true);
   assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).fastpaths[1].archived, true);
 });
+
+test("--no-tombstones after a default run removes the tombstones and keeps the archive", () => {
+  const { dir, file } = workspace([full("alpha", "stable"), full("bravo", "retired")]);
+  archiveRetiredFastpaths(file, { workspaceRoot: dir });
+  const second = archiveRetiredFastpaths(file, { workspaceRoot: dir, tombstones: false });
+  assert.equal(second.applied, true);
+  assert.equal(second.removedTombstones, 1);
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")).fastpaths.map((entry) => entry.intent), ["alpha"]);
+  assert.equal(readRetiredArchive(retiredArchivePathFor(file)).retired[0].stop_rule.length, 400);
+});
+
+test("two retired records with the same intent stop the split instead of overwriting each other", () => {
+  assert.throws(() => splitRetiredFastpaths({ fastpaths: [full("bravo", "retired"), full("bravo", "retired", { capability_id: "recipe:other" })] }), /share the intent/);
+});
