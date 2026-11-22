@@ -4,6 +4,7 @@ All notable changes to MyOS Dispatch are documented here.
 
 ## Unreleased
 
+- Test suite is green again and no longer depends on who runs it or on the date. `npm test` drops the caller's session markers (`MYOS_INITIATOR`, `MYOS_INITIATOR_OAUTH_DISABLED`, `MYOS_BACKGROUND_IS_SIDECAR`, `MYOS_SIDECAR_ORCHESTRATED`) for the test processes, and image policy tests run on a clock pinned before the policy review date. No runtime change. The image policy `openai-gpt54mini-high-20261014` passed its review date on 2026-11-14, so bounded image requests are refused until it is reviewed again; the suite now reports that as a diagnostic.
 - Estate hints: an optional, private, fail-open advisory line that names the folder most likely to own what a prompt is about. Evidence only, never routing authority. See docs/estate-hints.md.
 
 ## Unreleased (issue #8 customer install fixes)

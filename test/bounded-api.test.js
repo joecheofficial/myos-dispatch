@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
+require('./helpers/vision-policy-clock');
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'bounded-api-test-'));
 process.env.MYOS_USAGE_LEDGER_DIR = path.join(temp, 'usage');
 process.env.MYOS_ACTIVITY_LEDGER_DIR = path.join(temp, 'activity');

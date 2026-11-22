@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const zlib = require('node:zlib');
+const { policyExpiredOnRealClock, realNow } = require('./helpers/vision-policy-clock');
 const { prepareVision, assertVisionPolicy, POLICY } = require('../src/runtime/bounded-vision');
 const pin = bytes => ({ bytes, sha256: crypto.createHash('sha256').update(bytes).digest('hex') });
 // Independent bit-by-bit fixture CRC, intentionally not the runtime table implementation.
@@ -78,4 +79,17 @@ test('only the reviewed current model and conservative prices provide an image b
     Date.now = () => POLICY.expiresAt;
     assert.throws(() => prepareVision(pin(png()), POLICY.model), { code: 'BOUNDED_IMAGE_BOUND_UNAVAILABLE' });
   } finally { Date.now = now; }
+});
+test('real calendar: the policy answers only until its review date, and a passed date is reported', t => {
+  const pinned = Date.now;
+  try {
+    Date.now = realNow;
+    if (policyExpiredOnRealClock()) {
+      assert.throws(() => assertVisionPolicy(POLICY.model), { code: 'BOUNDED_IMAGE_BOUND_UNAVAILABLE' });
+      t.diagnostic(`image policy ${POLICY.id} passed its review date ${new Date(POLICY.expiresAt).toISOString()}: ` +
+        'image requests are refused at runtime until the policy is reviewed again');
+    } else {
+      assert.equal(assertVisionPolicy(POLICY.model).id, POLICY.id);
+    }
+  } finally { Date.now = pinned; }
 });
