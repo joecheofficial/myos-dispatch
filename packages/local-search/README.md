@@ -81,7 +81,34 @@ myos-search-dispatch --dispatch-root /absolute/separate/dispatch-core --settings
 
 After reviewing both absolute paths, change only `enabled` to `true` to opt in. The enabled settings are exactly `{ "version": 1, "enabled": true, "node24": "/absolute/path/to/node24", "configPath": "/absolute/private/local-search.json" }`. Disabled or invalid settings fail before local-search configuration loads, writes, or child-process creation. The bridge reads the normal Dispatch capability authority, adds a private ephemeral overlay containing only `local:search-launcher`, and uses the real `resolveDispatchPlan` path to select that fixed capability. There is no automatic or global route, hook, or hosted-content path. The launched child is always the packaged sibling `myos-search.js`; Dispatch core is not bundled inside this local-search module.
 
-`describe`, `status`, and `open` are the only bridge operations. `open` sets up local search directly in assistant chat; owners and teammates are never sent to Terminal. The assistant receives the exact argv commands to configure roots, check status, index content, and run searches. Tell your assistant which folders to include and it will do the rest. Setup records no root until metadata consent is explicit, and content indexing has its own consent. QMD setup asks only for the embedding model used by semantic search. Search can run lexical-only without a model.
+`describe`, `status`, and `open` are the only bridge operations. `open` sets up local search directly in assistant chat; owners and teammates are never sent to Terminal. The assistant receives the exact argv commands to configure roots, check status, index content, and run searches, alongside `requestFiles` and `requestFormat`. Tell your assistant which folders to include and it will do the rest. Setup records no root until metadata consent is explicit, and content indexing has its own consent. Before running configure, show the owner the exact folder list and run it only after they say yes in chat. No code path runs configure itself. The assistant runs the argv with an empty environment (`env: {}`). QMD setup asks only for the embedding model used by semantic search. Search can run lexical-only without a model.
+
+The configure request JSON (`local-search-configure-request.json`) specifies `enabled` and approved `roots` with their identifiers, absolute paths, extensions, and content indexing preferences:
+
+```json
+{
+  "enabled": true,
+  "roots": [
+    {
+      "id": "docs",
+      "path": "/absolute/path/to/docs",
+      "extensions": [".md", ".txt"],
+      "contentEnabled": true
+    }
+  ]
+}
+```
+
+The search request JSON (`local-search-search-request.json`) provides the query string, optional search mode, optional root scoping, and optional maximum result limit:
+
+```json
+{
+  "query": "deployment guide",
+  "mode": "auto",
+  "roots": ["docs"],
+  "maxResults": 8
+}
+```
 
 Each search prints its packet status, scan budget, unavailable-source count, semantic state, and negative-result qualification. A partial or unavailable zero-result response is not presented as proof that a file is absent. Before opening a content hit, the search engine reads it again and compares its SHA-256 hash with the displayed result. A changed file requires a fresh search and selection. Metadata-only hits use exact-path metadata verification inside the configured root and do not ingest file content.
 

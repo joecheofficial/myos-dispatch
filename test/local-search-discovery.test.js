@@ -71,6 +71,8 @@ test("open never calls runProcess or osascript and returns assistantSetup with a
     { node24, configPath },
     {
       platform: "darwin",
+      lstat() { return { isFile() { return true; }, isSymbolicLink() { return false; } }; },
+      realpath(p) { return p; },
       verifyRuntime() {},
       fileExists() { return true; },
       runProcess() {
@@ -83,43 +85,78 @@ test("open never calls runProcess or osascript and returns assistantSetup with a
   assert.equal(result.ok, true);
   assert.equal(result.status, "assistantSetup");
   assert.equal(result.ownerLine, "Local search is set up in chat. Tell your assistant which folders to include and it will do the rest.");
+  assert.equal(result.confirmInChat, "Before running configure, show the owner the exact folder list and run it only after they say yes in chat.");
+  assert.equal(result.env, "clean");
+  const configDir = path.dirname(configPath);
+  const configureRequestPath = path.join(configDir, "local-search-configure-request.json");
+  const searchRequestPath = path.join(configDir, "local-search-search-request.json");
+  assert.deepEqual(result.requestFiles, {
+    configure: configureRequestPath,
+    search: searchRequestPath,
+  });
+  assert.deepEqual(result.requestFormat, {
+    configure: "JSON object with enabled (boolean) and roots (array of { id, path (absolute), extensions, contentEnabled })",
+    search: "JSON object with query (string), mode (optional), roots (optional array of ids), maxResults (optional number up to 8)",
+  });
   const nestedCli = path.resolve(__dirname, "../packages/local-search/bin/local-search.js");
   assert.deepEqual(result.assistant, {
-    configure: [node24, nestedCli, "configure", "--config", configPath],
+    configure: [node24, nestedCli, "configure", "--config", configPath, "--request", configureRequestPath],
     status: [node24, nestedCli, "status", "--config", configPath],
     index: [node24, nestedCli, "index", "--config", configPath],
-    search: [node24, nestedCli, "search", "--config", configPath],
+    search: [node24, nestedCli, "search", "--config", configPath, "--request", searchRequestPath],
   });
   // Verify configPath with quote or space stays one single argv element
   assert.equal(result.assistant.configure[4], configPath);
-  assert.equal(result.assistant.configure.length, 5);
+  assert.equal(result.assistant.configure[6], configureRequestPath);
+  assert.equal(result.assistant.configure.length, 7);
+  assert.equal(result.assistant.search.length, 7);
 });
 
 test("open returns all expected failure statuses unchanged", () => {
   const { open } = require(modulePath);
   const validNode24 = "/opt/node24/bin/node";
   const validConfig = "/private/tmp/config.json";
+  const safeAdapters = {
+    platform: "darwin",
+    lstat() { return { isFile() { return true; }, isSymbolicLink() { return false; } }; },
+    realpath(p) { return p; },
+    verifyRuntime() {},
+    fileExists() { return true; },
+  };
 
   // unsupportedPlatform
   const linux = open({ node24: validNode24, configPath: validConfig }, { platform: "linux" });
   assert.deepEqual(linux, { ok: false, status: "unsupportedPlatform" });
 
   // invalidArguments: missing or relative paths
-  assert.deepEqual(open(null, { platform: "darwin" }), { ok: false, status: "invalidArguments" });
-  assert.deepEqual(open({ node24: "relative/node", configPath: validConfig }, { platform: "darwin" }), { ok: false, status: "invalidArguments" });
-  assert.deepEqual(open({ node24: validNode24, configPath: "relative/config.json" }, { platform: "darwin" }), { ok: false, status: "invalidArguments" });
+  assert.deepEqual(open(null, safeAdapters), { ok: false, status: "invalidArguments" });
+  assert.deepEqual(open({ node24: "relative/node", configPath: validConfig }, safeAdapters), { ok: false, status: "invalidArguments" });
+  assert.deepEqual(open({ node24: validNode24, configPath: "relative/config.json" }, safeAdapters), { ok: false, status: "invalidArguments" });
+
+  // runtimeUnavailable: symlinked runtime or realpath mismatch
+  const symlinkRuntime = open(
+    { node24: validNode24, configPath: validConfig },
+    { ...safeAdapters, lstat() { return { isFile() { return true; }, isSymbolicLink() { return true; } }; } },
+  );
+  assert.deepEqual(symlinkRuntime, { ok: false, status: "runtimeUnavailable" });
+
+  const mismatchRuntime = open(
+    { node24: validNode24, configPath: validConfig },
+    { ...safeAdapters, realpath() { return "/different/node"; } },
+  );
+  assert.deepEqual(mismatchRuntime, { ok: false, status: "runtimeUnavailable" });
 
   // runtimeUnavailable: verifyRuntime throws
   const badRuntime = open(
     { node24: validNode24, configPath: validConfig },
-    { platform: "darwin", verifyRuntime() { throw new Error("bad runtime"); } },
+    { ...safeAdapters, verifyRuntime() { throw new Error("bad runtime"); } },
   );
   assert.deepEqual(badRuntime, { ok: false, status: "runtimeUnavailable" });
 
   // launchUnavailable: engine bin missing
   const missingEngine = open(
     { node24: validNode24, configPath: validConfig },
-    { platform: "darwin", verifyRuntime() {}, fileExists() { return false; } },
+    { ...safeAdapters, fileExists() { return false; } },
   );
   assert.deepEqual(missingEngine, { ok: false, status: "launchUnavailable" });
 });

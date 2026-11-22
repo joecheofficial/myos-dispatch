@@ -16,6 +16,7 @@ const DISPATCH_FILES = Object.freeze([
   "src/capability-router.js",
 ]);
 const LAUNCHER_PATH = path.resolve(__dirname, "myos-search.js");
+const NESTED_CLI = path.resolve(__dirname, "../packages/local-search/bin/local-search.js");
 const CAPABILITY_ID = "local:search-launcher";
 const FIXED_CAPABILITY = Object.freeze({
   id: CAPABILITY_ID,
@@ -36,11 +37,12 @@ const OPERATION_PHRASES = Object.freeze({
 const LOCAL_STATUS_VALUES = new Set(["disabled", "notStarted", "partial", "passive", "degraded", "runtimeUnavailable", "statusUnavailable", "malformedStatus"]);
 const MAX_SETTINGS_BYTES = 16_384;
 const OWNER_LINE = "Local search is set up in chat. Tell your assistant which folders to include and it will do the rest.";
-const KNOWN_ARGV_FLAGS = new Set(["configure", "status", "index", "search", "--config"]);
-
-function isValidArgvElement(element) {
-  return typeof element === "string" && (KNOWN_ARGV_FLAGS.has(element) || isNormalizedAbsolute(element));
-}
+const CONFIRM_IN_CHAT = "Before running configure, show the owner the exact folder list and run it only after they say yes in chat.";
+const ENV_HINT = "clean";
+const REQUEST_FORMAT = Object.freeze({
+  configure: "JSON object with enabled (boolean) and roots (array of { id, path (absolute), extensions, contentEnabled })",
+  search: "JSON object with query (string), mode (optional), roots (optional array of ids), maxResults (optional number up to 8)",
+});
 
 function response(status, extra = {}) {
   return { ok: false, status, taskClass: TASK_CLASS, complianceLane: COMPLIANCE_LANE, ...extra };
@@ -219,7 +221,7 @@ function childArgs(operation, settings) {
   return args;
 }
 
-function validatedLauncherOutput(operation, value) {
+function validatedLauncherOutput(operation, value, settings) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   if (operation === "describe") {
     const expectedCommands = ["describe", "status", "open"];
@@ -257,24 +259,72 @@ function validatedLauncherOutput(operation, value) {
   if (operation === "open") {
     if (value.ok !== true || value.status !== "assistantSetup") return null;
     if (typeof value.ownerLine !== "string" || value.ownerLine !== OWNER_LINE) return null;
+    if (typeof value.confirmInChat !== "string" || value.confirmInChat !== CONFIRM_IN_CHAT) return null;
+    if (value.env !== ENV_HINT) return null;
+    if (!settings || !isNormalizedAbsolute(settings.node24) || !isNormalizedAbsolute(settings.configPath)) return null;
+
+    const configDir = path.dirname(settings.configPath);
+    const configureRequestPath = path.join(configDir, "local-search-configure-request.json");
+    const searchRequestPath = path.join(configDir, "local-search-search-request.json");
+    const expectedRequestFiles = {
+      configure: configureRequestPath,
+      search: searchRequestPath,
+    };
+
+    if (!value.requestFiles || typeof value.requestFiles !== "object" || Array.isArray(value.requestFiles)) return null;
+    const reqKeys = Object.keys(value.requestFiles).sort();
+    if (reqKeys.length !== 2 || reqKeys[0] !== "configure" || reqKeys[1] !== "search") return null;
+    if (value.requestFiles.configure !== expectedRequestFiles.configure || value.requestFiles.search !== expectedRequestFiles.search) {
+      return null;
+    }
+
+    if (!value.requestFormat || typeof value.requestFormat !== "object" || Array.isArray(value.requestFormat)) return null;
+    const formatKeys = Object.keys(value.requestFormat).sort();
+    const expectedFormatKeys = Object.keys(REQUEST_FORMAT).sort();
+    if (formatKeys.length !== expectedFormatKeys.length || formatKeys.some((k, i) => k !== expectedFormatKeys[i])) return null;
+    if (formatKeys.some((k) => value.requestFormat[k] !== REQUEST_FORMAT[k])) return null;
+
     if (!value.assistant || typeof value.assistant !== "object" || Array.isArray(value.assistant)) return null;
     const expectedKeys = ["configure", "index", "search", "status"];
     const actualKeys = Object.keys(value.assistant).sort();
     if (actualKeys.length !== expectedKeys.length || actualKeys.some((k, i) => k !== expectedKeys[i])) {
       return null;
     }
-    const assistant = {};
+
+    const expectedAssistant = {
+      configure: [settings.node24, NESTED_CLI, "configure", "--config", settings.configPath, "--request", configureRequestPath],
+      index: [settings.node24, NESTED_CLI, "index", "--config", settings.configPath],
+      search: [settings.node24, NESTED_CLI, "search", "--config", settings.configPath, "--request", searchRequestPath],
+      status: [settings.node24, NESTED_CLI, "status", "--config", settings.configPath],
+    };
+
     for (const key of expectedKeys) {
-      const argv = value.assistant[key];
-      if (!Array.isArray(argv) || argv.length === 0) return null;
-      for (const element of argv) {
-        if (!isValidArgvElement(element)) return null;
+      const childArgv = value.assistant[key];
+      const expectedArgv = expectedAssistant[key];
+      if (!Array.isArray(childArgv) || childArgv.length !== expectedArgv.length) return null;
+      for (let index = 0; index < expectedArgv.length; index += 1) {
+        if (childArgv[index] !== expectedArgv[index]) return null;
       }
-      assistant[key] = [...argv];
     }
+
     return success("setupInChat", {
-      ownerLine: value.ownerLine,
-      assistant,
+      ownerLine: OWNER_LINE,
+      confirmInChat: CONFIRM_IN_CHAT,
+      env: ENV_HINT,
+      requestFiles: {
+        configure: configureRequestPath,
+        search: searchRequestPath,
+      },
+      requestFormat: {
+        configure: REQUEST_FORMAT.configure,
+        search: REQUEST_FORMAT.search,
+      },
+      assistant: {
+        configure: [...expectedAssistant.configure],
+        status: [...expectedAssistant.status],
+        index: [...expectedAssistant.index],
+        search: [...expectedAssistant.search],
+      },
     });
   }
   return null;
@@ -303,7 +353,7 @@ function runLauncher(operation, settings, adapters) {
   } catch {
     return response("invalidLauncherOutput");
   }
-  return validatedLauncherOutput(operation, parsed) || response("invalidLauncherOutput");
+  return validatedLauncherOutput(operation, parsed, settings) || response("invalidLauncherOutput");
 }
 
 function parseArgs(argv) {

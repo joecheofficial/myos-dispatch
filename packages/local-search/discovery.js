@@ -9,6 +9,12 @@ const NESTED_CLI = path.resolve(__dirname, "bin/local-search.js");
 const LOCAL_UI = path.resolve(__dirname, "local-ui.js");
 const STATUS_VALUES = new Set(["disabled", "notStarted", "partial", "passive", "degraded"]);
 const OWNER_LINE = "Local search is set up in chat. Tell your assistant which folders to include and it will do the rest.";
+const CONFIRM_IN_CHAT = "Before running configure, show the owner the exact folder list and run it only after they say yes in chat.";
+const ENV_HINT = "clean";
+const REQUEST_FORMAT = Object.freeze({
+  configure: "JSON object with enabled (boolean) and roots (array of { id, path (absolute), extensions, contentEnabled })",
+  search: "JSON object with query (string), mode (optional), roots (optional array of ids), maxResults (optional number up to 8)",
+});
 const COMMANDS = Object.freeze(["describe", "status", "open"]);
 const DESCRIPTOR = Object.freeze({
   id: "local-search",
@@ -49,6 +55,20 @@ function help() {
 
 function isNormalizedAbsolute(value) {
   return typeof value === "string" && path.isAbsolute(value) && path.normalize(value) === value;
+}
+
+function isRegularNonSymlink(filePath, adapters = {}) {
+  try {
+    const lstat = adapters.lstat || adapters.lstatSync || fs.lstatSync;
+    const stat = lstat(filePath);
+    if (!stat || (typeof stat.isFile === "function" && !stat.isFile()) || (typeof stat.isSymbolicLink === "function" && stat.isSymbolicLink())) {
+      return false;
+    }
+    const realpath = adapters.realpath || adapters.realpathSync || fs.realpathSync;
+    return realpath(filePath) === filePath;
+  } catch {
+    return false;
+  }
 }
 
 function status(input, adapters = {}) {
@@ -121,6 +141,9 @@ function open(input, adapters = {}) {
   if (!input || !isNormalizedAbsolute(input.node24) || !isNormalizedAbsolute(input.configPath)) {
     return { ok: false, status: "invalidArguments" };
   }
+  if (!isRegularNonSymlink(input.node24, adapters)) {
+    return { ok: false, status: "runtimeUnavailable" };
+  }
   try {
     (adapters.verifyRuntime || verifyNode24)(input.node24);
   } catch {
@@ -128,15 +151,26 @@ function open(input, adapters = {}) {
   }
   if (!(adapters.fileExists || fs.existsSync)(NESTED_CLI)) return { ok: false, status: "launchUnavailable" };
 
+  const configDir = path.dirname(input.configPath);
+  const configureRequestPath = path.join(configDir, "local-search-configure-request.json");
+  const searchRequestPath = path.join(configDir, "local-search-search-request.json");
+
   return {
     ok: true,
     status: "assistantSetup",
     ownerLine: OWNER_LINE,
+    confirmInChat: CONFIRM_IN_CHAT,
+    env: ENV_HINT,
+    requestFiles: {
+      configure: configureRequestPath,
+      search: searchRequestPath,
+    },
+    requestFormat: REQUEST_FORMAT,
     assistant: {
-      configure: [input.node24, NESTED_CLI, "configure", "--config", input.configPath],
+      configure: [input.node24, NESTED_CLI, "configure", "--config", input.configPath, "--request", configureRequestPath],
       status: [input.node24, NESTED_CLI, "status", "--config", input.configPath],
       index: [input.node24, NESTED_CLI, "index", "--config", input.configPath],
-      search: [input.node24, NESTED_CLI, "search", "--config", input.configPath],
+      search: [input.node24, NESTED_CLI, "search", "--config", input.configPath, "--request", searchRequestPath],
     },
   };
 }
@@ -152,4 +186,4 @@ function execute(argv, adapters = {}) {
   return open(input, adapters);
 }
 
-module.exports = { OWNER_LINE, describe, execute, help, open, status };
+module.exports = { CONFIRM_IN_CHAT, ENV_HINT, OWNER_LINE, REQUEST_FORMAT, describe, execute, help, open, status };
