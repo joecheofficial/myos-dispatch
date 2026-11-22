@@ -5,6 +5,7 @@
 process.env.MYOS_INTENT_HORIZON_ENABLED = "1";
 
 const assert = require("node:assert/strict");
+require("./helpers/hermetic-env");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");

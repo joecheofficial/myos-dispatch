@@ -24,6 +24,7 @@ const path = require("node:path");
 const ROOT = path.resolve(__dirname, "..");
 const TIMEOUT_FAILURE_TYPES = new Set(["testTimeoutFailure", "cancelledByParent"]);
 const TIMEOUT_TEXT = /\b(?:timed out|timeout|ETIMEDOUT)\b/i;
+const { scrubCallerContext } = require("../test/helpers/hermetic-env");
 
 function defaultConcurrency(env = process.env) {
   const requested = Number(env.MYOS_TEST_CONCURRENCY);
@@ -83,6 +84,14 @@ function retryFiles(failures, root = ROOT) {
   return [...files].sort();
 }
 
+// The suite's result must not depend on who runs it. A writer started by an
+// unattended bridge or a sidecar worker carries session markers that change
+// routing, auth mode and trust class; they are dropped for the test processes.
+function testEnv(base = process.env) {
+  return scrubCallerContext({ MYOS_OAUTH_RECOVERY: "0", MYOS_BACKGROUND_BACKPRESSURE_ENABLED: "0",
+    MYOS_LOCAL_SEARCH_PROBE_TIMEOUT_MS: "30000", ...base });
+}
+
 function runNodeTest(args, env) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, ["--test", "--test-reporter=tap", ...args], { cwd: ROOT, env, stdio: ["ignore", "pipe", "pipe"] });
@@ -96,8 +105,7 @@ function runNodeTest(args, env) {
 async function main(argv = process.argv.slice(2)) {
   // Local-search residency probes wait 1 s by default and drop a file that does
   // not answer; under load that removes fixture files. No test measures it.
-  const env = { MYOS_OAUTH_RECOVERY: "0", MYOS_BACKGROUND_BACKPRESSURE_ENABLED: "0",
-    MYOS_LOCAL_SEARCH_PROBE_TIMEOUT_MS: "30000", ...process.env };
+  const env = testEnv(process.env);
   const concurrency = defaultConcurrency(env);
   const targets = argv.length ? argv : testFiles();
   const first = await runNodeTest([`--test-concurrency=${concurrency}`, ...targets], env);
@@ -127,4 +135,4 @@ if (require.main === module) {
   main().then((code) => { process.exitCode = code; }, (error) => { console.error(error); process.exitCode = 1; });
 }
 
-module.exports = { defaultConcurrency, isTimeoutClass, parseFailures, retryFiles, testFiles };
+module.exports = { defaultConcurrency, isTimeoutClass, parseFailures, retryFiles, testEnv, testFiles };
