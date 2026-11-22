@@ -147,8 +147,31 @@ function invalidateSweep(state) {
   closeDirectory(state);
 }
 
+function checkRootCanonicalAndIntact(root) {
+  try {
+    const canonical = root.validatedRealPath || root.path;
+    const stat = fs.lstatSync(canonical);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) {
+      return { ok: false, reason: "root swapped to symlink or non-directory" };
+    }
+    const currentReal = fs.realpathSync(root.path);
+    if (root.validatedRealPath && currentReal !== root.validatedRealPath) {
+      return { ok: false, reason: "root realpath changed since config time" };
+    }
+    return { ok: true, canonical };
+  } catch (error) {
+    return { ok: false, reason: error.code === "ENOENT" ? "removed" : "directoryUnavailable" };
+  }
+}
+
 function openNextDirectory(state, usage, budgets) {
   if (state.directory || state.queue.length === 0 || usage.directoryHandles >= budgets.directoryHandles) return false;
+  const rootCheck = checkRootCanonicalAndIntact(state.root);
+  if (!rootCheck.ok) {
+    invalidateSweep(state);
+    state.skipReason = rootCheck.reason;
+    return false;
+  }
   const queued = state.queue.shift();
   const checked = inspectDirectory(state.root, queued.path, queued.expectedIdentity);
   if (!checked.ok) { invalidateSweep(state); return false; }
