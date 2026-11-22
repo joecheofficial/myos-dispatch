@@ -39,15 +39,74 @@ function parse(argv) {
     if (!Number.isSafeInteger(bytes) || bytes < 512 || bytes > 16384) usage("--context-bytes must be an integer from 512 to 16384");
   } else if (values["--context-bytes"] !== undefined || values["--receipt-dir"] !== undefined) usage("context options require --format context");
   if (!values["--config"] || !path.isAbsolute(values["--config"])) usage("--config must be absolute");
-  if (values["--request"] && !path.isAbsolute(values["--request"])) usage("--request must be absolute");
+  if (values["--request"] && !path.isAbsolute(values["--request"])) usage("request path must be absolute");
   return { operation, values };
 }
 
-function readRequest(filePath) {
+function readRequest(filePath, dependencies = {}) {
   if (!filePath) return null;
-  const stat = fs.lstatSync(filePath);
-  if (!stat.isFile() || stat.isSymbolicLink()) usage("request path must be a regular non-symlink file");
-  return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  if (typeof filePath !== "string" || !path.isAbsolute(filePath)) usage("request path must be absolute");
+
+  const lstatSync = dependencies.lstatSync || fs.lstatSync;
+  const openSync = dependencies.openSync || fs.openSync;
+  const fstatSync = dependencies.fstatSync || fs.fstatSync;
+  const readSync = dependencies.readSync || fs.readSync;
+  const closeSync = dependencies.closeSync || fs.closeSync;
+  const getuid = dependencies.getuid || (typeof process.getuid === "function" ? () => process.getuid() : null);
+
+  const parentDir = path.dirname(filePath);
+  let parentStat;
+  try {
+    parentStat = lstatSync(parentDir);
+  } catch {
+    usage("request parent directory is not accessible");
+  }
+  if (parentStat.isSymbolicLink()) usage("request parent directory must not be a symlink");
+  if (!parentStat.isDirectory()) usage("request parent directory must be a directory");
+  const currentUid = getuid ? getuid() : null;
+  if (currentUid !== null && parentStat.uid !== currentUid) usage("request parent directory must be owned by the current user");
+  if ((parentStat.mode & 0o022) !== 0) usage("request file folder is writable by other users");
+
+  const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0);
+  let fd;
+  try {
+    fd = openSync(filePath, flags);
+  } catch {
+    usage("request path must be a regular non-symlink file");
+  }
+
+  try {
+    let stat;
+    try {
+      stat = fstatSync(fd);
+    } catch {
+      usage("request file stat failed");
+    }
+    if (!stat.isFile()) usage("request path must be a regular non-symlink file");
+    if (currentUid !== null && stat.uid !== currentUid) usage("request path must be owned by the current user");
+    if ((stat.mode & 0o022) !== 0) usage("request path must not be group or other writable");
+    const MAX_REQUEST_BYTES = 1024 * 1024; // 1 MiB
+    if (stat.size > MAX_REQUEST_BYTES) usage("request file exceeds 1 MiB size limit");
+
+    const buffer = Buffer.alloc(stat.size);
+    let bytesRead = 0;
+    while (bytesRead < stat.size) {
+      const chunk = readSync(fd, buffer, bytesRead, stat.size - bytesRead, bytesRead);
+      if (chunk === 0) break;
+      bytesRead += chunk;
+    }
+    if (bytesRead !== stat.size) usage("request file could not be read completely");
+
+    try {
+      return JSON.parse(buffer.toString("utf8"));
+    } catch {
+      usage("request file contains invalid JSON");
+    }
+  } finally {
+    if (fd !== undefined) {
+      try { closeSync(fd); } catch {}
+    }
+  }
 }
 
 function number(value, name) {
@@ -73,9 +132,9 @@ async function withCancellation(run) {
   }
 }
 
-async function main(argv = process.argv.slice(2)) {
+async function main(argv = process.argv.slice(2), dependencies = {}) {
   const { operation, values } = parse([...argv]);
-  const requestFile = readRequest(values["--request"]);
+  const requestFile = readRequest(values["--request"], dependencies);
   if (operation === "configure") return api.configure({ configPath: values["--config"], config: requestFile });
   const configPath = values["--config"];
   if (operation === "status") return api.status(configPath);
@@ -136,7 +195,7 @@ async function runCli(argv, dependencies = {}) {
   try {
     const parsed = parse([...argv]);
     const outputFormat = parsed.values["--format"] || "json";
-    const result = await main(argv);
+    const result = await main(argv, dependencies);
     let output;
     if (outputFormat === "evidence") output = formatEvidence(result, { isTTY: process.stdout.isTTY === true });
     else if (outputFormat === "context") {
@@ -158,4 +217,4 @@ if (require.main === module) {
   void runCli(process.argv.slice(2));
 }
 
-module.exports = { main, parse, runCli };
+module.exports = { main, parse, readRequest, runCli };

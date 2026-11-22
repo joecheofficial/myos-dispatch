@@ -1,6 +1,7 @@
 "use strict";
 
 const crypto = require("node:crypto");
+const fs = require("node:fs");
 const { loadConfig, normalizeConfig, writeConfig } = require("./config");
 const { ensureState, loadCatalogue, publish, reconcile } = require("./catalogue");
 const { acquire, watch: startWatch } = require("./maintenance");
@@ -23,9 +24,34 @@ async function configure(input) {
   return normalizeConfig(input);
 }
 
+function isRootCanonicalAndIntact(root) {
+  try {
+    const currentGivenReal = fs.realpathSync(root.path);
+    if (root.validatedRealPath && currentGivenReal !== root.validatedRealPath) return false;
+    const canonical = root.validatedRealPath || root.path;
+    const stat = fs.lstatSync(canonical);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function status(configInput) {
   const config = resolveConfig(configInput);
-  if (!config.enabled) return { enabled: false, status: "disabled", taskClass: "cheap_routing", complianceLane: "unattended_local" };
+  const refusedRoots = config.refusedRoots || [];
+  if (!config.enabled) {
+    return {
+      enabled: false,
+      status: "disabled",
+      taskClass: "cheap_routing",
+      complianceLane: "unattended_local",
+      refusedRoots: [...refusedRoots],
+      ...(refusedRoots.length > 0 ? {
+        note: `${refusedRoots.length} folder${refusedRoots.length === 1 ? " is" : "s are"} not searched: ${refusedRoots.map((r) => `${r.path} (${r.reason})`).join(", ")}`,
+      } : {}),
+    };
+  }
   const catalogue = loadCatalogue(config);
   const roots = catalogue.roots || {};
   const complete = config.roots.every((root) => roots[root.id] && roots[root.id].complete);
@@ -41,6 +67,10 @@ async function status(configInput) {
     reconciledAt: catalogue.reconciledAt,
     complete,
     resources: loadResourceStatus(config),
+    refusedRoots: [...refusedRoots],
+    ...(refusedRoots.length > 0 ? {
+      note: `${refusedRoots.length} folder${refusedRoots.length === 1 ? " is" : "s are"} not searched: ${refusedRoots.map((r) => `${r.path} (${r.reason})`).join(", ")}`,
+    } : {}),
   };
 }
 
@@ -58,9 +88,10 @@ async function performIndex(config, adapters = {}, lockHeld = false) {
   const lock = lockHeld ? null : acquire(config);
   try {
     const deadline = Date.now() + config.budgets.indexDeadlineMs;
-    const freshness = reconcile(config, { publish: false, deadline });
+    const activeRoots = config.roots.filter(isRootCanonicalAndIntact);
+    const freshness = reconcile(config, { roots: activeRoots, publish: false, deadline });
     const hydration = await hydrateRecords(config, freshness.catalogue.records, freshness.currentReads, {
-      roots: config.roots, deadline, signal: adapters.signal, extractDocument: adapters.extractDocument,
+      roots: activeRoots, deadline, signal: adapters.signal, extractDocument: adapters.extractDocument,
     });
     freshness.unavailable.push(...hydration.unavailable);
     const revision = contentRevision(freshness.catalogue);
@@ -157,7 +188,14 @@ async function index(configInput, options = {}) {
 
 async function search(configInput, request, options) {
   const config = resolveConfig(configInput);
-  return runSearch(config, request, request?.mode === "native" ? options : { manifests: loadManifests(config), ...options });
+  const result = await runSearch(config, request, request?.mode === "native" ? options : { manifests: loadManifests(config), ...options });
+  if (config.refusedRoots && config.refusedRoots.length > 0 && result && typeof result === "object") {
+    return {
+      ...result,
+      refusedRoots: [...config.refusedRoots],
+    };
+  }
+  return result;
 }
 
 async function read(configInput, request, options = {}) {
@@ -169,7 +207,8 @@ async function read(configInput, request, options = {}) {
   const maxTokens = request.maxTokens === undefined ? config.budgets.maxTokens : request.maxTokens;
   if (maxTokens !== null && (!Number.isSafeInteger(maxTokens) || maxTokens <= 0)) throw Object.assign(new Error("maxTokens is out of bounds"), { code: "INVALID_REQUEST" });
   const deadline = Date.now() + config.budgets.queryDeadlineMs;
-  const roots = selectRoots(config, request.roots);
+  const selectedRoots = selectRoots(config, request.roots);
+  const roots = selectedRoots.filter(isRootCanonicalAndIntact);
   const freshness = reconcile(config, { roots, publish: false, deadline, maxContentScanBytes: config.budgets.maxContentScanBytes });
   const record = freshness.catalogue.records.find((item) => item.sourceId === request.sourceId && roots.some((root) => root.id === item.rootId));
   if (!record) {
