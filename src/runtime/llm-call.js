@@ -37,6 +37,7 @@ const { readLlmDefaults } = require("../llm-defaults");
 const {
   LlmOutputTruncatedError,
   assessTruncation,
+  hasToolCallOutput,
   normalizeFinishReason,
   planGoogleOutput,
   readOutputAccounting,
@@ -1400,14 +1401,15 @@ function maybeParseJson(text, responseMode) {
 async function llmCallAsync(options = {}) {
   const provider = normalizeProvider(options.provider || resolveProvider());
   const authMode = options.authMode || "api";
-  const timeoutMs = Number(options.timeoutMs || 180000);
+  const totalTimeoutMs = Number(options.timeoutMs || 180000);
+  const startedAt = Date.now();
   const maxOutputTokens = Number(options.maxOutputTokens || 4000);
   const responseMode = options.responseMode === "json" ? "json" : "text";
   const temperature = options.temperature;
   const messages = buildMessages(options);
   const { model, meta } = resolveModelForProvider(provider, options.profile, options.model);
 
-  const callProvider = async (headroomTokens = 0) => {
+  const callProvider = async (headroomTokens = 0, timeoutMs = totalTimeoutMs) => {
   let result;
   const providerMaxOutputTokens = maxOutputTokens + headroomTokens;
   if (provider === "openai") {
@@ -1500,7 +1502,7 @@ async function llmCallAsync(options = {}) {
       providerMaxOutputTokens: attempt.providerMaxOutputTokens,
       visibleTokens: accounting.visibleTokens,
       reasoningTokens: accounting.reasoningTokens,
-      hasToolCalls: Array.isArray(attempt.toolCalls) && attempt.toolCalls.length > 0,
+      hasToolCalls: (Array.isArray(attempt.toolCalls) && attempt.toolCalls.length > 0) || hasToolCallOutput(attempt.raw),
     });
     return { accounting, providerFinishReason, truncation };
   };
@@ -1517,32 +1519,73 @@ async function llmCallAsync(options = {}) {
   let inspected = inspect(result);
   result = withAccounting(result, inspected.accounting);
   let truncationRetry = null;
-  const headroomTokens = options.truncationRetry === false ? 0 : retryHeadroomTokens(inspected.truncation);
+  let retrySkipped = null;
+  let retryError = null;
+  let headroomTokens = options.truncationRetry === false ? 0 : retryHeadroomTokens(inspected.truncation);
+  if (headroomTokens > 0) {
+    // The retry stays inside the caller's own limits: the time left of
+    // timeoutMs (so sync wrappers cannot be killed mid-retry) and budgetCapUsd
+    // (worst case: the retry fills its whole provider cap).
+    const remainingMs = totalTimeoutMs - (Date.now() - startedAt);
+    const firstCostUsd = estimateCostUsd(meta, result.usage);
+    const worstRetryCostUsd = estimateCostUsd(meta, {
+      inputTokens: result.usage.inputTokens,
+      outputTokens: maxOutputTokens + headroomTokens,
+    });
+    if (remainingMs < Math.max(2000, totalTimeoutMs * 0.25)) {
+      retrySkipped = "deadline";
+    } else if (
+      options.budgetCapUsd != null && firstCostUsd != null &&
+      firstCostUsd + worstRetryCostUsd > Number(options.budgetCapUsd)
+    ) {
+      retrySkipped = "budget_cap";
+    }
+    if (retrySkipped) headroomTokens = 0;
+  }
   if (headroomTokens > 0) {
     const first = { result, inspected };
-    truncationRetry = {
-      headroomTokens,
-      firstAttempt: { ...first.inspected.truncation },
-      firstAttemptUsage: first.result.usage,
-    };
-    result = await callProvider(headroomTokens);
-    inspected = inspect(result);
-    result = withAccounting(result, inspected.accounting);
-    // Both attempts were billed. Report the sum so the ledger stays truthful.
-    result.usage = {
-      ...result.usage,
-      inputTokens: Number(result.usage.inputTokens || 0) + Number(first.result.usage.inputTokens || 0),
-      outputTokens: Number(result.usage.outputTokens || 0) + Number(first.result.usage.outputTokens || 0),
-      reasoningTokens: Number(result.usage.reasoningTokens || 0) + Number(first.result.usage.reasoningTokens || 0),
-    };
+    try {
+      const second = await callProvider(headroomTokens, totalTimeoutMs - (Date.now() - startedAt));
+      truncationRetry = {
+        headroomTokens,
+        firstAttempt: { ...first.inspected.truncation },
+        firstAttemptUsage: first.result.usage,
+      };
+      inspected = inspect(second);
+      result = withAccounting(second, inspected.accounting);
+      // Both attempts were billed. Report the sum so the ledger stays truthful.
+      result.usage = {
+        ...result.usage,
+        inputTokens: Number(result.usage.inputTokens || 0) + Number(first.result.usage.inputTokens || 0),
+        outputTokens: Number(result.usage.outputTokens || 0) + Number(first.result.usage.outputTokens || 0),
+        reasoningTokens: Number(result.usage.reasoningTokens || 0) + Number(first.result.usage.reasoningTokens || 0),
+      };
+    } catch (error) {
+      // A failed retry must not discard the billed first attempt, and must not
+      // turn a cut answer into a retryable provider error that moves the call
+      // to another provider. Keep the first attempt and report it as truncated.
+      retryError = String(error?.message || error).slice(0, 200);
+    }
   }
   const truncation = inspected.truncation
-    ? { ...inspected.truncation, retried: Boolean(truncationRetry) }
+    ? {
+        ...inspected.truncation,
+        retried: Boolean(truncationRetry),
+        ...(retrySkipped ? { retrySkipped } : {}),
+        ...(retryError ? { retryError } : {}),
+      }
     : null;
 
   const estimatedCostUsd = estimateCostUsd(meta, result.usage);
   enforceBudgetCap(estimatedCostUsd, options.budgetCapUsd);
-  const json = maybeParseJson(result.text, responseMode);
+  // A cut JSON answer rarely parses. The typed truncated result is the signal
+  // the caller needs, so a parse failure must not replace it.
+  let json = null;
+  try {
+    json = maybeParseJson(result.text, responseMode);
+  } catch (error) {
+    if (!truncation) throw error;
+  }
 
   const enriched = {
     ...result,

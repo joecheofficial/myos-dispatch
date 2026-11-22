@@ -31,7 +31,7 @@ const openaiShaped = ({ text, finish = 'stop', completion, reasoning = 0 }) => j
 });
 const FULL = '2, 3, 5, 7, 11, 13, 17, 19, 23, 29. One is not prime because it has a single divisor.';
 const CUT = 'The first 40 prime numbers are:\n2, 3, 5, 7';
-const google = (extra = {}) => ({ provider: 'google', model: 'gemini-2.5-flash', prompt: 'List primes.', maxOutputTokens: 500, timeoutMs: 2000, ...extra });
+const google = (extra = {}) => ({ provider: 'google', model: 'gemini-2.5-flash', prompt: 'List primes.', maxOutputTokens: 500, timeoutMs: 20000, ...extra });
 function recordFetch(responses) {
   const bodies = [];
   global.fetch = async (url, init) => {
@@ -187,7 +187,7 @@ test('OpenAI-shaped provider: finish_reason length with reasoning inside complet
     () => openaiShaped({ text: '', finish: 'length', completion: 500, reasoning: 500 }),
     () => openaiShaped({ text: FULL, finish: 'stop', completion: 700, reasoning: 520 }),
   ]);
-  const result = await runtime.llmCallAsync({ provider: 'openrouter', model: 'test/reasoner', prompt: 'List primes.', maxOutputTokens: 500, timeoutMs: 2000, includeMetadata: true });
+  const result = await runtime.llmCallAsync({ provider: 'openrouter', model: 'test/reasoner', prompt: 'List primes.', maxOutputTokens: 500, timeoutMs: 20000, includeMetadata: true });
   assert.equal(seen.length, 2);
   assert.equal(seen[0].body.max_tokens, 500);
   assert.equal(seen[1].body.max_tokens, 500 + 1024);
@@ -199,7 +199,7 @@ test('OpenAI-shaped provider: finish_reason length with reasoning inside complet
 
 test('OpenAI-shaped provider: plain stop passes through untouched', async () => {
   const seen = recordFetch([() => openaiShaped({ text: FULL, completion: 40 })]);
-  const result = await runtime.llmCallAsync({ provider: 'openrouter', model: 'test/plain', prompt: 'List primes.', maxOutputTokens: 500, timeoutMs: 2000, includeMetadata: true });
+  const result = await runtime.llmCallAsync({ provider: 'openrouter', model: 'test/plain', prompt: 'List primes.', maxOutputTokens: 500, timeoutMs: 20000, includeMetadata: true });
   assert.equal(seen.length, 1);
   assert.equal(seen[0].body.max_tokens, 500);
   assert.equal(result.finishReason, 'stop');
@@ -210,7 +210,7 @@ test('routed call: the default_automation request carries the budget and the res
   const seen = recordFetch([() => gemini({ text: CUT, finishReason: 'MAX_TOKENS', visible: 20, thoughts: 990 })]);
   const result = await runtime.myosRun({
     taskClass: 'default_automation', executionPolicy: 'internal_automation', authMode: 'api',
-    pinnedProvider: 'google', model: 'gemini-2.5-flash', prompt: 'List primes.', maxOutputTokens: 500, timeoutMs: 2000,
+    pinnedProvider: 'google', model: 'gemini-2.5-flash', prompt: 'List primes.', maxOutputTokens: 500, timeoutMs: 20000,
     agentId: 'llm-truncation-test', project: 'dispatch',
   });
   assert.equal(seen[0].body.generationConfig.maxOutputTokens, 500 + truncation.AUTOMATION_THINKING_BUDGET);
@@ -234,8 +234,72 @@ test('legacy text wrapper raises the typed error instead of returning a cut answ
   recordFetch([() => gemini({ text: CUT, finishReason: 'MAX_TOKENS', visible: 20, thoughts: 990 })]);
   await assert.rejects(runtime.geminiCallAsync({
     taskClass: 'default_automation', executionPolicy: 'internal_automation', authMode: 'api',
-    model: 'gemini-2.5-flash', prompt: 'List primes.', maxOutputTokens: 500, timeoutMs: 2000, agentId: 'llm-truncation-test', project: 'dispatch',
+    model: 'gemini-2.5-flash', prompt: 'List primes.', maxOutputTokens: 500, timeoutMs: 20000, agentId: 'llm-truncation-test', project: 'dispatch',
   }), { code: 'LLM_OUTPUT_TRUNCATED' });
+});
+
+test('a retry that fails keeps the first attempt as a typed truncated result, not a retryable provider error', async () => {
+  let calls = 0;
+  global.fetch = async () => {
+    calls += 1;
+    if (calls === 1) return gemini({ text: CUT, finishReason: 'MAX_TOKENS', visible: 20, thoughts: 476 });
+    return new Response(JSON.stringify({ error: { message: 'Resource exhausted', status: 'RESOURCE_EXHAUSTED' } }), { status: 429 });
+  };
+  const result = await runtime.llmCallAsync(google({ taskClass: 'heavy_synthesis', includeMetadata: true }));
+  assert.equal(calls, 2);
+  assert.equal(result.truncated, true);
+  assert.equal(result.text, CUT);
+  assert.equal(result.truncation.retried, false);
+  assert.match(result.truncation.retryError, /Resource exhausted/);
+  assert.equal(result.usage.outputTokens, 20);
+});
+
+test('the retry is skipped when it could exceed budgetCapUsd, and the cut is still typed', async () => {
+  const seen = recordFetch([() => gemini({ text: CUT, finishReason: 'MAX_TOKENS', visible: 20, thoughts: 476 })]);
+  const result = await runtime.llmCallAsync(google({ taskClass: 'heavy_synthesis', includeMetadata: true, budgetCapUsd: 0.0005 }));
+  assert.equal(seen.length, 1);
+  assert.equal(result.truncated, true);
+  assert.equal(result.truncation.retrySkipped, 'budget_cap');
+});
+
+test('the retry is skipped when too little of timeoutMs is left', async () => {
+  let calls = 0;
+  global.fetch = async () => {
+    calls += 1;
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    return gemini({ text: CUT, finishReason: 'MAX_TOKENS', visible: 20, thoughts: 476 });
+  };
+  const result = await runtime.llmCallAsync(google({ taskClass: 'heavy_synthesis', includeMetadata: true, timeoutMs: 150 }));
+  assert.equal(calls, 1);
+  assert.equal(result.truncation.retrySkipped, 'deadline');
+});
+
+test('JSON mode: a cut answer returns the typed truncated result instead of an invalid JSON error', async () => {
+  recordFetch([() => gemini({ text: '{"decision":"dra', finishReason: 'MAX_TOKENS', visible: 6, thoughts: 490 })]);
+  const result = await runtime.llmCallAsync(google({ taskClass: 'heavy_synthesis', responseMode: 'json', includeMetadata: true }));
+  assert.equal(result.truncated, true);
+  assert.equal(result.json, null);
+  await assert.rejects(runtime.llmCallAsync(google({ taskClass: 'heavy_synthesis', responseMode: 'json' })), { code: 'LLM_OUTPUT_TRUNCATED' });
+  recordFetch([() => gemini({ text: 'not json', finishReason: 'STOP', visible: 3 })]);
+  await assert.rejects(runtime.llmCallAsync(google({ taskClass: 'heavy_synthesis', responseMode: 'json', includeMetadata: true })), /invalid JSON/);
+});
+
+test('a Gemini function call that ends with STOP after heavy reasoning is not flagged', async () => {
+  const seen = recordFetch([() => json({
+    candidates: [{ content: { parts: [{ functionCall: { name: 'lookup', args: {} } }] }, finishReason: 'STOP' }],
+    usageMetadata: { promptTokenCount: 25, candidatesTokenCount: 12, thoughtsTokenCount: 480 },
+  })]);
+  const result = await runtime.llmCallAsync(google({ taskClass: 'heavy_synthesis', includeMetadata: true, tools: [{ functionDeclarations: [{ name: 'lookup' }] }] }));
+  assert.equal(seen.length, 1);
+  assert.equal(result.truncated, false);
+});
+
+test('sync wrapper source applies the typed error to text-only callers', () => {
+  const cut = { text: CUT, truncated: true, truncation: { cause: 'reasoning_consumed_output_cap', visibleTokens: 20, reasoningTokens: 476, requestedMaxOutputTokens: 500 } };
+  assert.throws(() => runtime.textOrThrowIfTruncated(cut, {}), { code: 'LLM_OUTPUT_TRUNCATED' });
+  assert.equal(runtime.textOrThrowIfTruncated(cut, { allowTruncated: true }), CUT);
+  assert.equal(runtime.textOrThrowIfTruncated({ text: FULL, truncated: false }, {}), FULL);
+  assert.equal(runtime.textOrThrowIfTruncated({ text: FULL }, {}), FULL);
 });
 
 test('cost estimate counts Gemini reasoning tokens, which are billed as output', () => {
@@ -258,6 +322,17 @@ test('pure rules: finish reason vocabulary, accounting, headroom bounds', () => 
   assert.equal(truncation.retryHeadroomTokens({ cause: 'reasoning_consumed_output_cap', reasoningTokens: 90000 }), truncation.RETRY_HEADROOM_MAX);
   assert.equal(truncation.retryHeadroomTokens({ cause: 'visible_output_hit_cap', reasoningTokens: 0 }), 0);
   assert.equal(truncation.supportsGoogleThinkingBudget('gemini-2.5-flash-lite'), true);
+  const plan = (extra) => truncation.planGoogleOutput({ maxOutputTokens: 500, ...extra });
+  // flash-lite does not think by default: an automation class must not switch it on.
+  assert.deepEqual(plan({ model: 'gemini-2.5-flash-lite', taskClass: 'default_automation' }), { thinkingBudget: null, providerMaxOutputTokens: 500, reason: 'model_default' });
+  // pro cannot switch thinking off: it gets its floor, never a 400.
+  assert.deepEqual(plan({ model: 'gemini-2.5-pro', disableThinking: true }), { thinkingBudget: 128, providerMaxOutputTokens: 628, reason: 'thinking_disabled' });
+  assert.equal(plan({ model: 'gemini-2.5-flash', disableThinking: true }).thinkingBudget, 0);
+  assert.equal(plan({ model: 'gemini-2.5-pro', thinkingBudget: 10 }).thinkingBudget, 128);
+  assert.equal(plan({ model: 'gemini-2.5-flash-lite', thinkingBudget: 100 }).thinkingBudget, 512);
+  assert.equal(plan({ model: 'gemini-2.5-flash-lite', thinkingBudget: 0 }).thinkingBudget, 0);
+  assert.deepEqual(plan({ model: 'gemini-2.5-flash', taskClass: 'default_automation', thinkingBudget: -1 }), { thinkingBudget: -1, providerMaxOutputTokens: 500, reason: 'caller_dynamic' });
+  assert.equal(plan({ model: 'gemini-2.5-flash', taskClass: 'default_automation', thinkingBudget: 2000 }).providerMaxOutputTokens, 2500);
   assert.equal(truncation.supportsGoogleThinkingBudget('gemini-2.5-flash-image'), false);
   assert.equal(truncation.assessTruncation({ finishReason: 'tool_calls', requestedMaxOutputTokens: 500, visibleTokens: 0, reasoningTokens: 480 }), null);
 });

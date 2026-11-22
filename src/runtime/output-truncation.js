@@ -38,6 +38,24 @@ function supportsGoogleThinkingBudget(model) {
   return /^gemini-2\.5-(flash|pro)/i.test(id) && !/(image|tts|audio|live)/i.test(id);
 }
 
+// Per-model thinking rules for Gemini 2.5. `floor` is the smallest budget the
+// API accepts; `canDisable` says whether 0 is accepted; `thinksByDefault` is
+// false for flash-lite, which must not have thinking switched on for it.
+function googleThinkingRules(model) {
+  const id = String(model || "");
+  if (!supportsGoogleThinkingBudget(id)) return null;
+  if (/^gemini-2\.5-pro/i.test(id)) return { floor: 128, canDisable: false, thinksByDefault: true };
+  if (/^gemini-2\.5-flash-lite/i.test(id)) return { floor: 512, canDisable: true, thinksByDefault: false };
+  return { floor: 0, canDisable: true, thinksByDefault: true };
+}
+
+function hasToolCallOutput(raw) {
+  const parts = raw?.candidates?.[0]?.content?.parts;
+  if (Array.isArray(parts) && parts.some((part) => part && part.functionCall)) return true;
+  const calls = raw?.choices?.[0]?.message?.tool_calls;
+  return Array.isArray(calls) && calls.length > 0;
+}
+
 function isBoundedReasoningTaskClass(taskClass) {
   return BOUNDED_REASONING_TASK_CLASSES.includes(String(taskClass || ""));
 }
@@ -56,27 +74,37 @@ function planGoogleOutput({
 } = {}) {
   const requested = toCount(maxOutputTokens);
   const headroom = toCount(headroomTokens);
+  const rules = googleThinkingRules(model);
   if (searchGrounding || disableThinking) {
     // Existing rule: grounding returns empty parts unless thinking is off.
-    return { thinkingBudget: 0, providerMaxOutputTokens: requested + headroom, reason: "thinking_disabled" };
+    // A model that cannot switch thinking off gets its smallest budget, with
+    // the cap raised by the same amount.
+    const off = rules && !rules.canDisable ? rules.floor : 0;
+    return { thinkingBudget: off, providerMaxOutputTokens: requested + Math.max(off, headroom), reason: "thinking_disabled" };
   }
-  if (!supportsGoogleThinkingBudget(model)) {
+  if (!rules) {
     return { thinkingBudget: null, providerMaxOutputTokens: requested + headroom, reason: "model_default" };
   }
-  const explicit = Number.isFinite(Number(thinkingBudget)) && Number(thinkingBudget) >= 0
-    ? Math.floor(Number(thinkingBudget))
-    : null;
-  if (explicit !== null) {
+  const asked = Number(thinkingBudget);
+  if (thinkingBudget !== undefined && thinkingBudget !== null && Number.isFinite(asked)) {
+    if (asked < 0) {
+      // -1 is Gemini's "dynamic" budget. Honor it; only headroom is added.
+      return { thinkingBudget: -1, providerMaxOutputTokens: requested + headroom, reason: "caller_dynamic" };
+    }
+    // Clamp to what the model accepts, so a caller value can never be a 400.
+    const wanted = Math.floor(asked);
+    const explicit = wanted === 0 && rules.canDisable ? 0 : Math.max(rules.floor, wanted);
     return {
       thinkingBudget: explicit,
       providerMaxOutputTokens: requested + Math.max(explicit, headroom),
       reason: "caller_budget",
     };
   }
-  if (isBoundedReasoningTaskClass(taskClass) || headroom > 0) {
+  if (headroom > 0 || (isBoundedReasoningTaskClass(taskClass) && rules.thinksByDefault)) {
+    const budget = Math.max(rules.floor, AUTOMATION_THINKING_BUDGET);
     return {
-      thinkingBudget: AUTOMATION_THINKING_BUDGET,
-      providerMaxOutputTokens: requested + Math.max(AUTOMATION_THINKING_BUDGET, headroom),
+      thinkingBudget: budget,
+      providerMaxOutputTokens: requested + Math.max(budget, headroom),
       reason: headroom > 0 ? "headroom_retry" : "automation_budget",
     };
   }
@@ -210,6 +238,8 @@ module.exports = {
   RETRY_HEADROOM_MIN,
   TRUNCATION_ERROR_CODE,
   assessTruncation,
+  googleThinkingRules,
+  hasToolCallOutput,
   isBoundedReasoningTaskClass,
   normalizeFinishReason,
   planGoogleOutput,
