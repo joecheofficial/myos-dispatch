@@ -110,12 +110,12 @@ async function until(check, limitMs = SETTLE_LIMIT_MS) {
   return check();
 }
 
-function childCode() {
+function childCode(waitMs = 60000) {
   return `
     const fs=require('node:fs');
     const {acquireInference}=require(process.argv[1]);
     const stateDirectory=process.argv[2], trace=process.argv[3], hold=Number(process.argv[4]);
-    const config={stateDirectory,resourcePolicy:{inferenceWaitMs:5000}};
+    const config={stateDirectory,resourcePolicy:{inferenceWaitMs:${waitMs}}};
     const abort=new AbortController();
     process.on('SIGTERM',()=>abort.abort());
     if(process.send)process.send('waiting');
@@ -125,12 +125,16 @@ function childCode() {
       await new Promise(r=>setTimeout(r,hold));
       fs.appendFileSync(trace,'END '+process.pid+'\\n');
       lock.release();
-    }).catch(error=>{if(process.send)process.send(error.code);process.exitCode=error.code==='ABORTED'?0:1});
+    }).catch(error=>{
+      console.error('contender failed: '+(error.code||error.name)+': '+error.message);
+      if(process.send)process.send(error.code);
+      process.exitCode=error.code==='ABORTED'?0:1;
+    });
   `;
 }
 
-function runContender(stateDirectory, trace, hold = 40) {
-  return spawn(process.execPath, ["-e", childCode(), RESOURCE_MODULE, stateDirectory, trace, String(hold)], { stdio: ["ignore", "ignore", "pipe", "ipc"] });
+function runContender(stateDirectory, trace, hold = 40, waitMs = 60000) {
+  return spawn(process.execPath, ["-e", childCode(waitMs), RESOURCE_MODULE, stateDirectory, trace, String(hold)], { stdio: ["ignore", "ignore", "pipe", "ipc"] });
 }
 
 function finished(child) {
@@ -138,7 +142,10 @@ function finished(child) {
     let stderr = "";
     child.stderr.on("data", (chunk) => { stderr += chunk; });
     child.on("error", reject);
-    child.on("exit", (code, signal) => code === 0 ? resolve() : reject(new Error(`child ${code}/${signal}: ${stderr}`)));
+    child.on("close", (code, signal) => {
+      const failure = stderr.split("\n").find((line) => line.startsWith("contender failed:"));
+      code === 0 ? resolve() : reject(new Error(`${failure ? `${failure}\n` : ""}child ${code}/${signal}: ${stderr}`));
+    });
   });
 }
 
@@ -220,6 +227,26 @@ for (const count of [2, 4, 8]) test(`${count} processes admit at most one heavy 
   }
   assert.equal(active, 0);
   assert.equal(maximum, 1);
+});
+
+test("a contender times out without acquiring an occupied inference slot", async (t) => {
+  const { base, input } = fixture(t);
+  const config = normalizeConfig(input);
+  fs.mkdirSync(config.stateDirectory, { mode: 0o700 });
+  const trace = path.join(base, "trace");
+  const owner = runContender(config.stateDirectory, trace, 60_000);
+  t.after(async () => { owner.kill("SIGKILL"); await exited(owner); });
+  assert.equal(await message(owner), "acquired");
+  const waiter = runContender(config.stateDirectory, trace, 1, 200);
+  t.after(async () => { waiter.kill("SIGKILL"); await exited(waiter); });
+  const messages = [];
+  waiter.on("message", (value) => messages.push(value));
+  await assert.rejects(finished(waiter), {
+    message: /^contender failed: RESOURCE_ADMISSION_TIMEOUT: heavy inference admission timed out\n/,
+  });
+  assert.ok(messages.includes("RESOURCE_ADMISSION_TIMEOUT"));
+  assert.equal(messages.includes("acquired"), false);
+  assert.equal(fs.readFileSync(trace, "utf8").trim(), `START ${owner.pid}`);
 });
 
 test("a killed owner releases the SQLite inference transaction", async (t) => {
