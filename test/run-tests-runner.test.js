@@ -5,7 +5,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
-const { isTimeoutClass, parseFailures, retryFiles, defaultConcurrency } = require("../scripts/run-tests");
+const { isTimeoutClass, parseFailures, retryFiles, defaultConcurrency, testEnv } = require("../scripts/run-tests");
 
 const ROOT = path.resolve(__dirname, "..");
 const block = (name, fields) => [`not ok 7 - ${name}`, "  ---", ...fields.map((line) => `  ${line}`), "  ..."].join("\n");
@@ -42,4 +42,18 @@ test("concurrency is bounded and overridable", () => {
   assert.equal(defaultConcurrency({ MYOS_TEST_CONCURRENCY: "2" }), 2);
   const value = defaultConcurrency({});
   assert.ok(value >= 1 && value <= 4);
+});
+
+test("test processes never inherit the caller's session markers, and keep everything else", () => {
+  const base = { PATH: "/usr/bin", MYOS_INITIATOR: "unattended", MYOS_INITIATOR_OAUTH_DISABLED: "1",
+    MYOS_BACKGROUND_IS_SIDECAR: "1", MYOS_SIDECAR_ORCHESTRATED: "1", MYOS_TEST_CONCURRENCY: "2", MYOS_OAUTH_RECOVERY: "1" };
+  const env = testEnv(base);
+  for (const key of ["MYOS_INITIATOR", "MYOS_INITIATOR_OAUTH_DISABLED", "MYOS_BACKGROUND_IS_SIDECAR", "MYOS_SIDECAR_ORCHESTRATED"]) {
+    assert.equal(key in env, false, key);
+  }
+  assert.equal(env.PATH, "/usr/bin");
+  assert.equal(env.MYOS_TEST_CONCURRENCY, "2");
+  assert.equal(env.MYOS_OAUTH_RECOVERY, "1");
+  assert.equal(testEnv({}).MYOS_BACKGROUND_BACKPRESSURE_ENABLED, "0");
+  assert.equal(base.MYOS_INITIATOR, "unattended");
 });

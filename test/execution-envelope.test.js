@@ -2,6 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+require("./helpers/hermetic-env");
 
 const {
   buildExecutionEnvelope,

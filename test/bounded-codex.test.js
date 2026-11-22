@@ -1,5 +1,6 @@
 "use strict";
 const test=require("node:test"),assert=require("node:assert/strict");
+require("./helpers/hermetic-env");
 const fs=require("node:fs"),os=require("node:os"),path=require("node:path"),{createHash}=require("node:crypto");
 const api=require("../src/runtime/llm-call");
 const runner=require("../src/background/background-agent-runner");

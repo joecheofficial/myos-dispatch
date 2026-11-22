@@ -1,6 +1,7 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
+require("./helpers/hermetic-env");
 const { resolveExecutionPlan, validateExecutionCandidate } = require("../src/myos-routing");
 const fs = require("node:fs");
 const os = require("node:os");

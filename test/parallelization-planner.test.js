@@ -6,6 +6,7 @@ const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const test = require("node:test");
 const assert = require("node:assert/strict");
+require("./helpers/hermetic-env");
 
 // Planner behavior tests use a synthetic credential; absence is covered in customer-runtime.test.js.
 process.env.OPENAI_API_KEY = "fixture-only";
