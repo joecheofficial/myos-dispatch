@@ -374,6 +374,7 @@ function normalizeRoot(root, options = {}) {
   }
 
   let realRootPath = rootPath;
+  let realRootResolved = false;
   try {
     const stat = fs.lstatSync(rootPath);
     if (stat.isSymbolicLink()) {
@@ -394,6 +395,7 @@ function normalizeRoot(root, options = {}) {
       }
     }
     realRootPath = fs.realpathSync(rootPath);
+    realRootResolved = true;
   } catch (error) {
     if (error.code === "INVALID_CONFIG") throw error;
   }
@@ -416,7 +418,7 @@ function normalizeRoot(root, options = {}) {
   return Object.freeze({
     id: root.id,
     path: rootPath,
-    validatedRealPath: realRootPath,
+    ...(realRootResolved ? { validatedRealPath: realRootPath } : {}),
     contentEnabled: root.contentEnabled === true,
     extensions: Object.freeze([...new Set(extensions.map((item) => item.toLowerCase()))]),
     maxFiles: positiveInteger(root.maxFiles, 10_000, `root ${root.id} maxFiles`),

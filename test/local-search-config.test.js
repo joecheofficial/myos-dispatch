@@ -261,3 +261,22 @@ test("a root swapped to a symlink after configure is skipped at walk time", asyn
     fs.opendirSync = realOpendir;
   }
 });
+
+test("a root that does not exist at load is not skipped once it is created (#202 owner-approved fix)", (t) => {
+  const base = fs.realpathSync(temporaryDirectory(t));
+  const later = path.join(base, "created-later");
+  const before = normalizeConfig({
+    enabled: true,
+    stateDirectory: path.join(base, "state"),
+    roots: [{ id: "later", path: later, extensions: [".txt"] }],
+  });
+  assert.equal(before.roots.length, 1);
+  assert.equal(before.roots[0].validatedRealPath, undefined, "no validated realpath for a missing root");
+  fs.mkdirSync(later);
+  const after = normalizeConfig({
+    enabled: true,
+    stateDirectory: path.join(base, "state"),
+    roots: [{ id: "later", path: later, extensions: [".txt"] }],
+  });
+  assert.equal(after.roots[0].validatedRealPath, fs.realpathSync(later));
+});
