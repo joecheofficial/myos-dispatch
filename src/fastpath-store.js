@@ -2,6 +2,7 @@
 
 const crypto = require("node:crypto");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const { invalidateJsonCache } = require("./json-cache");
 const { resolveWorkspacePath, resolveWorkspaceRoot } = require("./myos-compat");
@@ -51,15 +52,22 @@ function slug(value) {
     .toLowerCase() || "fastpath";
 }
 
-function workspacePath(relPath, workspaceRoot = WORKSPACE_ROOT) {
+// `~` and `~/...` resolve against the home of the install being audited, the
+// same way the runtime resolves them (workspace-context toWorkspacePath).
+function workspacePath(relPath, workspaceRoot = WORKSPACE_ROOT, homeDir = "") {
   if (!relPath || typeof relPath !== "string") return "";
-  return path.isAbsolute(relPath) ? relPath : path.join(workspaceRoot, relPath);
+  if (path.isAbsolute(relPath)) return relPath;
+  if (relPath.startsWith("~/")) {
+    const home = homeDir || process.env.HOME || os.homedir();
+    return path.join(home, relPath.slice(2));
+  }
+  return path.join(workspaceRoot, relPath);
 }
 
-function existsInWorkspace(relPath, workspaceRoot = WORKSPACE_ROOT) {
+function existsInWorkspace(relPath, workspaceRoot = WORKSPACE_ROOT, homeDir = "") {
   if (!relPath || typeof relPath !== "string") return false;
   if (/^[a-z]+:/i.test(relPath)) return true;
-  return fs.existsSync(workspacePath(relPath, workspaceRoot));
+  return fs.existsSync(workspacePath(relPath, workspaceRoot, homeDir));
 }
 
 function isRequireResolvable(filePath) {
@@ -128,7 +136,7 @@ function validateRecipeRoute(entry, label, options = {}) {
   const workspaceRoot = options.workspaceRoot || WORKSPACE_ROOT;
   if (!entry.recipe_path) return { errors, warnings };
 
-  const recipePath = workspacePath(entry.recipe_path, workspaceRoot);
+  const recipePath = workspacePath(entry.recipe_path, workspaceRoot, options.homeDir);
   let manifest = null;
   try {
     manifest = readJson(recipePath);
@@ -156,7 +164,7 @@ function validateRecipeRoute(entry, label, options = {}) {
   const manifestHandler = typeof manifest.handler === "string"
     ? path.resolve(path.dirname(recipePath), manifest.handler)
     : "";
-  const declaredHandler = entry.handler_path ? workspacePath(entry.handler_path, workspaceRoot) : "";
+  const declaredHandler = entry.handler_path ? workspacePath(entry.handler_path, workspaceRoot, options.homeDir) : "";
   const handlerPath = declaredHandler || manifestHandler;
   if (handlerPath) {
     if (!fs.existsSync(handlerPath)) {
@@ -278,7 +286,7 @@ function auditFastpathsDoc(fastpathsDoc, options = {}) {
     if (status !== "retired") {
       for (const field of PATH_FIELDS) {
         if (!entry[field]) continue;
-        if (!existsInWorkspace(entry[field], workspaceRoot)) {
+        if (!existsInWorkspace(entry[field], workspaceRoot, options.homeDir)) {
           errors.push(`${label}: ${field} does not exist (${entry[field]})`);
         }
       }

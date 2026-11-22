@@ -37,6 +37,10 @@ const GENERIC_TOKENS = new Set([
 ]);
 // Cross-domain tags are useful metadata but cannot identify a capability.
 // "git" names a tool, not the Git Manager: "explain git rebase" is a question.
+// Words a skill description uses to give instructions ("Use only when the
+// user says ...") rather than to say what the skill does. They match ordinary
+// prompts ("use Sonnet only for this one") and are never evidence.
+const DESCRIPTION_INSTRUCTION_TOKENS = new Set(['use', 'uses', 'used', 'only', 'when', 'whenever', 'user', 'users', 'says', 'say', 'asks', 'ask', 'wants', 'want', 'invoke', 'invoked', 'trigger', 'triggers', 'triggered', 'skill', 'skills', 'explicitly', 'request', 'requests', 'requested']);
 const GENERIC_CAPABILITY_ALIASES = new Set(["api", "media", "myos", "service", "tool", "agent", "memory", "database", "launch", "files", "storage", "status", "git"]);
 // Organizer-built indexes alias a project capability with its package.json script
 // names. Every Node project has "start", "test", "check" or "status", so one of
@@ -245,7 +249,7 @@ function scoreCapabilityMatch(capability, text) {
     evidenceScore += 20;
   } else {
     for (const token of meaningfulTokens(description)) {
-      if (tokens.has(token)) evidenceScore += 2;
+      if (tokens.has(token) && !DESCRIPTION_INSTRUCTION_TOKENS.has(token)) evidenceScore += 2;
     }
   }
 

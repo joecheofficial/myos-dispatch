@@ -56,7 +56,8 @@ test("audit prints a WARN summary for retired entries without retired_at/retired
   }));
   const result = spawnSync("node", ["scripts/audit-dispatch-fastpaths.js"], {
     cwd: path.join(__dirname, ".."),
-    env: { ...process.env, HOME: tmpDir },
+    // The audit follows MYOS_HOME_ROOT; an inherited value must not reach a real install.
+    env: Object.fromEntries(Object.entries({ ...process.env, HOME: tmpDir }).filter(([key]) => key !== "MYOS_HOME_ROOT")),
     encoding: "utf8",
   });
   assert.equal(result.status, 0, result.stderr);
